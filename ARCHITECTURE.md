@@ -30,7 +30,7 @@ pact-lang/
 │   ├── diagnostic-schema.md  # Diagnosticスキーマ定義(M0で確定)
 │   ├── grammar.md            # 文法リファレンス(pact_specツールの配信元)
 │   └── errors/               # エラーコード別解説
-│       └── PACT-E042.md      # 1コード1ファイル
+│       └── PACT-E3042.md     # 1コード1ファイル
 │
 ├── examples/                 # .pactサンプル集(pact_examplesの配信元)
 │   ├── basics/
