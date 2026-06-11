@@ -1,0 +1,8 @@
+[package]
+name = "pact_syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pact lexer, parser, and AST. No type knowledge."
+
+[dependencies]
