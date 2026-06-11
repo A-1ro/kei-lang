@@ -142,12 +142,14 @@ IO
 | `pact_examples` | query: string | コード例[] | イディオム検索(「Resultの連鎖」「エフェクト宣言の書き方」等) |
 | `pact_transpile` | source: string | TS source + source map | 動作確認用 |
 
-### 6.2 Diagnostic スキーマ(案)
+### 6.2 Diagnostic スキーマ
+
+確定版の正式な定義は `spec/diagnostic-schema.md` を参照(M0 で確定)。以下は例。
 
 ```json
 {
   "severity": "error",
-  "code": "PACT-E042",
+  "code": "PACT-E3042",
   "message": "Effect 'Database.Write' used but not declared in 'uses' clause",
   "span": { "file": "transfer.pact", "start": {"line": 12, "col": 3}, "end": {"line": 12, "col": 28} },
   "fixes": [
