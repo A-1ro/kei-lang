@@ -232,9 +232,9 @@ name = "pact_mcp"
 version = "0.1.0"
 dependencies = [
  "pact_check",
- "pact_emit",
  "pact_fmt",
  "pact_syntax",
+ "serde_json",
 ]
 
 [[package]]

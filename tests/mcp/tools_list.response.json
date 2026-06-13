@@ -1,0 +1,72 @@
+{
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+    "tools": [
+      {
+        "description": "Look up the Pact language spec. Pass `topic` as a section number (e.g. \"3\"), a heading keyword, or an error code (e.g. \"PACT-E3001\"); omit it for the index.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "topic": {
+              "description": "Section number, heading keyword, or error code. Empty returns the index.",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "name": "pact_spec"
+      },
+      {
+        "description": "Statically check Pact source (syntax + types + effects + contracts). Returns a Diagnostic[] JSON array, each with span, code, and at least one fix candidate.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "description": "Pact source text to check.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
+        },
+        "name": "pact_check"
+      },
+      {
+        "description": "Format Pact source into canonical form. On a syntax error it does not reformat and returns the Diagnostic[] instead (isError).",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "description": "Pact source text to format.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
+        },
+        "name": "pact_fmt"
+      },
+      {
+        "description": "Search Pact example snippets by keyword (matches path and body). Omit `query` to list all examples.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Keyword to search example paths and bodies. Empty lists all.",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "name": "pact_examples"
+      }
+    ]
+  }
+}

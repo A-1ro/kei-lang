@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": -32601,
+    "message": "Method not found: resources/list"
+  },
+  "id": 15,
+  "jsonrpc": "2.0"
+}

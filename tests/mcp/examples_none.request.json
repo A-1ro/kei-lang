@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 13,
+  "method": "tools/call",
+  "params": {
+    "name": "pact_examples",
+    "arguments": { "query": "zzz-no-match" }
+  }
+}

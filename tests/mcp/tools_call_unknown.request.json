@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "method": "tools/call",
+  "params": {
+    "name": "pact_transpile",
+    "arguments": { "source": "module demo\n" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": 16,
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "text": "Unknown tool 'pact_transpile'.",
+        "type": "text"
+      }
+    ],
+    "isError": true
+  }
+}
