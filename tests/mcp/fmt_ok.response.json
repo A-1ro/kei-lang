@@ -1,0 +1,13 @@
+{
+  "id": 9,
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "text": "module demo\n\nfunc double(x: Int) -> Int {\n  return x + x\n}\n",
+        "type": "text"
+      }
+    ],
+    "isError": false
+  }
+}
