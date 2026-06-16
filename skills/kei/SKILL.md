@@ -199,7 +199,8 @@ import infra.database as Database         // 名前空間に別名を付けて i
 - import は**全て明示**。ワイルドカード・再エクスポート禁止。
 - モジュールパスはファイルパスと 1:1(`payments.transfer` ↔ `payments/transfer.kei`)。`module` のパス各セグメントに予約語(`fail` 等)は使えない(`KEI-E0102`)。
 - 暗黙の import は無い。使う外部名は必ず import する。
-- `as` で別名 import した名前空間配下のメンバ呼び出し(`Database.fetchBalance(...)` 等)は **opaque** 扱い。v0.1 の `check` は外部モジュールの実体を解決しないので、戻り型を気にせず呼べて check も通る(本体ロジックは自分で正しく組むこと)。
+- `as` で別名 import した名前空間配下のメンバ呼び出し(`Database.fetchBalance(...)` 等)は、既定では **opaque** 扱い。`check` は外部モジュールの実体を解決しないので、戻り型を気にせず呼べて check も通る(本体ロジックは自分で正しく組むこと)。
+- **境界を検証したいなら `extern` 署名を宣言する(v0.2)。** `extern Time.now() -> Int uses Clock` のように外部関数の戻り型・エフェクトを宣言すると、その呼び出しは opaque でなくなり、戻り型が型検査に伝播し、エフェクトが呼び出し元の `uses` へ推移伝播する(宣言漏れは `KEI-E3001`)。`extern` は import の後・モジュール先頭の宣言群に置く。詳細は §3「外部境界(extern)」と `spec/kei-spec-v0.2.md` §2。
 
 ---
 
@@ -275,6 +276,32 @@ func viaIO(id: Int) -> Bool
 
 中間ノード(`Network` / `File` / `Database`)も書ける。これ以外を書くと `KEI-E3002 unknown effect`(ユーザー定義エフェクトは v0.2 以降)。
 
+### 外部境界(extern / v0.2)
+
+外部呼び出し(`Database.*` / `Time.now()` 等)は既定で opaque だが、`extern` 署名を宣言すると
+**戻り型とエフェクトが検査される**。境界を合意書に載せたいときに使う。
+
+```kei
+module fx.extern
+
+import infra.time as Time
+
+extern Time.now() -> Int uses Clock
+
+func recordedAt() -> Int
+  uses Clock                  // ← extern が uses Clock を宣言しているので、ここにも要る
+{
+  return Time.now()
+}
+```
+
+- `extern <名前空間パス>(<引数>) [-> <戻り型>] [uses <エフェクト...>]`。import の後に置く。
+- 宣言したエフェクトは呼び出し元の `uses` へ推移伝播する。書き忘れると `KEI-E3001`(↓§7)。
+  ✗ 上記で `uses Clock` を消すと「`Clock` used but not declared ... required by call to 'Time.now'」。
+- 戻り型は型検査に伝播する(`match` / `else fail` で開ける)。取り違えは `KEI-E2001`。
+- opt-in。`extern` の無い外部呼び出しは従来どおり opaque で通る(段階移行)。
+- 重複署名は `KEI-E3003`、`uses` に標準外エフェクトは `KEI-E3002`。
+
 ---
 
 ## 4. 契約
@@ -320,6 +347,27 @@ func increment(count: Int, step: Int) -> Int
 ```
 
 `old()` と `result` は **`ensures` 専用**。`requires` や本体で使うと `KEI-E4002`。
+
+### 外部状態の数量保存は純粋ヘルパーへ退避する(v0.2 / 推奨)
+
+「在庫がちょうど 1 減る」のような**外部状態(DB 等)の数量的契約**は、関数全体の `ensures` には
+書けない(契約式は副作用禁止で DB を読めず、`old()` は引数しか見られない)。数量変換を
+**現在値を引数で受ける純粋ヘルパー**に切り出し、その `requires`/`ensures` で表す。本体は外部状態を
+読み → ヘルパーで次の値を計算 → 書き戻す。**本体は必ずヘルパーを経由する。**
+
+```kei
+module contracts.conserve_external
+
+func decrementAvailable(available: Int) -> Int
+  requires available > 0
+  ensures result == old(available) - 1
+{
+  return available - 1
+}
+```
+
+実物は `examples/contracts/borrow.kei`。背景と限界は `spec/kei-spec-v0.2.md` §4、言語拡張の比較は
+`docs/effect-postconditions-memo.md`。
 
 ---
 
@@ -380,6 +428,52 @@ func balanceOf(account: Int, amount: Int) -> Result<Int, WithdrawError>
 - `Result` のメンバは `.isOk` / `.isErr`、`Option` のメンバは `.isSome` / `.isNone` のみ。
 - `Result<T, E>` と `Option<T>` は混同不可(`KEI-E2001`)。中身を裸で返すのも型不一致 → `Ok(...)` / `Some(...)` で包む(`return Ok(x)` であって `return x` ではない)。
 
+### `match` で中身を取り出す(純粋文脈でも使える / v0.2)
+
+`else fail` は **Result を返す関数**でしか使えない(失敗時に `Err` で脱出するため)。
+**純粋関数の内部で Option / Result / enum を開く**なら `match` 式を使う。`match` は **式**で、
+各腕の式の型が一致し、その型が全体の型になる。
+
+```kei
+module match.basics
+
+func isOverdue(daysLeft: Option<Int>) -> Option<Bool> {
+  return match daysLeft {
+    Some(d) => Some(d < 0)
+    None => None()
+  }
+}
+```
+
+- パターンは 1 段:`Option` は `Some(x)` / `None`、`Result` は `Ok(x)` / `Err(e)`、
+  enum は `Enum.V` / `Enum.V(a, b)` / `Enum.V { a, b }`(**構築形と対称**。`Color.Red` のように enum 名を付ける)。
+- 名前付きフィールドは**全フィールドを列挙**する(`Rect { w, h }`)。束縛変数は**その腕の中だけ**で有効。
+- **網羅性は必須。** 全バリアントの腕を書く(`_` ワイルドカードは無い)。漏れると `KEI-E2007`。
+  これにより enum にバリアントを足すと既存の `match` が必ずエラーになり、追従漏れを防げる。
+- 腕の区切りは改行(`kei fmt` が正規化)。腕の本体は式のみ(文ブロック不可)。
+
+```kei
+module match.enum
+
+enum Light {
+  Red
+  Yellow
+  Green
+}
+
+func canGo(light: Light) -> Bool {
+  return match light {
+    Light.Red => false
+    Light.Yellow => false
+    Light.Green => true
+  }
+}
+```
+
+`match` のエラー: `KEI-E2007`(網羅漏れ)/ `KEI-E2008`(到達不能な重複腕)/
+`KEI-E2009`(パターンが型に不適合 — 型と違うコンストラクタ族・存在しないバリアント・束縛形違い)/
+`KEI-E2001`(腕の式の型不一致)。詳細は `spec/errors/<code>.md` と `spec/kei-spec-v0.2.md` §1。
+
 ---
 
 ## 6. イディオム集(実ファイルから)
@@ -390,6 +484,8 @@ func balanceOf(account: Int, amount: Int) -> Result<Int, WithdrawError>
 - **Option の分岐** — `examples/basics/options.kei`(`Some` / `None()` の返し分け)
 - **enum と tagged 型** — `examples/basics/enums.kei`(unit / 位置 / 名前付きバリアント、`type X = String tagged "X"`)
 - **契約と数量保存** — `examples/contracts/counter.kei`(`requires` / `ensures` / `old` / `result`)
+- **match で網羅分解** — `examples/basics/matching.kei`(Option / Result / enum を `match` で開く。純粋文脈で Option を分解)
+- **外部境界 + 数量保存** — `examples/contracts/borrow.kei`(`extern` で境界検証、純粋ヘルパー `decrementAvailable` で「ちょうど 1 減る」を担保)
 - **エフェクト + Result + else fail** — `examples/contracts/withdraw.kei`、`examples/effects/transfer.kei`(`uses` 複数、`Audit.Log.record(...)`、`Err(... { ... })` 構築)
 
 `transfer.kei` の本体は「取得 → 早期脱出 → 検査 → 副作用 → 監査 → `Ok` 返却」という実務の定型:
@@ -537,7 +633,7 @@ tagged 型と基底型、または別の tagged 型を混同した。`type Accou
 
 ### KEI-E0102 reserved keyword as identifier
 
-予約語を識別子に使った。予約語: `module import as type record enum func uses requires ensures let if else fail return tagged true false implies`。
+予約語を識別子に使った。予約語: `module import as type record enum func uses requires ensures let if else fail return tagged true false implies match`。
 
 ✗: `let type = 1` → ✓: 別名にする(`let kind = 1`)。`.` の後ろのメンバ名は同綴りでも可(`Audit.Log.record`)。
 
@@ -554,7 +650,11 @@ tagged 型と基底型、または別の tagged 型を混同した。`type Accou
 
 ## 8. 検証ループの回し方
 
-1. `kei check <file> --json` を実行し、`Diagnostic[]` を得る。
+1. `kei check <file> --json` を実行し、`CheckReport`(`{ "diagnostics": Diagnostic[], "contracts": ContractInfo[] }`)を得る。
+   - `diagnostics` … 従来の Diagnostic 配列(これを読んで直す)。
+   - `contracts` … 各 requires / ensures の**達成検証レベル**(v0.2 / M12)。`{ func, kind, expr, verification, span }`。
+     `verification` は `static`(コンパイル時に成立確定)/ `runtime`(実行時アサーション。大半はこれ)/ `trusted` / `unchecked`。
+     **「契約が書かれた」と「機械検証された」は別物**で、これはその到達度の報告。検証レベルはソース構文には書かない(`spec/kei-spec-v0.2.md` §3)。
 2. 各 Diagnostic を読む。構造は:
 
    | フィールド | 内容 |
@@ -600,7 +700,7 @@ tagged 型と基底型、または別の tagged 型を混同した。`type Accou
 ]
 ```
 
-`--json` を付けない既定出力は同じ情報の散文(`error[KEI-E3001]: ...` と `--> file:line:col`、`= fix: ...`)。機械処理は `--json`、目視は既定で。
+`--json` を付けない既定出力は同じ情報の散文(`error[KEI-E3001]: ...` と `--> file:line:col`、`= fix: ...`)。契約があれば末尾に `verification:` ブロック(`<func> <kind> <expr> [<level>]`)も出る。機械処理は `--json`、目視は既定で。
 
 ### 整形
 
@@ -611,6 +711,7 @@ tagged 型と基底型、または別の tagged 型を混同した。`type Accou
 ## 参照
 
 - `spec/kei-spec-v0.1.md` — 言語仕様(source of truth)
+- `spec/kei-spec-v0.2.md` — v0.2 差分章(`match` / `extern` / 検証レベル / 数量契約イディオム)
 - `spec/diagnostic-schema.md` — Diagnostic の確定スキーマ
 - `spec/errors/<code>.md` — 各エラーコードの解説
 - `examples/` — check-clean な実例(basics / contracts / effects)

@@ -13,6 +13,7 @@ use kei_syntax::ast;
 use kei_syntax::{Position as SynPosition, Span as SynSpan};
 
 use crate::effects;
+use crate::report::{CheckReport, ContractInfo, ContractKind, Verification};
 use crate::types::Ty;
 use crate::{Diagnostic, Fix, Position, Severity, Span, TextEdit};
 
@@ -27,8 +28,12 @@ mod codes {
     pub const RECORD_LITERAL: &str = "KEI-E2004";
     pub const TAGGED_CONFUSION: &str = "KEI-E2005";
     pub const TYPE_ARITY: &str = "KEI-E2006";
+    pub const MATCH_NOT_EXHAUSTIVE: &str = "KEI-E2007";
+    pub const MATCH_UNREACHABLE_ARM: &str = "KEI-E2008";
+    pub const MATCH_PATTERN: &str = "KEI-E2009";
     pub const EFFECT_UNDECLARED: &str = "KEI-E3001";
     pub const UNKNOWN_EFFECT: &str = "KEI-E3002";
+    pub const DUPLICATE_EXTERN: &str = "KEI-E3003";
     pub const IMPURE_CONTRACT: &str = "KEI-E4001";
     pub const CONTRACT_CONSTRUCT: &str = "KEI-E4002";
 }
@@ -62,6 +67,106 @@ pub fn check_module(file: &str, module: &ast::Module) -> Vec<Diagnostic> {
     diags
 }
 
+/// 検査結果(診断)に加えて、各契約の達成検証レベルを併せて返す(M12)。
+/// `kei check --json` が出力する構造化レポート。
+pub fn check_module_report(file: &str, module: &ast::Module) -> CheckReport {
+    let diagnostics = check_module(file, module);
+    let contracts = collect_contracts(file, module);
+    CheckReport {
+        diagnostics,
+        contracts,
+    }
+}
+
+/// 各関数の requires / ensures を走査し、検証レベルを判定して報告を組む。
+fn collect_contracts(file: &str, module: &ast::Module) -> Vec<ContractInfo> {
+    let mut out = Vec::new();
+    for item in &module.items {
+        let ast::Item::Func(f) = item else { continue };
+        for c in &f.requires {
+            out.push(contract_info(file, &f.name.name, ContractKind::Requires, c));
+        }
+        for c in &f.ensures {
+            out.push(contract_info(file, &f.name.name, ContractKind::Ensures, c));
+        }
+    }
+    out
+}
+
+fn contract_info(file: &str, func: &str, kind: ContractKind, expr: &ast::Expr) -> ContractInfo {
+    let s = expr.span();
+    ContractInfo {
+        func: func.to_string(),
+        kind,
+        expr: contract_expr_text(expr),
+        verification: verification_of(expr),
+        span: Span {
+            file: file.to_string(),
+            start: Position {
+                line: s.start.line,
+                col: s.start.col,
+            },
+            end: Position {
+                line: s.end.line,
+                col: s.end.col,
+            },
+        },
+    }
+}
+
+/// v0.2 の検証レベル判定(最小実装)。純粋・定数評価可能で**真**に畳める契約は
+/// コンパイル時に成立が確定するため `static`。それ以外は実行時アサーションの
+/// `runtime`(spec/kei-spec-v0.2.md §3)。SMT による本格 static は v1.0 送り。
+fn verification_of(expr: &ast::Expr) -> Verification {
+    match const_eval(expr) {
+        Some(ConstVal::Bool(true)) => Verification::Static,
+        _ => Verification::Runtime,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConstVal {
+    Int(i64),
+    Bool(bool),
+}
+
+/// 変数を含まない純粋な式を定数畳み込みする。畳めなければ `None`。
+fn const_eval(expr: &ast::Expr) -> Option<ConstVal> {
+    use ast::{BinOp::*, UnaryOp};
+    match expr {
+        ast::Expr::Int { value, .. } => Some(ConstVal::Int(*value)),
+        ast::Expr::Bool { value, .. } => Some(ConstVal::Bool(*value)),
+        ast::Expr::Unary { op, expr, .. } => match (op, const_eval(expr)?) {
+            (UnaryOp::Neg, ConstVal::Int(n)) => Some(ConstVal::Int(n.checked_neg()?)),
+            (UnaryOp::Not, ConstVal::Bool(b)) => Some(ConstVal::Bool(!b)),
+            _ => None,
+        },
+        ast::Expr::Binary { op, lhs, rhs, .. } => {
+            let l = const_eval(lhs)?;
+            let r = const_eval(rhs)?;
+            match (op, l, r) {
+                (Add, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Int(a.checked_add(b)?)),
+                (Sub, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Int(a.checked_sub(b)?)),
+                (Mul, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Int(a.checked_mul(b)?)),
+                (Div, ConstVal::Int(a), ConstVal::Int(b)) if b != 0 => {
+                    Some(ConstVal::Int(a.checked_div(b)?))
+                }
+                (Eq, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a == b)),
+                (Ne, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a != b)),
+                (Lt, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a < b)),
+                (Gt, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a > b)),
+                (Le, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a <= b)),
+                (Ge, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a >= b)),
+                (Eq, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a == b)),
+                (Ne, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a != b)),
+                (Implies, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(!a || b)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // モジュール環境(名前解決の対象表)
 // ---------------------------------------------------------------------------
@@ -82,6 +187,20 @@ enum VariantDef {
     Record(Vec<(String, Ty)>),
 }
 
+/// `match` の被検査対象の構造。スクルティニの型から導出する。
+enum MatchShape {
+    /// `Option<T>`(内側 T)
+    Option(Ty),
+    /// `Result<T, E>`
+    Result(Ty, Ty),
+    /// ユーザー enum(名前 + バリアント定義)
+    Enum(String, Vec<(String, VariantDef)>),
+    /// import 由来など解決不能。網羅性検査は行わない(寛容)
+    Unknown,
+    /// `Int` / `String` 等、match できない具体型
+    NonMatchable(Ty),
+}
+
 #[derive(Debug, Clone)]
 struct FuncSig {
     params: Vec<(String, Ty)>,
@@ -92,6 +211,14 @@ struct FuncSig {
     uses_end: Option<SynPosition>,
 }
 
+/// 外部境界の署名(M11)。`extern Time.now() -> Int uses Clock` の登録形。
+#[derive(Debug, Clone)]
+struct ExternSig {
+    params: Vec<(String, Ty)>,
+    ret: Ty,
+    effects: Vec<String>,
+}
+
 struct Env {
     file: String,
     kinds: HashMap<String, NameKind>,
@@ -99,6 +226,8 @@ struct Env {
     enums: HashMap<String, Vec<(String, VariantDef)>>,
     aliases: HashMap<String, Ty>,
     funcs: HashMap<String, FuncSig>,
+    /// 外部関数の署名。フルパス(`"Database.fetchBalance"`)で引く。
+    externs: HashMap<String, ExternSig>,
 }
 
 impl Env {
@@ -114,6 +243,7 @@ impl Env {
             enums: HashMap::new(),
             aliases: HashMap::new(),
             funcs: HashMap::new(),
+            externs: HashMap::new(),
         };
         // 名前 → 最初の定義位置(重複メッセージと「最初の定義のみ有効」の判定)。
         let mut first: HashMap<String, SynSpan> = HashMap::new();
@@ -155,6 +285,8 @@ impl Env {
                 ast::Item::Record(r) => (&r.name, NameKind::Record),
                 ast::Item::Enum(e) => (&e.name, NameKind::Enum),
                 ast::Item::Func(f) => (&f.name, NameKind::Func),
+                // extern はローカル名を導入しない(外部パスの署名のみ)。
+                ast::Item::Extern(_) => continue,
             };
             match (env.kinds.get(&ident.name), first.get(&ident.name)) {
                 (Some(NameKind::Import), Some(_)) => {
@@ -356,6 +488,75 @@ impl Env {
                 env.funcs.insert(f.name.name.clone(), sig.clone());
             }
             fn_sigs.push(Some(sig));
+        }
+
+        // 6) extern 署名の登録(M11)。重複は E3003、未知エフェクトは E3002。
+        for item in &module.items {
+            let ast::Item::Extern(e) = item else { continue };
+            let key = e
+                .path
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            if env.externs.contains_key(&key) {
+                env.push(
+                    diags,
+                    codes::DUPLICATE_EXTERN,
+                    format!("duplicate extern signature for '{key}'"),
+                    e.span,
+                    vec![direction(format!(
+                        "Remove the duplicate extern for '{key}'"
+                    ))],
+                );
+                continue;
+            }
+            let mut params = Vec::new();
+            for p in &e.params {
+                let ty = env.resolve_ty(&p.ty, diags);
+                params.push((p.name.name.clone(), ty));
+            }
+            let ret = e
+                .ret
+                .as_ref()
+                .map(|t| env.resolve_ty(t, diags))
+                .unwrap_or(Ty::Unit);
+            let mut effects = Vec::new();
+            for u in &e.uses {
+                let path = u
+                    .path
+                    .iter()
+                    .map(|i| i.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                if effects::is_known(&path) {
+                    if !effects.contains(&path) {
+                        effects.push(path);
+                    }
+                } else {
+                    let fix = match suggestion(&path, effects::STANDARD_EFFECTS.iter().copied()) {
+                        Some(s) => env.replace_fix(format!("Did you mean '{s}'?"), u.span, &s),
+                        None => direction(
+                            "Use a standard effect (IO, Network.*, File.*, Database.*, Clock, Random, Audit.Log)",
+                        ),
+                    };
+                    env.push(
+                        diags,
+                        codes::UNKNOWN_EFFECT,
+                        format!("unknown effect '{path}'"),
+                        u.span,
+                        vec![fix],
+                    );
+                }
+            }
+            env.externs.insert(
+                key,
+                ExternSig {
+                    params,
+                    ret,
+                    effects,
+                },
+            );
         }
 
         (env, fn_sigs)
@@ -873,6 +1074,11 @@ impl FnChecker<'_> {
             ast::Expr::RecordLit { path, fields, span } => {
                 self.infer_record_lit(path, fields, *span)
             }
+            ast::Expr::Match {
+                scrutinee,
+                arms,
+                span,
+            } => self.infer_match(scrutinee, arms, *span),
         }
     }
 
@@ -1111,6 +1317,18 @@ impl FnChecker<'_> {
                         return self.call_variant(&root.clone(), vname, args, span);
                     }
                 }
+                // 外部境界(import した名前空間配下)の呼び出しで extern 署名が
+                // あれば照合する。無ければ従来どおり opaque(M11 段階移行)。
+                if let Some(path) = field_path(callee) {
+                    if self.lookup_scope(&path[0]).is_none()
+                        && self.env.kinds.get(&path[0]) == Some(&NameKind::Import)
+                    {
+                        let key = path.join(".");
+                        if let Some(sig) = self.env.externs.get(&key).cloned() {
+                            return self.call_extern(&key, &sig, args, span);
+                        }
+                    }
+                }
                 let callee_ty = self.infer(callee);
                 self.call_value(&callee_ty, args, span)
             }
@@ -1295,10 +1513,43 @@ impl FnChecker<'_> {
             self.infer(arg);
         }
 
+        self.check_call_effects(&callee.effects, name, span);
+        callee.ret
+    }
+
+    /// 外部境界の呼び出し(M11)。extern 署名と引数を照合し、戻り型を返し、
+    /// 宣言エフェクトを呼び出し元の uses へ推移伝播する(境界越しの E3001)。
+    fn call_extern(&mut self, key: &str, sig: &ExternSig, args: &[ast::Expr], span: SynSpan) -> Ty {
+        if args.len() != sig.params.len() {
+            self.push(
+                codes::TYPE_MISMATCH,
+                format!(
+                    "external function '{key}' takes {} argument(s), found {}",
+                    sig.params.len(),
+                    args.len()
+                ),
+                span,
+                vec![direction("Adjust the arguments")],
+            );
+        }
+        for (arg, (_, pty)) in args.iter().zip(&sig.params) {
+            let at = self.infer(arg);
+            self.check_assign(&pty.clone(), &at, arg.span());
+        }
+        for arg in args.iter().skip(sig.params.len()) {
+            self.infer(arg);
+        }
+        self.check_call_effects(&sig.effects, key, span);
+        sig.ret.clone()
+    }
+
+    /// 呼び出し先(ローカル関数 / extern)の宣言エフェクトを呼び出し元の uses に
+    /// 照合する。本体では未宣言を E3001、契約式では副作用を E4001。
+    fn check_call_effects(&mut self, effects: &[String], callee: &str, span: SynSpan) {
         if self.mode == Mode::Body {
-            // エフェクト検査: 呼び出し先の宣言エフェクトが呼び出し元の uses に
-            // 包含されているか(推移的伝播 + 階層包含判定)。
-            for eff in &callee.effects {
+            // 呼び出し先の宣言エフェクトが呼び出し元の uses に包含されているか
+            // (推移的伝播 + 階層包含判定)。
+            for eff in effects {
                 if self.sig.effects.iter().any(|d| effects::covers(d, eff)) {
                     continue;
                 }
@@ -1317,25 +1568,24 @@ impl FnChecker<'_> {
                     self.diags,
                     codes::EFFECT_UNDECLARED,
                     format!(
-                        "effect '{eff}' used but not declared in 'uses' clause of '{caller}' (required by call to '{name}')"
+                        "effect '{eff}' used but not declared in 'uses' clause of '{caller}' (required by call to '{callee}')"
                     ),
                     span,
                     vec![fix],
                 );
             }
-        } else if !callee.effects.is_empty() {
-            // 契約純粋性検査: 契約式の中ではエフェクトを持つ関数を呼べない(spec §4)。
+        } else if !effects.is_empty() {
+            // 契約純粋性検査: 契約式の中ではエフェクトを持つ呼び出しを禁止(spec §4)。
             self.push(
                 codes::IMPURE_CONTRACT,
                 format!(
-                    "call to '{name}' (uses {}) is not allowed in a contract; contract expressions must be pure",
-                    callee.effects.join(", ")
+                    "call to '{callee}' (uses {}) is not allowed in a contract; contract expressions must be pure",
+                    effects.join(", ")
                 ),
                 span,
                 vec![direction("Move the effectful call into the function body")],
             );
         }
-        callee.ret
     }
 
     fn call_variant(
@@ -1643,6 +1893,404 @@ impl FnChecker<'_> {
         }
     }
 
+    // -- match 式 ----------------------------------------------------------
+
+    fn infer_match(&mut self, scrutinee: &ast::Expr, arms: &[ast::MatchArm], span: SynSpan) -> Ty {
+        let scrut_ty = self.infer(scrutinee);
+        let shape = self.match_shape(&scrut_ty);
+
+        if let MatchShape::NonMatchable(t) = &shape {
+            let t = t.clone();
+            self.push(
+                codes::MATCH_PATTERN,
+                format!(
+                    "cannot match on type '{t}'; match works on Option, Result, or enum values"
+                ),
+                scrutinee.span(),
+                vec![direction("Match on an Option, Result, or enum value")],
+            );
+            // 本体の式は型検査だけしておく(カスケード防止)。
+            for arm in arms {
+                self.scopes.push(HashMap::new());
+                self.infer(&arm.body);
+                self.scopes.pop();
+            }
+            return Ty::Unknown;
+        }
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut result_ty = Ty::Unknown;
+        let mut have_result = false;
+
+        for arm in arms {
+            let (key, bindings) = self.check_pattern(&arm.pattern, &shape);
+            if let Some(k) = &key {
+                if seen.contains(k) {
+                    self.push(
+                        codes::MATCH_UNREACHABLE_ARM,
+                        format!("unreachable match arm: '{k}' is already covered above"),
+                        arm.pattern.span,
+                        vec![direction("Remove the duplicate arm")],
+                    );
+                } else {
+                    seen.push(k.clone());
+                }
+            }
+            self.scopes.push(bindings);
+            let body_ty = self.infer(&arm.body);
+            self.scopes.pop();
+            if !have_result {
+                result_ty = body_ty;
+                have_result = true;
+            } else if !body_ty.compatible(&result_ty) {
+                self.push(
+                    codes::TYPE_MISMATCH,
+                    format!(
+                        "match arms have incompatible types: expected '{result_ty}', found '{body_ty}'"
+                    ),
+                    arm.body.span(),
+                    vec![direction("Make every arm produce the same type")],
+                );
+            } else if matches!(result_ty, Ty::Unknown) {
+                result_ty = body_ty;
+            }
+        }
+
+        self.check_exhaustiveness(&shape, &seen, span);
+        result_ty
+    }
+
+    fn match_shape(&self, scrut: &Ty) -> MatchShape {
+        match scrut {
+            Ty::Option(t) => MatchShape::Option((**t).clone()),
+            Ty::Result(t, e) => MatchShape::Result((**t).clone(), (**e).clone()),
+            Ty::Enum(name) => match self.env.enums.get(name) {
+                Some(variants) => MatchShape::Enum(name.clone(), variants.clone()),
+                None => MatchShape::Unknown,
+            },
+            Ty::Tagged { underlying, .. } => self.match_shape(underlying),
+            Ty::Unknown => MatchShape::Unknown,
+            other => MatchShape::NonMatchable(other.clone()),
+        }
+    }
+
+    /// パターンを `shape` に照合し、(網羅キー, 束縛) を返す。
+    /// 不適合は KEI-E2009 を積み、束縛は付くだけ付ける(カスケード防止)。
+    fn check_pattern(
+        &mut self,
+        pat: &ast::Pattern,
+        shape: &MatchShape,
+    ) -> (Option<String>, HashMap<String, Ty>) {
+        let ctor: Vec<&str> = pat.path.iter().map(|i| i.name.as_str()).collect();
+        match shape {
+            MatchShape::Option(inner) => match ctor.as_slice() {
+                ["Some"] => {
+                    let b = self.bind_ctor_payload(pat, "Some", std::slice::from_ref(inner));
+                    (Some("Some".to_string()), b)
+                }
+                ["None"] => {
+                    self.expect_unit_payload(pat, "None");
+                    (Some("None".to_string()), HashMap::new())
+                }
+                _ => {
+                    self.bad_pattern(pat, "Some(x)' or 'None");
+                    (None, self.loose_bindings(pat))
+                }
+            },
+            MatchShape::Result(ok, err) => match ctor.as_slice() {
+                ["Ok"] => {
+                    let b = self.bind_ctor_payload(pat, "Ok", std::slice::from_ref(ok));
+                    (Some("Ok".to_string()), b)
+                }
+                ["Err"] => {
+                    let b = self.bind_ctor_payload(pat, "Err", std::slice::from_ref(err));
+                    (Some("Err".to_string()), b)
+                }
+                _ => {
+                    self.bad_pattern(pat, "Ok(x)' or 'Err(e)");
+                    (None, self.loose_bindings(pat))
+                }
+            },
+            MatchShape::Enum(name, variants) => self.check_enum_pattern(pat, name, variants),
+            MatchShape::Unknown => {
+                // 解決不能なスクルティニ: 束縛だけ付けて寛容に通す。
+                let key = ctor.join(".");
+                (Some(key), self.loose_bindings(pat))
+            }
+            MatchShape::NonMatchable(_) => (None, self.loose_bindings(pat)),
+        }
+    }
+
+    fn check_enum_pattern(
+        &mut self,
+        pat: &ast::Pattern,
+        enum_name: &str,
+        variants: &[(String, VariantDef)],
+    ) -> (Option<String>, HashMap<String, Ty>) {
+        let ctor: Vec<&str> = pat.path.iter().map(|i| i.name.as_str()).collect();
+        // enum パターンは `Enum.Variant` の 2 段形を要求する(構築形と対称)。
+        let vname = match ctor.as_slice() {
+            [e, v] if *e == enum_name => *v,
+            _ => {
+                self.push(
+                    codes::MATCH_PATTERN,
+                    format!(
+                        "pattern '{}' does not match scrutinee of type '{enum_name}'; use '{enum_name}.Variant'",
+                        ctor.join(".")
+                    ),
+                    pat.span,
+                    vec![direction(format!("Write a '{enum_name}.Variant' pattern"))],
+                );
+                return (None, self.loose_bindings(pat));
+            }
+        };
+        let Some((_, def)) = variants.iter().find(|(n, _)| n == vname) else {
+            let names: Vec<&str> = variants.iter().map(|(n, _)| n.as_str()).collect();
+            let fix = match suggestion(vname, names.iter().copied()) {
+                Some(s) => {
+                    self.env
+                        .replace_fix(format!("Did you mean '{s}'?"), pat.path[1].span, &s)
+                }
+                None => direction(format!("Use one of the variants of '{enum_name}'")),
+            };
+            self.push(
+                codes::MATCH_PATTERN,
+                format!("no variant '{vname}' on enum '{enum_name}'"),
+                pat.span,
+                vec![fix],
+            );
+            return (None, self.loose_bindings(pat));
+        };
+        let bindings = match (def, &pat.payload) {
+            (VariantDef::Unit, ast::PatternPayload::Unit) => HashMap::new(),
+            (VariantDef::Tuple(tys), ast::PatternPayload::Tuple { bindings }) => {
+                if bindings.len() != tys.len() {
+                    self.push(
+                        codes::MATCH_PATTERN,
+                        format!(
+                            "variant '{vname}' of '{enum_name}' binds {} value(s), found {}",
+                            tys.len(),
+                            bindings.len()
+                        ),
+                        pat.span,
+                        vec![direction("Match the number of bound values")],
+                    );
+                }
+                self.bind_tuple(pat, bindings, tys)
+            }
+            (VariantDef::Record(fields), ast::PatternPayload::Record { fields: pat_fields }) => {
+                self.bind_record(pat, pat_fields, fields, enum_name, vname)
+            }
+            _ => {
+                let want = match def {
+                    VariantDef::Unit => format!("'{enum_name}.{vname}'"),
+                    VariantDef::Tuple(_) => format!("'{enum_name}.{vname}(...)'"),
+                    VariantDef::Record(_) => format!("'{enum_name}.{vname} {{ ... }}'"),
+                };
+                self.push(
+                    codes::MATCH_PATTERN,
+                    format!("variant '{vname}' of '{enum_name}' must be matched as {want}"),
+                    pat.span,
+                    vec![direction(format!("Write the pattern as {want}"))],
+                );
+                self.loose_bindings(pat)
+            }
+        };
+        (Some(vname.to_string()), bindings)
+    }
+
+    /// 組み込みコンストラクタ(`Some` / `Ok` / `Err`)のペイロード束縛。
+    /// 位置束縛を要求し、個数が合わなければ KEI-E2009。
+    fn bind_ctor_payload(
+        &mut self,
+        pat: &ast::Pattern,
+        name: &str,
+        tys: &[Ty],
+    ) -> HashMap<String, Ty> {
+        match &pat.payload {
+            ast::PatternPayload::Tuple { bindings } => {
+                if bindings.len() != tys.len() {
+                    self.push(
+                        codes::MATCH_PATTERN,
+                        format!(
+                            "'{name}' binds exactly {} value(s), found {}",
+                            tys.len(),
+                            bindings.len()
+                        ),
+                        pat.span,
+                        vec![direction(format!("Write '{name}(x)'"))],
+                    );
+                }
+                self.bind_tuple(pat, bindings, tys)
+            }
+            _ => {
+                self.push(
+                    codes::MATCH_PATTERN,
+                    format!("'{name}' binds its payload; write '{name}(x)'"),
+                    pat.span,
+                    vec![direction(format!("Write '{name}(x)'"))],
+                );
+                self.loose_bindings(pat)
+            }
+        }
+    }
+
+    fn expect_unit_payload(&mut self, pat: &ast::Pattern, name: &str) {
+        if !matches!(pat.payload, ast::PatternPayload::Unit) {
+            self.push(
+                codes::MATCH_PATTERN,
+                format!("'{name}' takes no payload; write '{name}'"),
+                pat.span,
+                vec![direction(format!("Write '{name}'"))],
+            );
+        }
+    }
+
+    /// 位置束縛(`Some(x)` / `E.V(a, b)`)を型に対応づける。
+    fn bind_tuple(
+        &mut self,
+        pat: &ast::Pattern,
+        bindings: &[ast::Ident],
+        tys: &[Ty],
+    ) -> HashMap<String, Ty> {
+        let mut out = HashMap::new();
+        for (i, b) in bindings.iter().enumerate() {
+            let ty = tys.get(i).cloned().unwrap_or(Ty::Unknown);
+            self.insert_binding(&mut out, b, ty, pat);
+        }
+        out
+    }
+
+    /// 名前付き束縛(`E.V { a, b }`)。全フィールドの列挙を要求する。
+    fn bind_record(
+        &mut self,
+        pat: &ast::Pattern,
+        pat_fields: &[ast::Ident],
+        def_fields: &[(String, Ty)],
+        enum_name: &str,
+        vname: &str,
+    ) -> HashMap<String, Ty> {
+        let mut out = HashMap::new();
+        let mut listed: HashSet<String> = HashSet::new();
+        for f in pat_fields {
+            listed.insert(f.name.clone());
+            match def_fields.iter().find(|(n, _)| n == &f.name) {
+                Some((_, ty)) => self.insert_binding(&mut out, f, ty.clone(), pat),
+                None => {
+                    let names: Vec<&str> = def_fields.iter().map(|(n, _)| n.as_str()).collect();
+                    let fix = match suggestion(&f.name, names.iter().copied()) {
+                        Some(s) => self
+                            .env
+                            .replace_fix(format!("Did you mean '{s}'?"), f.span, &s),
+                        None => {
+                            direction(format!("Use one of the fields of '{enum_name}.{vname}'"))
+                        }
+                    };
+                    self.push(
+                        codes::MATCH_PATTERN,
+                        format!("no field '{}' on '{enum_name}.{vname}'", f.name),
+                        f.span,
+                        vec![fix],
+                    );
+                }
+            }
+        }
+        let missing: Vec<&str> = def_fields
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .filter(|n| !listed.contains(*n))
+            .collect();
+        if !missing.is_empty() {
+            let list: Vec<String> = missing.iter().map(|n| format!("'{n}'")).collect();
+            self.push(
+                codes::MATCH_PATTERN,
+                format!(
+                    "match pattern for '{enum_name}.{vname}' must bind all field(s); missing {}",
+                    list.join(", ")
+                ),
+                pat.span,
+                vec![direction("Bind every field of the variant")],
+            );
+        }
+        out
+    }
+
+    fn insert_binding(
+        &mut self,
+        out: &mut HashMap<String, Ty>,
+        name: &ast::Ident,
+        ty: Ty,
+        _pat: &ast::Pattern,
+    ) {
+        if out.contains_key(&name.name) {
+            self.push(
+                codes::DUPLICATE_DEF,
+                format!("duplicate binding '{}' in this pattern", name.name),
+                name.span,
+                vec![direction("Rename one of the bound variables")],
+            );
+        } else {
+            out.insert(name.name.clone(), ty);
+        }
+    }
+
+    /// 不適合パターンでも、束縛名は Unknown 型で導入しておく(本体の検査を続ける)。
+    fn loose_bindings(&self, pat: &ast::Pattern) -> HashMap<String, Ty> {
+        let mut out = HashMap::new();
+        match &pat.payload {
+            ast::PatternPayload::Unit => {}
+            ast::PatternPayload::Tuple { bindings } => {
+                for b in bindings {
+                    out.insert(b.name.clone(), Ty::Unknown);
+                }
+            }
+            ast::PatternPayload::Record { fields } => {
+                for f in fields {
+                    out.insert(f.name.clone(), Ty::Unknown);
+                }
+            }
+        }
+        out
+    }
+
+    fn bad_pattern(&mut self, pat: &ast::Pattern, expected: &str) {
+        let ctor: Vec<&str> = pat.path.iter().map(|i| i.name.as_str()).collect();
+        self.push(
+            codes::MATCH_PATTERN,
+            format!(
+                "pattern '{}' does not match the scrutinee; expected '{expected}'",
+                ctor.join(".")
+            ),
+            pat.span,
+            vec![direction(format!("Write a '{expected}' pattern"))],
+        );
+    }
+
+    fn check_exhaustiveness(&mut self, shape: &MatchShape, seen: &[String], span: SynSpan) {
+        let required: Vec<String> = match shape {
+            MatchShape::Option(_) => vec!["Some".to_string(), "None".to_string()],
+            MatchShape::Result(..) => vec!["Ok".to_string(), "Err".to_string()],
+            MatchShape::Enum(_, variants) => variants.iter().map(|(n, _)| n.clone()).collect(),
+            MatchShape::Unknown | MatchShape::NonMatchable(_) => return,
+        };
+        let missing: Vec<String> = required.into_iter().filter(|r| !seen.contains(r)).collect();
+        if !missing.is_empty() {
+            let list: Vec<String> = missing.iter().map(|m| format!("'{m}'")).collect();
+            self.push(
+                codes::MATCH_NOT_EXHAUSTIVE,
+                format!(
+                    "match is not exhaustive: missing arm(s) for {}",
+                    list.join(", ")
+                ),
+                span,
+                vec![direction(format!(
+                    "Add an arm for each of: {}",
+                    missing.join(", ")
+                ))],
+            );
+        }
+    }
+
     fn infer_unary(&mut self, op: ast::UnaryOp, expr: &ast::Expr) -> Ty {
         let t = self.infer(expr);
         match op {
@@ -1777,6 +2425,159 @@ fn direction(title: impl Into<String>) -> Fix {
     Fix {
         title: title.into(),
         edits: vec![],
+    }
+}
+
+/// 契約式の Kei ソース表記。`kei_emit` の `kei_expr_text` と同じ優先順位規則で
+/// 整形し、`KeiContractViolation.condition` と一致させる(検証レポートの `expr`)。
+fn contract_expr_text(e: &ast::Expr) -> String {
+    // kei_emit と同じ優先順位(Equality < Relational)。括弧を最小化する。
+    fn bin_prec(op: ast::BinOp) -> u8 {
+        use ast::BinOp::*;
+        match op {
+            Implies => 0,
+            Eq | Ne => 1,
+            Lt | Gt | Le | Ge => 2,
+            Add | Sub => 3,
+            Mul | Div => 4,
+        }
+    }
+    fn bin_op_text(op: ast::BinOp) -> &'static str {
+        use ast::BinOp::*;
+        match op {
+            Eq => "==",
+            Ne => "!=",
+            Lt => "<",
+            Gt => ">",
+            Le => "<=",
+            Ge => ">=",
+            Add => "+",
+            Sub => "-",
+            Mul => "*",
+            Div => "/",
+            Implies => "implies",
+        }
+    }
+    // 子が二項式で親より弱く結合するときだけ括弧で包む。Postfix は 6 相当。
+    fn child(e: &ast::Expr, parent: u8) -> String {
+        let needs_paren = matches!(e, ast::Expr::Binary { op, .. } if bin_prec(*op) < parent);
+        let text = contract_expr_text(e);
+        if needs_paren {
+            format!("({text})")
+        } else {
+            text
+        }
+    }
+    match e {
+        ast::Expr::Int { value, .. } => value.to_string(),
+        ast::Expr::Str { value, .. } => contract_string_literal(value),
+        ast::Expr::Bool { value, .. } => value.to_string(),
+        ast::Expr::Name { name, .. } => name.clone(),
+        ast::Expr::Field { base, name, .. } => format!("{}.{}", child(base, 6), name.name),
+        ast::Expr::Call { callee, args, .. } => {
+            let args: Vec<String> = args.iter().map(contract_expr_text).collect();
+            format!("{}({})", child(callee, 6), args.join(", "))
+        }
+        ast::Expr::Unary { op, expr, .. } => {
+            let sym = match op {
+                ast::UnaryOp::Neg => "-",
+                ast::UnaryOp::Not => "!",
+            };
+            format!("{sym}{}", child(expr, 5))
+        }
+        ast::Expr::Binary { op, lhs, rhs, .. } => {
+            let p = bin_prec(*op);
+            // implies は右結合、他は左結合(parser::parse_implies)。同優先度の子は
+            // 結合方向に応じて括弧を保つ(`(a implies b) implies c` / `a - (b - c)`)。
+            let (lhs_min, rhs_min) = if matches!(op, ast::BinOp::Implies) {
+                (p + 1, p)
+            } else {
+                (p, p + 1)
+            };
+            format!(
+                "{} {} {}",
+                child(lhs, lhs_min),
+                bin_op_text(*op),
+                child(rhs, rhs_min)
+            )
+        }
+        ast::Expr::RecordLit { path, fields, .. } => {
+            let head: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
+            let fs: Vec<String> = fields
+                .iter()
+                .map(|f| match &f.value {
+                    None => f.name.name.clone(),
+                    Some(v) => format!("{}: {}", f.name.name, contract_expr_text(v)),
+                })
+                .collect();
+            format!("{} {{ {} }}", head.join("."), fs.join(", "))
+        }
+        ast::Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            let arms: Vec<String> = arms
+                .iter()
+                .map(|arm| {
+                    format!(
+                        "{} => {}",
+                        contract_pattern_text(&arm.pattern),
+                        contract_expr_text(&arm.body)
+                    )
+                })
+                .collect();
+            format!(
+                "match {} {{ {} }}",
+                contract_expr_text(scrutinee),
+                arms.join(", ")
+            )
+        }
+    }
+}
+
+fn contract_pattern_text(pat: &ast::Pattern) -> String {
+    let head: Vec<&str> = pat.path.iter().map(|i| i.name.as_str()).collect();
+    let head = head.join(".");
+    match &pat.payload {
+        ast::PatternPayload::Unit => head,
+        ast::PatternPayload::Tuple { bindings } => {
+            let bs: Vec<&str> = bindings.iter().map(|i| i.name.as_str()).collect();
+            format!("{head}({})", bs.join(", "))
+        }
+        ast::PatternPayload::Record { fields } => {
+            let fs: Vec<&str> = fields.iter().map(|i| i.name.as_str()).collect();
+            format!("{head} {{ {} }}", fs.join(", "))
+        }
+    }
+}
+
+fn contract_string_literal(value: &str) -> String {
+    let mut s = String::with_capacity(value.len() + 2);
+    s.push('"');
+    for c in value.chars() {
+        match c {
+            '"' => s.push_str("\\\""),
+            '\\' => s.push_str("\\\\"),
+            '\n' => s.push_str("\\n"),
+            '\t' => s.push_str("\\t"),
+            '\r' => s.push_str("\\r"),
+            _ => s.push(c),
+        }
+    }
+    s.push('"');
+    s
+}
+
+/// `Database.fetchBalance` のような Name/Field 連鎖をドット区切りのパスに戻す。
+/// extern 署名の照合に使う(それ以外の式なら `None`)。
+fn field_path(expr: &ast::Expr) -> Option<Vec<String>> {
+    match expr {
+        ast::Expr::Name { name, .. } => Some(vec![name.clone()]),
+        ast::Expr::Field { base, name, .. } => {
+            let mut path = field_path(base)?;
+            path.push(name.name.clone());
+            Some(path)
+        }
+        _ => None,
     }
 }
 

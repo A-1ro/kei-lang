@@ -46,6 +46,20 @@ pub enum Item {
     Record(RecordDecl),
     Enum(EnumDecl),
     Func(FuncDecl),
+    Extern(ExternDecl),
+}
+
+/// 外部境界の署名宣言(M11)。
+/// `extern Time.now() -> Int uses Clock` のように、import した名前空間配下の
+/// 外部関数の戻り型・エフェクトを宣言する。本体は持たない。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExternDecl {
+    /// `[Time, now]` / `[Database, fetchBalance]` / `[Audit, Log, record]`
+    pub path: Vec<Ident>,
+    pub params: Vec<Param>,
+    pub ret: Option<Type>,
+    pub uses: Vec<EffectRef>,
+    pub span: Span,
 }
 
 /// `type AccountId = String tagged "AccountId"`
@@ -232,6 +246,12 @@ pub enum Expr {
         fields: Vec<RecordLitField>,
         span: Span,
     },
+    /// `match <scrutinee> { <pattern> => <expr>, ... }`(網羅分解。M10)
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -245,9 +265,38 @@ impl Expr {
             | Expr::Call { span, .. }
             | Expr::Unary { span, .. }
             | Expr::Binary { span, .. }
-            | Expr::RecordLit { span, .. } => *span,
+            | Expr::RecordLit { span, .. }
+            | Expr::Match { span, .. } => *span,
         }
     }
+}
+
+/// `match` の 1 腕(`<pattern> => <body>`)。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Expr,
+    pub span: Span,
+}
+
+/// 1 段のコンストラクタパターン。`path` はコンストラクタ
+/// (`Some` / `None` / `Ok` / `Err` または `Enum.Variant`)、`payload` は束縛形。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Pattern {
+    pub path: Vec<Ident>,
+    pub payload: PatternPayload,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind")]
+pub enum PatternPayload {
+    /// `None` / `E.Unit`(束縛なし)
+    Unit,
+    /// `Some(x)` / `Ok(x)` / `E.V(a, b)`(位置束縛)
+    Tuple { bindings: Vec<Ident> },
+    /// `E.V { a, b }`(名前付きフィールドをそのまま束縛するショートハンド)
+    Record { fields: Vec<Ident> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

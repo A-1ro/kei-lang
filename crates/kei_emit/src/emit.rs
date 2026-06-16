@@ -24,6 +24,7 @@ pub fn emit_checked(file: &str, source: &str, module: &ast::Module) -> EmitOutpu
         out: Out::default(),
         old_counter: 0,
         in_ensures: false,
+        match_counter: 0,
     };
     e.emit_module();
     let mut ts = e.out.buf;
@@ -145,6 +146,8 @@ impl RuntimeUses {
                     }
                     u.block(&f.body);
                 }
+                // extern は型・エフェクトの署名のみ。TS には何も生成しない。
+                ast::Item::Extern(_) => {}
             }
         }
         u
@@ -247,6 +250,14 @@ impl RuntimeUses {
                     }
                 }
             }
+            ast::Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.expr(scrutinee);
+                for arm in arms {
+                    self.expr(&arm.body);
+                }
+            }
         }
     }
 }
@@ -303,6 +314,8 @@ struct Emitter<'a> {
     /// ensures 内 `old(...)` の通し番号。事前キャプチャと同じ走査順で消費する。
     old_counter: usize,
     in_ensures: bool,
+    /// match 式ごとに一意なスクルティニ変数名(`kei$m0`, `kei$m1`, ...)を割り当てる。
+    match_counter: usize,
 }
 
 impl Emitter<'_> {
@@ -333,12 +346,17 @@ impl Emitter<'_> {
         }
 
         for item in &self.module.items {
+            // extern は外部境界の署名(検査専用)。TS 出力は持たない。
+            if matches!(item, ast::Item::Extern(_)) {
+                continue;
+            }
             self.out.newline();
             match item {
                 ast::Item::TypeAlias(a) => self.emit_alias(a),
                 ast::Item::Record(r) => self.emit_record(r),
                 ast::Item::Enum(e) => self.emit_enum(e),
                 ast::Item::Func(f) => self.emit_func(f),
+                ast::Item::Extern(_) => unreachable!("extern items are skipped above"),
             }
         }
     }
@@ -831,6 +849,89 @@ impl Emitter<'_> {
                 }
                 self.out.frag(" })");
             }
+            ast::Expr::Match {
+                scrutinee, arms, ..
+            } => self.emit_match(scrutinee, arms),
+        }
+    }
+
+    /// `match` を即時実行アロー関数(IIFE)に展開する。各腕は判別子で分岐する
+    /// `if` ガードに落ち、束縛は腕の冒頭で `const` する。網羅性はチェッカが
+    /// 保証するため、末尾の `throw` は到達不能(opaque な import 値の防御)。
+    fn emit_match(&mut self, scrutinee: &ast::Expr, arms: &[ast::MatchArm]) {
+        let id = self.match_counter;
+        self.match_counter += 1;
+        let var = format!("kei$m{id}");
+        self.out.frag("(() => {");
+        self.out.newline();
+        self.out.indent += 1;
+        self.out.start_line();
+        self.out.map(scrutinee.span());
+        self.out.frag(&format!("const {var} = "));
+        self.emit_expr(scrutinee, Prec::Or);
+        self.out.frag(";");
+        self.out.newline();
+        for arm in arms {
+            self.emit_match_arm(&var, arm);
+        }
+        self.out.line("throw new Error(\"non-exhaustive match\");");
+        self.out.indent -= 1;
+        self.out.start_line();
+        self.out.frag("})()");
+    }
+
+    fn emit_match_arm(&mut self, var: &str, arm: &ast::MatchArm) {
+        let ctor: Vec<&str> = arm.pattern.path.iter().map(|i| i.name.as_str()).collect();
+        let cond = match ctor.as_slice() {
+            ["Some"] | ["Ok"] => format!("{var}.ok"),
+            ["None"] | ["Err"] => format!("!{var}.ok"),
+            _ => {
+                let v = ctor.last().copied().unwrap_or("");
+                format!("{var}.kind === {}", ts_string(v))
+            }
+        };
+        self.out.start_line();
+        self.out.map(arm.pattern.span);
+        self.out.frag(&format!("if ({cond}) {{"));
+        self.out.newline();
+        self.out.indent += 1;
+        self.emit_pattern_bindings(var, &arm.pattern);
+        self.out.start_line();
+        self.out.map(arm.body.span());
+        self.out.frag("return ");
+        self.emit_expr(&arm.body, Prec::Or);
+        self.out.frag(";");
+        self.out.newline();
+        self.out.indent -= 1;
+        self.out.line("}");
+    }
+
+    fn emit_pattern_bindings(&mut self, var: &str, pat: &ast::Pattern) {
+        let ctor: Vec<&str> = pat.path.iter().map(|i| i.name.as_str()).collect();
+        match (&ctor[..], &pat.payload) {
+            (["Some"] | ["Ok"], ast::PatternPayload::Tuple { bindings }) => {
+                if let Some(b) = bindings.first() {
+                    self.out.line(&format!("const {} = {var}.value;", b.name));
+                }
+            }
+            (["Err"], ast::PatternPayload::Tuple { bindings }) => {
+                if let Some(b) = bindings.first() {
+                    self.out.line(&format!("const {} = {var}.error;", b.name));
+                }
+            }
+            (_, ast::PatternPayload::Tuple { bindings }) => {
+                for (i, b) in bindings.iter().enumerate() {
+                    self.out
+                        .line(&format!("const {} = {var}.values[{i}];", b.name));
+                }
+            }
+            (_, ast::PatternPayload::Record { fields }) => {
+                for f in fields {
+                    self.out
+                        .line(&format!("const {} = {var}.fields.{};", f.name, f.name));
+                }
+            }
+            (_, ast::PatternPayload::Unit) => {}
         }
     }
 
@@ -931,6 +1032,14 @@ fn collect_old_exprs(ensures: &[ast::Expr]) -> Vec<&ast::Expr> {
                     }
                 }
             }
+            ast::Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                walk(scrutinee, out);
+                for arm in arms {
+                    walk(&arm.body, out);
+                }
+            }
             _ => {}
         }
     }
@@ -967,9 +1076,14 @@ fn kei_bin_op(op: BinOp) -> &'static str {
 }
 
 fn kei_expr_text(e: &ast::Expr) -> String {
-    fn child(e: &ast::Expr, parent: Prec) -> String {
+    // `tight` は同優先度の子も括弧で包むか。左結合の右オペランド・
+    // 右結合(implies)の左オペランドで真にし、結合方向の取り違えを防ぐ。
+    fn child(e: &ast::Expr, parent: Prec, tight: bool) -> String {
         let needs_paren = match e {
-            ast::Expr::Binary { op, .. } => bin_prec(*op) < parent,
+            ast::Expr::Binary { op, .. } => {
+                let cp = bin_prec(*op);
+                cp < parent || (tight && cp == parent)
+            }
             _ => false,
         };
         let text = kei_expr_text(e);
@@ -985,26 +1099,36 @@ fn kei_expr_text(e: &ast::Expr) -> String {
         ast::Expr::Bool { value, .. } => if *value { "true" } else { "false" }.to_string(),
         ast::Expr::Name { name, .. } => name.clone(),
         ast::Expr::Field { base, name, .. } => {
-            format!("{}.{}", child(base, Prec::Postfix), name.name)
+            format!("{}.{}", child(base, Prec::Postfix, false), name.name)
         }
         ast::Expr::Call { callee, args, .. } => {
             let args: Vec<String> = args.iter().map(kei_expr_text).collect();
-            format!("{}({})", child(callee, Prec::Postfix), args.join(", "))
+            format!(
+                "{}({})",
+                child(callee, Prec::Postfix, false),
+                args.join(", ")
+            )
         }
         ast::Expr::Unary { op, expr, .. } => {
             let sym = match op {
                 UnaryOp::Neg => "-",
                 UnaryOp::Not => "!",
             };
-            format!("{sym}{}", child(expr, Prec::Unary))
+            format!("{sym}{}", child(expr, Prec::Unary, false))
         }
         ast::Expr::Binary { op, lhs, rhs, .. } => {
             let prec = bin_prec(*op);
+            // implies は右結合、他は左結合(parser::parse_implies)。
+            let (lhs_tight, rhs_tight) = if *op == BinOp::Implies {
+                (true, false)
+            } else {
+                (false, true)
+            };
             format!(
                 "{} {} {}",
-                child(lhs, prec),
+                child(lhs, prec, lhs_tight),
                 kei_bin_op(*op),
-                child(rhs, prec)
+                child(rhs, prec, rhs_tight)
             )
         }
         ast::Expr::RecordLit { path, fields, .. } => {
@@ -1017,6 +1141,42 @@ fn kei_expr_text(e: &ast::Expr) -> String {
                 })
                 .collect();
             format!("{} {{ {} }}", parts.join("."), fs.join(", "))
+        }
+        ast::Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            let arms: Vec<String> = arms
+                .iter()
+                .map(|a| {
+                    format!(
+                        "{} => {}",
+                        kei_pattern_text(&a.pattern),
+                        kei_expr_text(&a.body)
+                    )
+                })
+                .collect();
+            format!(
+                "match {} {{ {} }}",
+                kei_expr_text(scrutinee),
+                arms.join(", ")
+            )
+        }
+    }
+}
+
+/// パターンの Kei ソース表記(契約条件文字列・doc コメント用)。
+fn kei_pattern_text(pat: &ast::Pattern) -> String {
+    let path: Vec<&str> = pat.path.iter().map(|i| i.name.as_str()).collect();
+    let head = path.join(".");
+    match &pat.payload {
+        ast::PatternPayload::Unit => head,
+        ast::PatternPayload::Tuple { bindings } => {
+            let bs: Vec<&str> = bindings.iter().map(|i| i.name.as_str()).collect();
+            format!("{head}({})", bs.join(", "))
+        }
+        ast::PatternPayload::Record { fields } => {
+            let fs: Vec<&str> = fields.iter().map(|i| i.name.as_str()).collect();
+            format!("{head} {{ {} }}", fs.join(", "))
         }
     }
 }
