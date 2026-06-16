@@ -12,6 +12,7 @@ const balances = new Map<string, Money>();
 
 export function reset(): void {
   balances.clear();
+  available.clear();
 }
 
 export function seed(account: AccountId, balance: Money): void {
@@ -42,4 +43,20 @@ export function debit(account: AccountId, amount: Money): void {
 
 export function credit(account: AccountId, amount: Money): void {
   balances.set(account, (balances.get(account) ?? 0) + amount);
+}
+
+// 在庫数(examples/contracts/borrow.kei の extern 署名に対応)。
+const available = new Map<string, number>();
+
+export function seedAvailable(book: string, count: number): void {
+  available.set(book, count);
+}
+
+export function fetchAvailable(book: string): Option<number> {
+  const count = available.get(book);
+  return count === undefined ? None() : Some(count);
+}
+
+export function setAvailable(book: string, count: number): void {
+  available.set(book, count);
 }

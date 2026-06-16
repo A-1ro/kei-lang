@@ -348,6 +348,27 @@ func increment(count: Int, step: Int) -> Int
 
 `old()` と `result` は **`ensures` 専用**。`requires` や本体で使うと `KEI-E4002`。
 
+### 外部状態の数量保存は純粋ヘルパーへ退避する(v0.2 / 推奨)
+
+「在庫がちょうど 1 減る」のような**外部状態(DB 等)の数量的契約**は、関数全体の `ensures` には
+書けない(契約式は副作用禁止で DB を読めず、`old()` は引数しか見られない)。数量変換を
+**現在値を引数で受ける純粋ヘルパー**に切り出し、その `requires`/`ensures` で表す。本体は外部状態を
+読み → ヘルパーで次の値を計算 → 書き戻す。**本体は必ずヘルパーを経由する。**
+
+```kei
+module contracts.conserve_external
+
+func decrementAvailable(available: Int) -> Int
+  requires available > 0
+  ensures result == old(available) - 1
+{
+  return available - 1
+}
+```
+
+実物は `examples/contracts/borrow.kei`。背景と限界は `spec/kei-spec-v0.2.md` §4、言語拡張の比較は
+`docs/effect-postconditions-memo.md`。
+
 ---
 
 ## 5. 失敗の扱い(null も例外も無い)
@@ -464,6 +485,7 @@ func canGo(light: Light) -> Bool {
 - **enum と tagged 型** — `examples/basics/enums.kei`(unit / 位置 / 名前付きバリアント、`type X = String tagged "X"`)
 - **契約と数量保存** — `examples/contracts/counter.kei`(`requires` / `ensures` / `old` / `result`)
 - **match で網羅分解** — `examples/basics/matching.kei`(Option / Result / enum を `match` で開く。純粋文脈で Option を分解)
+- **外部境界 + 数量保存** — `examples/contracts/borrow.kei`(`extern` で境界検証、純粋ヘルパー `decrementAvailable` で「ちょうど 1 減る」を担保)
 - **エフェクト + Result + else fail** — `examples/contracts/withdraw.kei`、`examples/effects/transfer.kei`(`uses` 複数、`Audit.Log.record(...)`、`Err(... { ... })` 構築)
 
 `transfer.kei` の本体は「取得 → 早期脱出 → 検査 → 副作用 → 監査 → `Ok` 返却」という実務の定型:

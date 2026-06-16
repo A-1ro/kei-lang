@@ -1,0 +1,32 @@
+module contracts.borrow
+
+import infra.database as Database
+
+type BookId = String tagged "BookId"
+
+enum BorrowError {
+  NotFound(BookId)
+  OutOfStock(BookId)
+}
+
+extern Database.fetchAvailable(book: BookId) -> Option<Int> uses Database.Read
+extern Database.setAvailable(book: BookId, count: Int) uses Database.Write
+
+func decrementAvailable(available: Int) -> Int
+  requires available > 0
+  ensures result == old(available) - 1
+{
+  return available - 1
+}
+
+func borrowBook(book: BookId) -> Result<Int, BorrowError>
+  uses Database.Read, Database.Write
+{
+  let available = Database.fetchAvailable(book) else fail BorrowError.NotFound(book)
+  if available <= 0 {
+    return Err(BorrowError.OutOfStock(book))
+  }
+  let next = decrementAvailable(available)
+  Database.setAvailable(book, next)
+  return Ok(next)
+}

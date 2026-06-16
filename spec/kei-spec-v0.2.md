@@ -193,3 +193,57 @@ verification:
   increment requires true  [static]
   increment ensures result == old(count) + step  [runtime]
 ```
+
+## 4. 外部状態の数量的契約: 純粋ヘルパー経由(M13 / #21 短期分)
+
+「`borrowBook` を呼ぶと在庫が**ちょうど 1 減る**」を関数全体の `ensures` で書きたい。
+しかし v0.1/v0.2 の制約上それは直接書けない:
+
+1. **契約式は副作用禁止**(§4 / 将来の静的証明を壊さないため)——DB を読めない。
+2. **`old()` は引数しか参照できない**——外部状態(DB の在庫数)の「呼び出し前の値」を
+   `old()` で捉えられない。
+
+放置すると、**「`kei check` が通った」と「在庫が 1 減ることが保証されている」が乖離する**
+(書かれていない契約は検査されない)。v0.2 はこのギャップを**正式イディオム**で塞ぐ。
+
+### 4.1 正式イディオム: 数量保存を純粋ヘルパーへ退避する
+
+> **外部状態の数量的契約は、純粋ヘルパー関数へ切り出し、本体は必ずそれを経由する。**
+
+数量の変換規則(「ちょうど 1 減る」)を、現在値を**引数で受け取る純粋関数**に閉じ込め、その
+`requires` / `ensures` で表す。エフェクトを伴う本体は、外部状態を読み、純粋ヘルパーで次の値を
+計算し、外部状態へ書き戻す——必ずヘルパーを経由する。
+
+```kei
+func decrementAvailable(available: Int) -> Int
+  requires available > 0
+  ensures result == old(available) - 1     // 「ちょうど 1 減る」をここで保証
+{
+  return available - 1
+}
+
+func borrowBook(book: BookId) -> Result<Int, BorrowError>
+  uses Database.Read, Database.Write
+{
+  let available = Database.fetchAvailable(book) else fail BorrowError.NotFound(book)
+  if available <= 0 {
+    return Err(BorrowError.OutOfStock(book))
+  }
+  let next = decrementAvailable(available)   // ← 数量変換は必ずヘルパー経由
+  Database.setAvailable(book, next)
+  return Ok(next)
+}
+```
+
+完全な check-clean 例は `examples/contracts/borrow.kei`(e2e `tests/e2e/tests/borrow.test.ts`)。
+
+### 4.2 このイディオムの担保と限界
+
+- **担保できること:** 数量変換そのもの(`next == available - 1`)は純粋ヘルパーの契約として
+  検査される(v0.2 では runtime アサーション)。
+- **担保できないこと(構造的限界):** 「本体が**必ず**ヘルパーを経由する」「`fetchAvailable` で
+  読んだ値を**そのまま** `setAvailable` で書く」という**接続**は、言語が強制しない。本体の
+  正しさはレビュー(合意書)に依存する。これは「言語の制約に構造を合わせた」回避策であって、
+  外部状態の事後条件を素直に書けているわけではない。
+- → 素直な表現(`ensures Database.availableOf(book) == old(...) - 1`)を可能にする言語拡張は
+  **v0.3+ の設計合意後**に送る。比較検討は `docs/effect-postconditions-memo.md`。
