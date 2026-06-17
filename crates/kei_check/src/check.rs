@@ -36,6 +36,7 @@ mod codes {
     pub const DUPLICATE_EXTERN: &str = "KEI-E3003";
     pub const IMPURE_CONTRACT: &str = "KEI-E4001";
     pub const CONTRACT_CONSTRUCT: &str = "KEI-E4002";
+    pub const CONST_FALSE_CONTRACT: &str = "KEI-E4003";
 }
 
 /// 1 モジュールを検査し、出現位置に対応した順序で Diagnostic を返す。
@@ -114,13 +115,38 @@ fn contract_info(file: &str, func: &str, kind: ContractKind, expr: &ast::Expr) -
     }
 }
 
+/// 契約式を定数畳み込みで三分類する(M17 / #35)。`verification_of`(報告)と
+/// 恒偽診断(`check_contract_clause` の KEI-E4003)が共有する単一の判定点。
+/// 片方だけ分岐が増えてサイレント乖離する事故を防ぐ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContractTruth {
+    /// 定数畳み込みで `true`。コンパイル時に成立が確定。
+    AlwaysTrue,
+    /// 定数畳み込みで `false`。処理系が反証済み(必ず違反する)。
+    AlwaysFalse,
+    /// 変数を含むなど定数畳み込み不能。実行時に判定する。
+    Unknown,
+}
+
+fn classify_contract(expr: &ast::Expr) -> ContractTruth {
+    match const_eval(expr) {
+        Some(ConstVal::Bool(true)) => ContractTruth::AlwaysTrue,
+        Some(ConstVal::Bool(false)) => ContractTruth::AlwaysFalse,
+        _ => ContractTruth::Unknown,
+    }
+}
+
 /// v0.2 の検証レベル判定(最小実装)。純粋・定数評価可能で**真**に畳める契約は
 /// コンパイル時に成立が確定するため `static`。それ以外は実行時アサーションの
 /// `runtime`(spec/kei-spec-v0.2.md §3)。SMT による本格 static は v1.0 送り。
+///
+/// 恒偽(`AlwaysFalse`)は `verification_of` 上は `runtime` に倒すが、実際には
+/// `check_contract_clause` が KEI-E4003 でコンパイルエラーにするため実行時へは
+/// 到達しない(報告の `static` は「成立が判定済み」を意味し、反証済みとは区別する)。
 fn verification_of(expr: &ast::Expr) -> Verification {
-    match const_eval(expr) {
-        Some(ConstVal::Bool(true)) => Verification::Static,
-        _ => Verification::Runtime,
+    match classify_contract(expr) {
+        ContractTruth::AlwaysTrue => Verification::Static,
+        ContractTruth::AlwaysFalse | ContractTruth::Unknown => Verification::Runtime,
     }
 }
 
@@ -836,6 +862,22 @@ impl FnChecker<'_> {
                 format!("contract clause must be a Bool expression, found '{t}'"),
                 clause.span(),
                 vec![direction("Use a Bool condition")],
+            );
+        } else if classify_contract(clause) == ContractTruth::AlwaysFalse {
+            // 定数恒偽(`requires false` / `requires 1 > 2`)は処理系が反証済み。
+            // 実行時アサーションに落とさず、コンパイル時に静的エラーにする(M17 / #35)。
+            let kw = match self.mode {
+                Mode::Requires => "requires",
+                Mode::Ensures => "ensures",
+                Mode::Body => "contract",
+            };
+            self.push(
+                codes::CONST_FALSE_CONTRACT,
+                format!("contract is always false; this '{kw}' can never be satisfied"),
+                clause.span(),
+                vec![direction(
+                    "Replace the contract with a satisfiable condition",
+                )],
             );
         }
     }
@@ -2623,4 +2665,69 @@ fn levenshtein(a: &str, b: &str) -> usize {
         std::mem::swap(&mut prev, &mut cur);
     }
     prev[b.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `requires <src>` を 1 つ持つ関数をパースし、その契約式を取り出す。
+    fn requires_expr(src: &str) -> ast::Expr {
+        let module = kei_syntax::parse_module(&format!(
+            "module t\n\nfunc f(x: Int) -> Int\n  requires {src}\n{{\n  return x\n}}\n"
+        ));
+        assert!(
+            module.errors.is_empty(),
+            "test contract must parse: {:?}",
+            module.errors
+        );
+        let ast::Item::Func(f) = &module.module.items[0] else {
+            panic!("expected a function item");
+        };
+        f.requires[0].clone()
+    }
+
+    #[test]
+    fn classify_contract_three_way() {
+        // 恒真: 定数畳み込みで true。
+        assert_eq!(
+            classify_contract(&requires_expr("true")),
+            ContractTruth::AlwaysTrue
+        );
+        assert_eq!(
+            classify_contract(&requires_expr("2 > 1")),
+            ContractTruth::AlwaysTrue
+        );
+        // 恒偽: 定数畳み込みで false。
+        assert_eq!(
+            classify_contract(&requires_expr("false")),
+            ContractTruth::AlwaysFalse
+        );
+        assert_eq!(
+            classify_contract(&requires_expr("1 > 2")),
+            ContractTruth::AlwaysFalse
+        );
+        // 変数を含む契約は定数畳み込み不能。
+        assert_eq!(
+            classify_contract(&requires_expr("x > 0")),
+            ContractTruth::Unknown
+        );
+    }
+
+    #[test]
+    fn verification_levels_unchanged() {
+        // 恒真は static、それ以外(恒偽・変数あり)は runtime のまま(M17 で不変)。
+        assert_eq!(
+            verification_of(&requires_expr("true")),
+            Verification::Static
+        );
+        assert_eq!(
+            verification_of(&requires_expr("false")),
+            Verification::Runtime
+        );
+        assert_eq!(
+            verification_of(&requires_expr("x > 0")),
+            Verification::Runtime
+        );
+    }
 }
