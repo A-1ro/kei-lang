@@ -270,4 +270,56 @@ func borrowBook(book: BookId) -> Result<Int, BorrowError>
   正しさはレビュー(合意書)に依存する。これは「言語の制約に構造を合わせた」回避策であって、
   外部状態の事後条件を素直に書けているわけではない。
 - → 素直な表現(`ensures Database.availableOf(book) == old(...) - 1`)を可能にする言語拡張は
-  **v0.3+ の設計合意後**に送る。比較検討は `docs/effect-postconditions-memo.md`。
+  **v0.3 / §4.3(案1)で実装した**。比較検討は `docs/effect-postconditions-memo.md`。
+
+### 4.3 案1: 外部状態の事後条件を直接書く(`extern query` 観測子 / v0.3 / M14 / #45)
+
+§4.2 の限界(本体とヘルパーの接続がレビュー依存)を、`borrowBook` 自身の `ensures` に
+外部状態の遷移を**直接**書けるようにして閉じる。中核は **純粋観測子(query)** の導入。
+
+#### 構文: `extern query`
+
+```text
+extern query Database.availableOf(book: BookId) -> Int          // 純粋観測子(論理的読み取り)
+extern Database.setAvailable(book: BookId, count: Int) uses Database.Write
+```
+
+- `extern query <パス>(...) -> <型>` は、**副作用のない読み取り専用の観測子**を宣言する。
+  `query` は `extern` の直後にだけ置ける文脈依存キーワード(`extern query.foo()` のように
+  名前空間名としての `query` は従来どおり使える)。
+- **query は `uses` を持てない**(純粋であることが定義。`uses` を付けると `KEI-E3005`)。
+  純粋性は **`extern` 宣言を信頼する(trusted)** ——宣言が嘘なら契約も嘘になる(健全性の根)。
+
+#### 契約での参照と `old()`
+
+```text
+func borrowBook(book: BookId) -> Int
+  uses Database.Write
+  requires Database.availableOf(book) > 0
+  ensures Database.availableOf(book) == old(Database.availableOf(book)) - 1
+{ ... }
+```
+
+- 契約式の中から呼べる外部関数は **query 観測子だけ**。非 query の `extern` を契約から呼ぶと
+  `KEI-E4004`(副作用の有無に関わらず。契約は状態を**観測**するもので、作用させるものではない)。
+- `old(...)` を**観測子の呼び出しに拡張**する。`old(Database.availableOf(book))` は関数進入時点の
+  観測値を、`ensures` 評価時(退出時)の観測値と比較する。実装は関数進入時に観測子を一度評価して
+  退避し(`const kei$old$i = ...`)、退出時に再評価して比較する(M11 emit の `old` 機構の自然な延長)。
+- **副作用禁止規則との整合:** 観測子呼び出しは「論理的読み取り=純粋」なので、契約式の副作用禁止
+  (§1 / 第二条)に**反しない**。エフェクト付き関数(非 query extern・`uses` 付きローカル関数)を
+  契約から呼ぶことは引き続き禁止(`KEI-E4001` / `KEI-E4004`)。
+
+#### 担保されること(§4.2 との差)
+
+- `borrowBook` の**シグネチャ + 契約だけ**を読めば「成功時に在庫がちょうど 1 減る」が分かる。
+  純粋ヘルパーへの退避を強制されない。
+- 本体が実際に在庫を 1 減らさなければ(2 減らす / 減らし忘れる)、退出時の観測値が `old - 1` に
+  ならず、`ensures` 違反として実行時に必ず露見する(`examples/contracts/borrow_direct.kei` +
+  `tests/e2e/tests/borrow_direct.test.ts` の反例 `borrowBookOffByTwo` が `KeiContractViolation`)。
+- **検証レベル:** 案1 はまず `runtime`(観測子を実行時に呼んで比較)。`kei check --json` の
+  `contracts[].verification` は `runtime` を報告する(将来 `static` への引き上げは SMT 連携で)。
+
+#### スコープ外(案2 は入れない)
+
+ゴースト/モデル変数 + `modifies` 節(Dafny / Verus 式)は入れない。実装が重く、#25(コレクション)と
+量化(`forall`)の成熟が前提のため v0.3 以降で再評価する(`docs/effect-postconditions-memo.md`)。

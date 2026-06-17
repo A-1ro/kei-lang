@@ -35,9 +35,11 @@ mod codes {
     pub const UNKNOWN_EFFECT: &str = "KEI-E3002";
     pub const DUPLICATE_EXTERN: &str = "KEI-E3003";
     pub const UNDECLARED_EXTERN_CALL: &str = "KEI-E3004";
+    pub const QUERY_WITH_EFFECTS: &str = "KEI-E3005";
     pub const IMPURE_CONTRACT: &str = "KEI-E4001";
     pub const CONTRACT_CONSTRUCT: &str = "KEI-E4002";
     pub const CONST_FALSE_CONTRACT: &str = "KEI-E4003";
+    pub const NON_QUERY_IN_CONTRACT: &str = "KEI-E4004";
 }
 
 /// 検査オプション(M16 / #44)。既定はすべて off で、`check_module` /
@@ -266,6 +268,8 @@ struct FuncSig {
 /// 外部境界の署名(M11)。`extern Time.now() -> Int uses Clock` の登録形。
 #[derive(Debug, Clone)]
 struct ExternSig {
+    /// 純粋観測子(`extern query`、M14 / #45)。契約式から呼べる論理的読み取り。
+    query: bool,
     params: Vec<(String, Ty)>,
     ret: Ty,
     effects: Vec<String>,
@@ -573,6 +577,18 @@ impl Env {
                 .as_ref()
                 .map(|t| env.resolve_ty(t, diags))
                 .unwrap_or(Ty::Unit);
+            // 純粋観測子(query)は副作用を持てない。`uses` が付いていればエラー(M14)。
+            if e.query && !e.uses.is_empty() {
+                env.push(
+                    diags,
+                    codes::QUERY_WITH_EFFECTS,
+                    format!(
+                        "query observer '{key}' must be pure; a 'query' extern cannot declare 'uses'"
+                    ),
+                    e.span,
+                    vec![direction("Remove 'uses' from the query, or drop 'query' if it has effects")],
+                );
+            }
             let mut effects = Vec::new();
             for u in &e.uses {
                 let path = u
@@ -604,6 +620,7 @@ impl Env {
             env.externs.insert(
                 key,
                 ExternSig {
+                    query: e.query,
                     params,
                     ret,
                     effects,
@@ -1939,7 +1956,24 @@ impl FnChecker<'_> {
         for arg in args.iter().skip(sig.params.len()) {
             self.infer(arg);
         }
-        self.check_call_effects(&sig.effects, key, span);
+        // 契約式の中から呼べる外部関数は **query 観測子(純粋な論理的読み取り)だけ**
+        // (M14 / #45)。query は無副作用なので old() でスナップショットでき、本体が
+        // 外部状態をどう変えるかを ensures から直接読み取れる。非 query の extern を
+        // 契約から呼ぶのは禁止(副作用の有無に関わらず観測子として宣言させる)。
+        if self.mode != Mode::Body && !sig.query {
+            self.push(
+                codes::NON_QUERY_IN_CONTRACT,
+                format!(
+                    "external function '{key}' may only be called in a contract if declared 'extern query'; contracts observe state, they do not act on it"
+                ),
+                span,
+                vec![direction(format!(
+                    "Declare 'extern query {key}(...)' if it is a pure observer"
+                ))],
+            );
+        } else {
+            self.check_call_effects(&sig.effects, key, span);
+        }
         sig.ret.clone()
     }
 
