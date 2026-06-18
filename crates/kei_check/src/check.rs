@@ -346,10 +346,11 @@ fn verification_of(expr: &ast::Expr) -> Verification {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum ConstVal {
     Int(i64),
     Bool(bool),
+    Str(String),
 }
 
 /// 変数を含まない純粋な式を定数畳み込みする。畳めなければ `None`。
@@ -358,6 +359,7 @@ fn const_eval(expr: &ast::Expr) -> Option<ConstVal> {
     match expr {
         ast::Expr::Int { value, .. } => Some(ConstVal::Int(*value)),
         ast::Expr::Bool { value, .. } => Some(ConstVal::Bool(*value)),
+        ast::Expr::Str { value, .. } => Some(ConstVal::Str(value.clone())),
         ast::Expr::Unary { op, expr, .. } => match (op, const_eval(expr)?) {
             (UnaryOp::Neg, ConstVal::Int(n)) => Some(ConstVal::Int(n.checked_neg()?)),
             (UnaryOp::Not, ConstVal::Bool(b)) => Some(ConstVal::Bool(!b)),
@@ -381,6 +383,9 @@ fn const_eval(expr: &ast::Expr) -> Option<ConstVal> {
                 (Ge, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a >= b)),
                 (Eq, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a == b)),
                 (Ne, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a != b)),
+                // 文字列定数の等値比較(`requires "a" == "b"` 等の恒偽/恒真を畳む。M17 / #35)。
+                (Eq, ConstVal::Str(a), ConstVal::Str(b)) => Some(ConstVal::Bool(a == b)),
+                (Ne, ConstVal::Str(a), ConstVal::Str(b)) => Some(ConstVal::Bool(a != b)),
                 (Implies, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(!a || b)),
                 _ => None,
             }
@@ -3281,6 +3286,19 @@ mod tests {
         assert_eq!(
             classify_contract(&requires_expr("1 > 2")),
             ContractTruth::AlwaysFalse
+        );
+        // 文字列定数の比較も畳む(#35 フォローアップ)。
+        assert_eq!(
+            classify_contract(&requires_expr("\"a\" == \"b\"")),
+            ContractTruth::AlwaysFalse
+        );
+        assert_eq!(
+            classify_contract(&requires_expr("\"a\" == \"a\"")),
+            ContractTruth::AlwaysTrue
+        );
+        assert_eq!(
+            classify_contract(&requires_expr("\"a\" != \"b\"")),
+            ContractTruth::AlwaysTrue
         );
         // 変数を含む契約は定数畳み込み不能。
         assert_eq!(

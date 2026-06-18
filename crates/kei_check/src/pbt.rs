@@ -332,7 +332,32 @@ fn eval_func_call(
             Err(_) => return Err(EvalError::Unsupported),
         }
     }
-    eval_block(&f.body, env, funcs, depth)
+    let result = eval_block(&f.body, env.clone(), funcs, depth)?;
+
+    // 呼び出し先の ensures も検査する。emit は全呼び出しで ensures をアサートするため、
+    // 呼び出し先が自身の事後条件を破ると実行時に throw する。トップレベル(depth 0)の
+    // ensures は run_function 側が節ごとに反例報告するのでここでは見ない。ネスト呼び出し
+    // (depth > 0)だけ、破れた ensures を Precondition(= 呼び出しが throw)として伝播し、
+    // 呼び出し元が generative に上がるのを防ぐ。
+    if depth > 0 {
+        let mut ens_env = env;
+        ens_env.insert("result".to_string(), result.clone());
+        for ens in &f.ensures {
+            match eval_bool(ens, &ens_env, funcs, true) {
+                Ok(true) => {}
+                Ok(false) => {
+                    return Err(EvalError::Precondition(format!(
+                        "ensures '{}' of '{}' is not satisfied",
+                        contract_expr_text(ens),
+                        f.name.name
+                    )))
+                }
+                // ネスト先の ensures が評価不能 → 妥当性を判定できない → 検証不能。
+                Err(_) => return Err(EvalError::Unsupported),
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// ブロックを評価し、`return` の値を返す。`return` が無ければ Unsupported。
@@ -1366,6 +1391,32 @@ mod tests {
             .find(|o| o.func == "positiveOnly")
             .expect("positiveOnly is analyzed");
         assert!(pos.passed, "positiveOnly is correct under its requires");
+    }
+
+    #[test]
+    fn callee_ensures_violation_is_a_counterexample() {
+        // broken は自身の ensures(result == y)を破る(y + 1 を返す)。wrapper は broken を
+        // 呼ぶだけで自分の ensures(result == x + 1)は本体結果と一致するが、実行時は broken の
+        // ensures が throw する。よって wrapper は generative に上げず反例になる。
+        let m = module(
+            "module t\n\nfunc broken(y: Int) -> Int\n  ensures result == y\n{\n  return y + 1\n}\n\nfunc wrapper(x: Int) -> Int\n  ensures result == x + 1\n{\n  return broken(x)\n}\n",
+        );
+        let out = run_module(&m);
+        let wrapper = out
+            .iter()
+            .find(|o| o.func == "wrapper")
+            .expect("wrapper is analyzed");
+        assert!(
+            !wrapper.passed,
+            "wrapper must not be generative: broken's ensures throws at runtime"
+        );
+        let ce = wrapper.counterexample.as_ref().expect("counterexample");
+        assert!(ce.precondition, "failure is a callee contract throw");
+        assert!(
+            ce.clause.contains("broken"),
+            "counterexample names the violated callee contract: {}",
+            ce.clause
+        );
     }
 
     #[test]
