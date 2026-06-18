@@ -137,6 +137,20 @@ fn run_function(
         domains.push(candidate_values(&p.ty)?);
     }
 
+    // 生成ケース総数(各次元の候補数の積)を、デカルト積を実体化する前に見積もる。
+    // 候補は Int=11 / String=3 / Bool=2 値なので Int 引数 N 個で 11^N になり、放置すると
+    // 巨大 Vec の実体化で OOM/ハングに至る。上限超過・桁あふれは「全数検査できない」ため
+    // 過信せず対象外にする(159/166/193 行と同じ安全側の哲学=部分検査で generative に
+    // 上げない)。スキップした関数は verification レポートで runtime のまま現れる。
+    const MAX_GENERATIVE_CASES: usize = 100_000;
+    match domains
+        .iter()
+        .try_fold(1usize, |acc, d| acc.checked_mul(d.len()))
+    {
+        Some(n) if n <= MAX_GENERATIVE_CASES => {}
+        _ => return None,
+    }
+
     let combos = cartesian(&domains);
     let mut cases_checked = 0usize;
     // 反例: (入力, 破れた節のテキスト, 診断 span, precondition か)。
@@ -722,10 +736,13 @@ fn lex_seeds(src: &str) -> Vec<SeedToken> {
                     } else {
                         s.push(chars[i]);
                     }
+                    // 生の改行を含む文字列でも後続トークンの行・列が揃うよう advance を使う
+                    // (col だけ進めると改行後の位置がずれる)。
+                    advance(chars[i], &mut line, &mut col);
                     i += 1;
-                    col += 1;
                 }
-                let len = (col - start_col).max(1);
+                // 複数行をまたぐと col が start_col より小さくなりうるので saturating。
+                let len = col.saturating_sub(start_col).max(1);
                 // 閉じ引用符を見ずに EOF に達したら未終端文字列(文法エラー)。
                 let kind = if terminated {
                     SeedTok::Str(s)
@@ -1625,6 +1642,52 @@ mod tests {
                 .iter()
                 .any(|d| d.code == seed_codes::SEED_COUNTEREXAMPLE),
             "old(result) seed must not be reported as a spurious counterexample: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn oversized_generative_space_is_skipped() {
+        // 候補は Int=11 値。Int 引数 6 個で 11^6≈177 万ケース > 上限 → 全数検査不能として
+        // 対象外(generative に上げず runtime のまま)。巨大 Vec を実体化しないのでハングしない。
+        let big = module(
+            "module t\n\nfunc big(a: Int, b: Int, c: Int, d: Int, e: Int, g: Int) -> Int\n  ensures result == a\n{\n  return a\n}\n",
+        );
+        assert!(
+            !run_module(&big).iter().any(|o| o.func == "big"),
+            "oversized input space must be skipped, not generatively verified"
+        );
+        // 上限以下(2 Int = 121 ケース)は従来どおり生成検査される。
+        let small = module(
+            "module t\n\nfunc small(a: Int, b: Int) -> Int\n  ensures result == a\n{\n  return a\n}\n",
+        );
+        let out = run_module(&small);
+        let o = out
+            .iter()
+            .find(|o| o.func == "small")
+            .expect("small input space is generatively verified");
+        assert!(
+            o.passed && o.cases_checked > 0,
+            "small must be verified: {o:?}"
+        );
+    }
+
+    #[test]
+    fn multiline_seed_string_aligns_following_token_line() {
+        // 生の改行を含むシード文字列の後ろのトークン位置が、改行ぶん正しく送られる。
+        // `!` はシードファイルの 3 行目(文字列の改行後)にあるので、診断行も 3 になる
+        // (改行を col だけで数えていた頃は 2 行目にずれていた)。
+        let m = module(
+            "module t\n\nfunc f(s: String) -> String\n  ensures result == s\n{\n  return s\n}\n",
+        );
+        let src = "seeds for f {\n  input { s: \"ab\ncd\" ! }\n}\n";
+        let diags = check_seeds("t.seeds", src, &m, &mut []);
+        let stray = diags
+            .iter()
+            .find(|d| d.code == seed_codes::SEED_GRAMMAR)
+            .expect("stray '!' after a multi-line string is a grammar error");
+        assert_eq!(
+            stray.span.start.line, 3,
+            "diagnostic must sit on the post-newline line: {stray:?}"
         );
     }
 
