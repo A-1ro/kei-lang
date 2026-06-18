@@ -1075,7 +1075,12 @@ impl Emitter<'_> {
         } else {
             self.emit_expr(lhs, prec);
             self.out.frag(&format!(" {} ", ts_bin_op(op)));
+            // 左結合演算子の右辺は 1 段高い優先度で出す。同優先度が右にネストしたとき
+            // (`a == (b == c)`)に括弧を保つため(括弧を落とすと JS の左結合で
+            // `(a == b) == c` に化けて結果が変わる)。Equality / Relational も対象。
             let rhs_min = match prec {
+                Prec::Equality => Prec::Relational,
+                Prec::Relational => Prec::Additive,
                 Prec::Additive => Prec::Multiplicative,
                 Prec::Multiplicative => Prec::Unary,
                 p => p,

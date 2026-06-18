@@ -53,6 +53,24 @@ impl Ty {
             _ => false,
         }
     }
+
+    /// 等値比較(`==` / `!=`)の対象になれるか。スカラー(Int / String / Bool と
+    /// それらを基底にする tagged 型)のみ。合成型(Record / Enum / Option /
+    /// Result / List / Unit)は emit が参照等価(`===`)しか出せず構造等価には
+    /// ならないため、v0.3 では等値比較を許さない(KEI-E2010)。Unknown は
+    /// import 境界の穴として寛容に許す。
+    pub fn is_equatable(&self) -> bool {
+        match self {
+            Ty::Int | Ty::Str | Ty::Bool | Ty::Unknown => true,
+            Ty::Tagged { underlying, .. } => underlying.is_equatable(),
+            Ty::Record(_)
+            | Ty::Enum(_)
+            | Ty::Option(_)
+            | Ty::Result(..)
+            | Ty::List(_)
+            | Ty::Unit => false,
+        }
+    }
 }
 
 impl fmt::Display for Ty {

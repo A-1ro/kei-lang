@@ -31,6 +31,7 @@ mod codes {
     pub const MATCH_NOT_EXHAUSTIVE: &str = "KEI-E2007";
     pub const MATCH_UNREACHABLE_ARM: &str = "KEI-E2008";
     pub const MATCH_PATTERN: &str = "KEI-E2009";
+    pub const UNSUPPORTED_EQUALITY: &str = "KEI-E2010";
     pub const EFFECT_UNDECLARED: &str = "KEI-E3001";
     pub const UNKNOWN_EFFECT: &str = "KEI-E3002";
     pub const DUPLICATE_EXTERN: &str = "KEI-E3003";
@@ -2971,6 +2972,22 @@ impl FnChecker<'_> {
             Eq | Ne => {
                 if !lt.compatible(&rt) {
                     self.compare_mismatch(&lt, &rt, span);
+                } else if !lt.is_equatable() || !rt.is_equatable() {
+                    // 型は一致するが合成型。emit は `===`(参照等価)しか出せず、
+                    // 構造等価にならない(例: `result == xs.get(0)` は非空リストで
+                    // 常に偽 → 契約が常に失敗する)。スカラー限定にする(spec v0.3)。
+                    let bad = if !lt.is_equatable() { &lt } else { &rt };
+                    self.push(
+                        codes::UNSUPPORTED_EQUALITY,
+                        format!(
+                            "equality is not supported on '{bad}'; == / != compare scalars only \
+                             (Int, String, Bool, and tagged scalars)"
+                        ),
+                        span,
+                        vec![direction(
+                            "Compare scalar fields, or use match to inspect the value",
+                        )],
+                    );
                 }
                 Ty::Bool
             }

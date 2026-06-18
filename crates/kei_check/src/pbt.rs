@@ -513,7 +513,7 @@ fn eval_expr(
 
 fn eval_binary(op: ast::BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
     use ast::BinOp::*;
-    use Value::{Bool, Int, Str};
+    use Value::{Bool, Int};
     match (op, l, r) {
         (Add, Int(a), Int(b)) => a.checked_add(b).map(Int).ok_or(EvalError::Trap),
         (Sub, Int(a), Int(b)) => a.checked_sub(b).map(Int).ok_or(EvalError::Trap),
@@ -522,17 +522,11 @@ fn eval_binary(op: ast::BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
         (Div, Int(a), Int(b)) => a.checked_div(b).map(Int).ok_or(EvalError::Trap),
         (Eq, a, b) => Ok(Bool(a == b)),
         (Ne, a, b) => Ok(Bool(a != b)),
+        // 順序比較は Int 限定(checker が KEI-E2001 で String/合成型を弾く)。
         (Lt, Int(a), Int(b)) => Ok(Bool(a < b)),
         (Gt, Int(a), Int(b)) => Ok(Bool(a > b)),
         (Le, Int(a), Int(b)) => Ok(Bool(a <= b)),
         (Ge, Int(a), Int(b)) => Ok(Bool(a >= b)),
-        // String の順序比較も評価する(emit は `<` 等を JS の文字列比較へ写すため、
-        // 評価器が未対応だと String 順序の ensures が generative に上がらない過小報告になる)。
-        // Rust の辞書式順序は生成候補(ASCII)では JS と一致する。
-        (Lt, Str(a), Str(b)) => Ok(Bool(a < b)),
-        (Gt, Str(a), Str(b)) => Ok(Bool(a > b)),
-        (Le, Str(a), Str(b)) => Ok(Bool(a <= b)),
-        (Ge, Str(a), Str(b)) => Ok(Bool(a >= b)),
         // `Implies` は eval_expr が短絡処理するためここには来ない(到達不能)。
         _ => Err(EvalError::Unsupported),
     }
@@ -1456,21 +1450,6 @@ mod tests {
             ce.clause.contains("broken"),
             "counterexample names the violated callee contract: {}",
             ce.clause
-        );
-    }
-
-    #[test]
-    fn string_ordering_contract_is_generatively_verified() {
-        // String の順序比較を含む ensures も生成検証できる(評価器が String の <,>,<=,>= に
-        // 対応。以前は未対応で generative に上がらず runtime 止まりだった)。
-        let m = module(
-            "module t\n\nfunc atLeast(a: String, b: String) -> Bool\n  ensures result == (a >= b)\n{\n  return a >= b\n}\n",
-        );
-        let out = run_module(&m);
-        let f = out.iter().find(|o| o.func == "atLeast").expect("analyzed");
-        assert!(
-            f.passed && f.cases_checked > 0,
-            "String ordering ensures must be generatively verified: {f:?}"
         );
     }
 

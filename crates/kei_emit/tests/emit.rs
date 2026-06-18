@@ -169,6 +169,35 @@ fn contract_expr_text_is_single_source_for_report_and_runtime() {
     );
 }
 
+/// 右ネストした同順位の等値/関係比較は括弧を保つ。`==` は JS で左結合なので、
+/// `c == (a == b)` を `c === a === b` と書くと `(c === a) === b` に化ける(PR #50
+/// 独立レビューの指摘)。`rhs_min` を一段上げて右辺の括弧を維持する。
+#[test]
+fn right_nested_equality_keeps_parentheses() {
+    let out = emit(concat!(
+        "func f(a: String, b: String, c: Bool) -> Bool {\n",
+        "  return c == (a == b)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return c === (a === b);"),
+        "right-nested equality must keep parens: {}",
+        out.ts
+    );
+    // 逆に過剰括弧は付けない: `<` は JS で `===` より強く結合するため、
+    // `a == (b < c)` の右辺は括弧なし `a === b < c`(= `a === (b < c)`)で正しい。
+    let out2 = emit(concat!(
+        "func g(a: Bool, b: Int, c: Int) -> Bool {\n",
+        "  return a == (b < c)\n",
+        "}\n",
+    ));
+    assert!(
+        out2.ts.contains("return a === b < c;"),
+        "relational rhs of equality needs no parens (binds tighter): {}",
+        out2.ts
+    );
+}
+
 #[test]
 fn else_fail_unwraps_via_shared_discriminant() {
     let out = emit(concat!(
