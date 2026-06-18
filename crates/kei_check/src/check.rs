@@ -246,7 +246,16 @@ fn suggest_missing_contracts(env: &Env, module: &ast::Module, diags: &mut Vec<Di
             continue;
         };
         let Some(value) = &r.value else { continue };
-        let expr = format!("result == {}", contract_expr_text(value));
+        // 本体式が二項式なら括弧で包む。`result == x > 0` は `==` と `>` の優先順位で
+        // `result == (x > 0)` に化けたり、`implies` が `result` を巻き込んだりするため、
+        // 提案を適用したら必ず「result と本体式の比較」になるよう明示する。
+        let body = contract_expr_text(value);
+        let body = if matches!(value, ast::Expr::Binary { .. }) {
+            format!("({body})")
+        } else {
+            body
+        };
+        let expr = format!("result == {body}");
         let diag = Diagnostic::new(
             Severity::Warning,
             codes::CONTRACT_MISSING,

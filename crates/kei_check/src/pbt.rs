@@ -1274,19 +1274,39 @@ fn validate_seed(
                 let mut ens_env = env.clone();
                 ens_env.insert("result".to_string(), result);
                 for clause in &f.ensures {
-                    if let Ok(false) = eval_bool(clause, &ens_env, funcs, true) {
-                        let expr = contract_expr_text(clause);
-                        counterexample(
-                            diags,
-                            format!(
-                                "ensures '{}' of '{}' is violated by the seeded input ({})",
-                                expr,
-                                seed.func,
-                                inputs_text()
-                            ),
-                        );
-                        // この ensures は generative とは言えない → 検証レベルを降格する。
-                        downgrades.push((seed.func.clone(), Some(expr)));
+                    let expr = contract_expr_text(clause);
+                    match eval_bool(clause, &ens_env, funcs, true) {
+                        Ok(true) => {}
+                        // ensures が偽 → 反例。
+                        Ok(false) => {
+                            counterexample(
+                                diags,
+                                format!(
+                                    "ensures '{}' of '{}' is violated by the seeded input ({})",
+                                    expr,
+                                    seed.func,
+                                    inputs_text()
+                                ),
+                            );
+                            downgrades.push((seed.func.clone(), Some(expr)));
+                        }
+                        // ensures の評価自体が throw する(節内ヘルパーの契約違反など)→ 実行時も
+                        // その ensures チェックが throw する。反例として報告し降格する。
+                        Err(EvalError::Precondition(desc)) => {
+                            counterexample(
+                                diags,
+                                format!(
+                                    "ensures '{}' of '{}' throws for the seeded input ({}): {}",
+                                    expr,
+                                    seed.func,
+                                    inputs_text(),
+                                    desc
+                                ),
+                            );
+                            downgrades.push((seed.func.clone(), Some(expr)));
+                        }
+                        // 評価器の範囲外 / trap はこのシードでは判定不能(寛容にスキップ)。
+                        Err(_) => {}
                     }
                 }
             }
@@ -1504,6 +1524,23 @@ mod tests {
                 .any(|d| d.code == seed_codes::SEED_GRAMMAR
                     && d.message.contains("unterminated string")),
             "unterminated string must be KEI-E4006: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn seed_with_throwing_ensures_is_reported() {
+        // ensures 自体が throw する(節内ヘルパー positiveCheck の requires を result が破る)。
+        // 実行時はその ensures チェックが throw する → シードは反例として報告される。
+        let m = module(
+            "module t\n\nfunc positiveCheck(y: Int) -> Bool\n  requires y > 0\n{\n  return true\n}\n\nfunc f(x: Int) -> Int\n  ensures positiveCheck(result)\n{\n  return x\n}\n",
+        );
+        let src = "seeds for f {\n  input { x: -5 }\n}\n";
+        let diags = check_seeds("t.seeds", src, &m, &mut []);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == seed_codes::SEED_COUNTEREXAMPLE && d.message.contains("throws")),
+            "a seed whose ensures throws must be a counterexample: {diags:?}"
         );
     }
 
