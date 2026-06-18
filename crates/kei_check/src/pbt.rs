@@ -498,7 +498,15 @@ fn eval_expr(
                     if !in_ensures || args.len() != 1 {
                         return Err(EvalError::Unsupported);
                     }
-                    return eval_expr(&args[0], env, funcs, in_ensures, depth);
+                    // `old(...)` は進入時状態のスナップショット。emit は本体実行前
+                    // (kei$result 初期化前)にキャプチャするので、`old(result)` は実行時に
+                    // 未初期化参照で壊れる。評価器でも進入時環境(= result を除いたパラメータ
+                    // のみ)で引数を評価し、`old(result)` を未解決=検証不能にして post-state の
+                    // result を流し込んで generative に上げてしまう穴を塞ぐ。純粋関数では
+                    // パラメータは不変なので `old(param) == param`。
+                    let mut entry_env = env.clone();
+                    entry_env.remove("result");
+                    return eval_expr(&args[0], &entry_env, funcs, in_ensures, depth);
                 }
                 // ローカル純粋関数の呼び出し。
                 if let Some(callee_fn) = funcs.get(name.as_str()) {
@@ -626,6 +634,8 @@ enum SeedTok {
     UnterminatedStr,
     /// 数字を伴わない `-` / 桁あふれなどの不正な整数(文法エラーにする)。
     BadInt,
+    /// 文法に属さない未知の文字(`!` など)。寛容に飛ばさず文法エラーにする。
+    Unknown(char),
     LBrace,
     RBrace,
     Colon,
@@ -788,7 +798,15 @@ fn lex_seeds(src: &str) -> Vec<SeedToken> {
                 });
             }
             _ => {
-                // 未知文字は 1 つ食べて飛ばす(寛容)。
+                // 未知文字は寛容に飛ばさず、未知トークンとして残す。パーサの各エラー経路が
+                // KEI-E4006 で弾く(`input { x: 1 ! }` や `x!: 1` のような不正なシードが
+                // 黙って通る穴を塞ぐ)。
+                toks.push(SeedToken {
+                    kind: SeedTok::Unknown(c),
+                    line: start_line,
+                    col: start_col,
+                    len: 1,
+                });
                 col += 1;
                 i += 1;
             }
@@ -1583,6 +1601,51 @@ mod tests {
                 .iter()
                 .any(|d| d.code == seed_codes::SEED_COUNTEREXAMPLE && d.message.contains("throws")),
             "a seed whose ensures throws must be a counterexample: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_seed_character_is_a_grammar_error() {
+        // シードファイル中の未知の句読点は寛容に飛ばさず KEI-E4006 にする。
+        let m = decrement_module();
+        // 値の後ろの `!`(`input { available: 7 ! }`)。
+        let src = "seeds for decrementAvailable {\n  input { available: 7 ! }\n}\n";
+        let diags = check_seeds("t.seeds", src, &m, &mut []);
+        assert!(
+            diags.iter().any(|d| d.code == seed_codes::SEED_GRAMMAR),
+            "stray '!' after a value must be KEI-E4006: {diags:?}"
+        );
+        // フィールド名に紛れた `!`(`x!: 1`)も弾く。
+        let src2 = "seeds for decrementAvailable {\n  input { available!: 7 }\n}\n";
+        let diags2 = check_seeds("t.seeds", src2, &m, &mut []);
+        assert!(
+            diags2.iter().any(|d| d.code == seed_codes::SEED_GRAMMAR),
+            "stray '!' in a field name must be KEI-E4006: {diags2:?}"
+        );
+    }
+
+    #[test]
+    fn old_result_is_not_validated_against_post_state() {
+        // `ensures old(result) == result` は、emit が本体実行前(kei$result 初期化前)に
+        // old(...) をキャプチャするため実行時は未初期化参照で壊れる。評価器が post-state の
+        // result を old に流し込んで generative(passed)に昇格させないことを確認する
+        // (進入時環境に result は無いので old(result) は検証不能 → 対象外)。
+        let m = module(
+            "module t\n\nfunc f(x: Int) -> Int\n  ensures old(result) == result\n{\n  return x\n}\n",
+        );
+        let out = run_module(&m);
+        assert!(
+            !out.iter().any(|o| o.func == "f"),
+            "old(result) must be unverifiable, not generative: {out:?}"
+        );
+        // シード経路でも偽の「合格」にならない(評価不能として寛容スキップ=反例も出さない)。
+        let src = "seeds for f {\n  input { x: 3 }\n}\n";
+        let diags = check_seeds("t.seeds", src, &m, &mut []);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == seed_codes::SEED_COUNTEREXAMPLE),
+            "old(result) seed must not be reported as a spurious counterexample: {diags:?}"
         );
     }
 
