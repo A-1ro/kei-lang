@@ -26,9 +26,9 @@ git checkout -b chore/bump-X.Y.Z
 | `.claude-plugin/plugin.json` | `version` | 手で編集 |
 | `.claude-plugin/marketplace.json` | `plugins[].version` | 手で編集 |
 | `Cargo.lock` | ワークスペースクレートの版数 | `cargo build` で再生成 |
-| `tests/mcp/initialize.response.json` | `serverInfo.version` | **手で編集せず** golden 再生成(下記) |
+| `tests/mcp/*.response.json` | `serverInfo.version` と spec 索引の「現行リリース」行 | **手で編集せず** golden 一括再生成(下記) |
 
-MCP の version は `env!("CARGO_PKG_VERSION")` 由来。Cargo.toml を上げてから golden を再生成する:
+MCP は version を `env!("CARGO_PKG_VERSION")` 由来で複数の応答に埋め込む(`initialize` の `serverInfo.version`、`kei_spec` 索引の「現行リリース v…」行 → `spec_index` / `spec_unknown`)。Cargo.toml を上げてから golden を一括再生成する(個別ファイルを手編集しない):
 
 ```
 UPDATE_GOLDEN=1 cargo test -p kei_mcp --test golden_mcp
