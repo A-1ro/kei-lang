@@ -1,0 +1,52 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-commit-ci.sh",
+            "if": "Bash(git commit*)",
+            "timeout": 300,
+            "statusMessage": "Running pre-commit CI (fmt / clippy / test)…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Read the file .claude/hooks/post-merge-lessons.prompt.md and follow its instructions exactly. Append your findings to docs/dev-notes/lessons-from-reviews.md. Do not commit, push, or modify any other file. Hook input JSON: $ARGUMENTS",
+            "model": "claude-sonnet-4-6",
+            "if": "Bash(gh pr merge*)",
+            "timeout": 180,
+            "statusMessage": "Extracting post-merge lessons (Sonnet)…"
+          },
+          {
+            "type": "agent",
+            "prompt": "Read the file .claude/hooks/post-merge-handoff.prompt.md and follow its instructions exactly. Append your findings to docs/dev-notes/handoff-candidates.md. Do not commit, push, or modify any other file (especially not HANDOFF.md itself). Hook input JSON: $ARGUMENTS",
+            "model": "claude-sonnet-4-6",
+            "if": "Bash(gh pr merge*)",
+            "timeout": 180,
+            "statusMessage": "Extracting post-merge HANDOFF.md candidates (Sonnet)…"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-learnings.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
