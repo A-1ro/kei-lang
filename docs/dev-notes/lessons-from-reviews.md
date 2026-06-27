@@ -41,3 +41,7 @@ CLAUDE.md に落として、ここからは削除してよい。
 - **Pattern**: 演算子の Prec 変更は全 emit 呼び出し側に波及する
   **Source**: A-1ro (owner) — crates/kei_emit/src/emit.rs:1069
   **Lesson**: `Prec::Implication` のような新しい優先度を追加してある演算子に割り当てる場合、`emit_contract_check`・`emit_call` 引数・`RecordLit` フィールドなど既存のすべての emit 呼び出し側が渡す `Prec` 値も同時に更新しないと、不要な括弧が生成コードに増殖する。
+
+## PR #72: fix(hooks): grant dev-notes write permission and recover PR #71 loop — 2026-06-27
+
+(no actionable patterns)
