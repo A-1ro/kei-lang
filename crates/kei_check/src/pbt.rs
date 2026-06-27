@@ -554,7 +554,6 @@ fn eval_binary(op: ast::BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
                 .map(Int)
                 .ok_or(EvalError::Trap)
         }
-        (Or, Bool(a), Bool(b)) => Ok(Bool(a || b)),
         (Eq, a, b) => Ok(Bool(a == b)),
         (Ne, a, b) => Ok(Bool(a != b)),
         // 順序比較は Int 限定(checker が KEI-E2001 で String/合成型を弾く)。

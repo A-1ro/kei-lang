@@ -234,7 +234,7 @@ fn implies_emits_disjunction() {
         "  return b\n",
         "}\n",
     ));
-    assert!(out.ts.contains("if (!((!(a) || b))) {"));
+    assert!(out.ts.contains("if (!(!(a) || b)) {"));
 }
 
 #[test]
@@ -247,16 +247,16 @@ fn or_and_remainder_emit_with_kei_int_semantics() {
         "  return amount == 0 || amount % caseSize == 0\n",
         "}\n",
     ));
-    assert!(out.ts.contains(
-        "return amount === 0 || ((kei$rem$lhs: number, kei$rem$rhs: number): number => kei$rem$lhs - Math.trunc(kei$rem$lhs / kei$rem$rhs) * kei$rem$rhs)(amount, caseSize) === 0;"
-    ));
+    assert!(out
+        .ts
+        .contains("return amount === 0 || amount % caseSize === 0;"));
     assert!(out
         .ts
         .contains("condition: \"result == (amount == 0 || amount >= minLot)\","));
 }
 
 #[test]
-fn remainder_operands_are_evaluated_once() {
+fn remainder_emits_plain_percent() {
     let out = emit(concat!(
         "module a.b\n",
         "\n",
@@ -270,7 +270,7 @@ fn remainder_operands_are_evaluated_once() {
         "  return Random.next() % (Random.next() + 1)\n",
         "}\n",
     ));
-    let needle = "return ((kei$rem$lhs: number, kei$rem$rhs: number): number => kei$rem$lhs - Math.trunc(kei$rem$lhs / kei$rem$rhs) * kei$rem$rhs)(Random.next(), Random.next() + 1);";
+    let needle = "return Random.next() % (Random.next() + 1);";
     assert!(out.ts.contains(needle), "unexpected TS:\n{}", out.ts);
 }
 

@@ -636,7 +636,7 @@ impl Emitter<'_> {
             self.out.start_line();
             self.out.map(expr.span());
             self.out.frag(&format!("const kei$old${i} = "));
-            self.emit_expr(expr, Prec::Or);
+            self.emit_expr(expr, Prec::Implication);
             self.out.frag(";");
             self.out.newline();
         }
@@ -704,7 +704,7 @@ impl Emitter<'_> {
         self.out.map(span);
         self.out.frag("if (!(");
         let was_ensures = self.in_ensures;
-        self.emit_expr(clause, Prec::Or);
+        self.emit_expr(clause, Prec::Implication);
         self.in_ensures = was_ensures;
         self.out.frag(")) {");
         self.out.newline();
@@ -748,7 +748,7 @@ impl Emitter<'_> {
                 match &r.value {
                     Some(v) => {
                         self.out.frag("return ");
-                        self.emit_expr(v, Prec::Or);
+                        self.emit_expr(v, Prec::Implication);
                         self.out.frag(";");
                     }
                     None => self.out.frag("return;"),
@@ -758,7 +758,7 @@ impl Emitter<'_> {
             ast::Stmt::Expr(e) => {
                 self.out.start_line();
                 self.out.map(e.span);
-                self.emit_expr(&e.expr, Prec::Or);
+                self.emit_expr(&e.expr, Prec::Implication);
                 self.out.frag(";");
                 self.out.newline();
             }
@@ -774,7 +774,7 @@ impl Emitter<'_> {
                 self.out.map(l.span);
                 self.out
                     .frag(&format!("const {name}{} = ", ann.as_deref().unwrap_or("")));
-                self.emit_expr(&l.value, Prec::Or);
+                self.emit_expr(&l.value, Prec::Implication);
                 self.out.frag(";");
                 self.out.newline();
             }
@@ -783,7 +783,7 @@ impl Emitter<'_> {
                 self.out.start_line();
                 self.out.map(l.span);
                 self.out.frag(&format!("const {name}$ = "));
-                self.emit_expr(&l.value, Prec::Or);
+                self.emit_expr(&l.value, Prec::Implication);
                 self.out.frag(";");
                 self.out.newline();
                 self.out.line(&format!("if (!{name}$.ok) {{"));
@@ -791,7 +791,7 @@ impl Emitter<'_> {
                 self.out.start_line();
                 self.out.map(fail.span());
                 self.out.frag("return Err(");
-                self.emit_expr(fail, Prec::Or);
+                self.emit_expr(fail, Prec::Implication);
                 self.out.frag(");");
                 self.out.newline();
                 self.out.indent -= 1;
@@ -812,7 +812,7 @@ impl Emitter<'_> {
     fn emit_if_from_line_start(&mut self, i: &ast::IfStmt) {
         self.out.map(i.span);
         self.out.frag("if (");
-        self.emit_expr(&i.cond, Prec::Or);
+        self.emit_expr(&i.cond, Prec::Implication);
         self.out.frag(") {");
         self.out.newline();
         self.out.indent += 1;
@@ -884,7 +884,7 @@ impl Emitter<'_> {
                         None => self.out.frag(&f.name.name),
                         Some(v) => {
                             self.out.frag(&format!("{}: ", f.name.name));
-                            self.emit_expr(v, Prec::Or);
+                            self.emit_expr(v, Prec::Implication);
                         }
                     }
                 }
@@ -909,7 +909,7 @@ impl Emitter<'_> {
         self.out.start_line();
         self.out.map(scrutinee.span());
         self.out.frag(&format!("const {var} = "));
-        self.emit_expr(scrutinee, Prec::Or);
+        self.emit_expr(scrutinee, Prec::Implication);
         self.out.frag(";");
         self.out.newline();
         for arm in arms {
@@ -940,7 +940,7 @@ impl Emitter<'_> {
         self.out.start_line();
         self.out.map(arm.body.span());
         self.out.frag("return ");
-        self.emit_expr(&arm.body, Prec::Or);
+        self.emit_expr(&arm.body, Prec::Implication);
         self.out.frag(";");
         self.out.newline();
         self.out.indent -= 1;
@@ -998,9 +998,9 @@ impl Emitter<'_> {
         if is_list_get(callee, args, self.list_ops) {
             if let ast::Expr::Field { base, .. } = callee {
                 self.out.frag("keiListGet(");
-                self.emit_expr(base, Prec::Or);
+                self.emit_expr(base, Prec::Implication);
                 self.out.frag(", ");
-                self.emit_expr(&args[0], Prec::Or);
+                self.emit_expr(&args[0], Prec::Implication);
                 self.out.frag(")");
                 return;
             }
@@ -1022,9 +1022,9 @@ impl Emitter<'_> {
                     "fold" if args.len() == 2 => {
                         self.emit_expr(base, Prec::Postfix);
                         self.out.frag(".reduce(");
-                        self.emit_expr(&args[1], Prec::Or);
+                        self.emit_expr(&args[1], Prec::Implication);
                         self.out.frag(", ");
-                        self.emit_expr(&args[0], Prec::Or);
+                        self.emit_expr(&args[0], Prec::Implication);
                         self.out.frag(")");
                         return;
                     }
@@ -1037,7 +1037,7 @@ impl Emitter<'_> {
                             if i > 0 {
                                 self.out.frag(", ");
                             }
-                            self.emit_expr(a, Prec::Or);
+                            self.emit_expr(a, Prec::Implication);
                         }
                         self.out.frag(")");
                         return;
@@ -1052,7 +1052,7 @@ impl Emitter<'_> {
             if i > 0 {
                 self.out.frag(", ");
             }
-            self.emit_expr(a, Prec::Or);
+            self.emit_expr(a, Prec::Implication);
         }
         self.out.frag(")");
     }
@@ -1077,17 +1077,12 @@ impl Emitter<'_> {
             self.emit_expr(rhs, Prec::Unary);
             self.out.frag(")");
         } else if op == BinOp::Rem {
-            // Int 剰余は Kei の 0 方向除算と同じ商で定義する。オペランドが extern
-            // 呼び出し等でも観測可能な再評価を起こさないよう、typed IIFE の引数で
-            // 左右を一度だけ評価してから式を計算する。
-            self.out
-                .frag("((kei$rem$lhs: number, kei$rem$rhs: number): number => ");
-            self.out
-                .frag("kei$rem$lhs - Math.trunc(kei$rem$lhs / kei$rem$rhs) * kei$rem$rhs)(");
-            self.emit_expr(lhs, Prec::Implication);
-            self.out.frag(", ");
-            self.emit_expr(rhs, Prec::Implication);
-            self.out.frag(")");
+            // JS の `a % b` は ECMA-262 §6.1.6.1.5 で `a - trunc(a/b) * b` と定義され、
+            // Kei の 0 方向除算に基づく剰余と完全一致する。a・b はそれぞれ 1 回ずつしか
+            // 評価されないため IIFE 展開は不要。
+            self.emit_expr(lhs, Prec::Multiplicative);
+            self.out.frag(" % ");
+            self.emit_expr(rhs, Prec::Unary);
         } else {
             self.emit_expr(lhs, prec);
             self.out.frag(&format!(" {} ", ts_bin_op(op)));

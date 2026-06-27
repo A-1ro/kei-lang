@@ -138,7 +138,7 @@ IO
 | multiplicative | `*` / `/` / `%` | 左 | `Int` |
 | additive | `+` / `-` | 左 | `Int` |
 | comparison | `==` / `!=` / `<` / `>` / `<=` / `>=` | 左 | 比較結果は `Bool` |
-| logical or | `||` | 左 | `Bool` |
+| logical or | `\|\|` | 左 | `Bool` |
 | implication | `implies` | 右 | `Bool` |
 
 `&&` は v0.4 では導入しない。「かつ」は `requires` を複数行に分けるか、`if` で構造化する。
