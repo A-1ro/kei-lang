@@ -5,7 +5,17 @@
       "Write(docs/dev-notes/**)",
       "Workflow(kei-code-review)",
       "mcp__github__pull_request_review_write",
-      "mcp__github__add_comment_to_pending_review"
+      "mcp__github__add_comment_to_pending_review",
+      "Edit(crates/**)",
+      "Write(crates/**)",
+      "Edit(runtime/**)",
+      "Write(runtime/**)",
+      "Edit(.claude/hooks/**)",
+      "Write(.claude/hooks/**)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git restore:*)"
     ]
   },
   "hooks": {
