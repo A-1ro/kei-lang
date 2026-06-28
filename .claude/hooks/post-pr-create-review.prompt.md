@@ -14,11 +14,11 @@ on the new PR at `high` level and post findings as inline PR comments.
    - If neither yields a number, abort with a one-line explanation in your final
      reply — do NOT guess a PR number.
 
-2. **Skip conditions.** Run `gh pr view <N> --json isDraft,title,body` and skip
+2. **Skip conditions.** Run `gh pr view <N> --json isDraft,title,author` and skip
    (return a one-line "skipped: <reason>" final reply) if ANY of:
    - `isDraft == true` (draft PRs aren't ready for review)
    - Title matches `^chore: bump version` (release bump PRs — already mechanical)
-   - Title starts with `chore(deps)` or author is `dependabot` (dependency PRs)
+   - Title starts with `chore(deps)` or `author.login == "dependabot[bot]"` (dependency PRs)
 
 3. **Invoke the skill.** Call the `Skill` tool with:
    - `skill`: `kei-code-review`
