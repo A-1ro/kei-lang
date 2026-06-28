@@ -112,9 +112,11 @@ func totalStockValue(products: List<Product>) -> Int
 
 - **構文**: `p => expr`(単項)/ `(a, b) => expr`(複数)。**body は単一式**。`{ ... }` ブロック禁止(M25 段階の射程)。**0 引数 `() => expr` は不許可**(`KEI-E0101`、F0)— キャプチャ禁止 + 純粋限定下では定数式しか書けず、コンビネータの arity も 0 を期待しないため、構文段階で弾く。
 - **位置**: List コンビネータの引数位置のみ。`let f = (ラムダ)` / `return ラムダ` / 任意の非コンビネータ引数位置のラムダは `KEI-E2001`(関数は値ではない)を維持。受信側が `List<T>` でないコンビネータ風呼び出し(`cart.map(...)`)は専用診断「`map` is a List<T> combinator」を出す(F7)。
-- **キャプチャ**: 禁止。ラムダ body 内で参照できるのは **ラムダパラメータ + トップレベル関数 + import** のみ。外側関数の `let` / parameter 参照は `KEI-E2001`(明示的に「キャプチャ不可」と診断)。特に `result`(ensures の特殊束縛)も lambda 内からは見えない(F1 / 「`result` is not accessible from lambda bodies」)。事前に `let r = result` で外に束縛する。
+- **キャプチャ**: 禁止。ラムダ body 内で参照できるのは **ラムダパラメータ + トップレベル関数 + import** のみ。外側関数の `let` / parameter 参照は `KEI-E2001`(明示的に「キャプチャ不可」と診断)。特に `result`(ensures の特殊束縛)も lambda 内からは見えない(F1 / 「`result` is not accessible from lambda bodies」)。
 - **エフェクト**: 純粋限定。ラムダ body 内で `uses` 付き関数を呼んだら `KEI-E3001`(外側関数の `uses` 包含があっても許さない。契約式と同じ純粋スコープ)。契約の中の lambda が effectful 呼び出しを含む場合は `KEI-E3001` + `KEI-E4001`(契約純粋性)の両方が出る(F6 / 二重診断は意図的)。
-- **`old(...)` の引数は lambda パラメータを参照不可**(F3 / `KEI-E4002`)。`old(expr)` は emit 段階で関数入口の `kei$old$N` に bind されるため、lambda の `p` は実行時に未定義参照になる。`let snap = old(seed)` で外に取り出してから lambda 内で参照する。emit 側は二段防御として `collect_old_exprs` を lambda 境界で停止する。
+- **`old(...)` は lambda body 内で一律禁止**(N3 / [0] / `KEI-E4002`、ensures モード限定)。`old` は関数入口で 1 回評価される(emit が `kei$old$N` に bind する)のに対し、lambda body は呼び出しごとに評価される — 時相が根本的に整合しない。引数が lambda param を参照するか否かに関わらず、`old(p.qty)` も `old(Database.maxLimit())` も等しく違反。したがって `xs.all(p => p < old(maxLimit()))` のような契約は書けない。代替: lambda body をトップレベル関数に切り出して `old(...)` 値を引数で渡すか、契約から `old` を取り除いて別の不変条件で表現する。emit 側は二段防御として `collect_old_exprs` を lambda 境界で停止する。
+- **TS 予約語**: lambda パラメータ名が TS 予約語(`class`, `var`, `null`, `this`, `function`, `delete`, `typeof`, `let`, `await`, `async` 等)と衝突したら `KEI-E2001`([4])。Kei 自体は予約していないが、emit 後の `(class) => ...` は `tsc` が parse 不能になるため check 段階で弾く。検出単位は v0.4 では lambda パラメータのみ(将来 let / 関数パラメータ全般に拡張可)。
+- **0 引数禁止**: `() => expr` は構文段階で `KEI-E0101` ([6])。parser が `Expr::Error` sentinel を返し、下流 walker は no-op で扱う。
 - **第一級関数値ではない**: ラムダは「コンビネータ引数位置の構文糖」であり、値として保存・再利用はできない(M9 / spec §10 「案 2: 第一級関数値を導入しない」を維持)。
 - **ネスト可能**: `xss.fold(0, (acc, xs) => acc + xs.fold(0, (a, x) => a + x))` のように内側のコンビネータ引数位置に再度 lambda を書ける。キャプチャ禁止・純粋限定は外側にも一段ずつ独立に効く(内側 lambda から外側 lambda の param を参照することはできない)。
 

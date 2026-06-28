@@ -303,6 +303,13 @@ pub enum Expr {
         body: Box<Expr>,
         span: Span,
     },
+    /// パーサが既に構文エラー(SyntaxError)を発火済みの位置に置く sentinel([6])。
+    /// 例: 0 引数ラムダ `() => expr` は `KEI-E0101` を発火した後 `Expr::Error` を返す。
+    /// 下流 walker(check / emit / fmt / pbt)は **no-op** で扱い、Lambda の `params`
+    /// が空という半妥当 AST を引きずらない設計にする(N0 で導入した銀弾を撤去するため)。
+    Error {
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -319,7 +326,8 @@ impl Expr {
             | Expr::RecordLit { span, .. }
             | Expr::Match { span, .. }
             | Expr::ListLit { span, .. }
-            | Expr::Lambda { span, .. } => *span,
+            | Expr::Lambda { span, .. }
+            | Expr::Error { span } => *span,
         }
     }
 }

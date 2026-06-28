@@ -1652,7 +1652,8 @@ impl Parser {
             // `(`・`)`・`=>` を消費し、body 1 式も parse_expr で食ってから(`true` を含む通常式)、
             // KEI-E0101 を 1 件だけ push して **placeholder Lambda** を返す。
             // 後続検査(kei_check)は Lambda として infer 経路に乗るが、params が空なので
-            // 直ちに combinator arity 経路で別エラーを出す可能性は許容(構文段階は 1 件で済む)。
+            // [6]: body を消費してから `Expr::Error` sentinel を返す。Lambda { params: [] } を
+            // 返すと下流 walker に「半妥当 AST」を引きずって銀弾を強いるため、Error で短絡する。
             let lparen = self.bump(); // '('
             self.bump(); // ')'
             self.bump(); // '=>'
@@ -1666,16 +1667,13 @@ impl Parser {
                     "p",
                 ),
             );
-            // body は通常通り parse_expr で食う(構文として正しい lambda 形に補正してから返す)。
-            // 失敗しても recovery 経路に乗せて Some(placeholder) を返すと cascade が増えるので、
-            // body が取れたときだけ Lambda を返し、取れなければ None で呼び出し元に委ねる。
-            let body = self.parse_expr(false)?;
-            let span = lparen.span.to(body.span());
-            return Some(Expr::Lambda {
-                params: Vec::new(),
-                body: Box::new(body),
-                span,
-            });
+            // body を通常パースで食って位置を整合させる(取れなくても Error で返す)。
+            let body_end = match self.parse_expr(false) {
+                Some(e) => e.span(),
+                None => self.cur().span,
+            };
+            let span = lparen.span.to(body_end);
+            return Some(Expr::Error { span });
         }
         self.parse_lambda()
     }

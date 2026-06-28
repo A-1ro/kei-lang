@@ -1526,6 +1526,9 @@ impl FnChecker<'_> {
                 );
                 Ty::Unknown
             }
+            // [6]: パーサが既に SyntaxError を報告済みの sentinel。型情報を持たないので
+            // 黙って Ty::Unknown に倒す。check 側で追加の diagnostic を上げないことが契約。
+            ast::Expr::Error { .. } => Ty::Unknown,
         }
     }
 
@@ -1579,22 +1582,33 @@ impl FnChecker<'_> {
         if let Some(floor) = self.lambda_floor {
             if self.scopes[..floor].iter().any(|s| s.contains_key(name)) {
                 if name == "result" {
+                    // [1]: 旧 fix「let r = result before the lambda」は ensures 節で `let` を
+                    // 書けないため実現不能。`result` を lambda 越しに参照する設計そのものが
+                    // v0.4 段階の射程外なので、その旨を明示する。
                     self.push(
                         codes::TYPE_MISMATCH,
                         "'result' is not accessible from lambda bodies; it is bound only at the ensures clause level"
                             .to_string(),
                         span,
-                        vec![direction(
-                            "Compute the value outside the combinator, e.g. 'let r = result' before the lambda",
-                        )],
+                        vec![
+                            direction(
+                                "Extract the lambda body into a top-level function that takes 'result' explicitly, and reference that function from the contract",
+                            ),
+                            direction(
+                                "Restructure the ensures to not need per-element access to 'result' (e.g. compare aggregate properties: 'result.length == products.length')",
+                            ),
+                            direction(
+                                "Known v0.4 limitation: ensures that mix per-element lambda predicates with 'result' are not expressible",
+                            ),
+                        ],
                     );
                 } else {
                     let name = name.to_string();
-                    // N1: 旧 fix「lambda パラメータで受け渡し」/「外で計算」は両方とも実現不能
-                    // (前者は arity-1 / arity-2 のコンビネータに余分な引数を渡せない、
-                    // 後者は同じスコープを参照すれば capture 経路で再度違反)。
-                    // 実行可能な選択肢に置き換える: (a) 定数なら inline、(b) fold で acc 化、
-                    // (c) 設計を見直して外部状態に依存しない述語にする。
+                    // [1]: 旧 fix「Inline the value if it is a constant」「Use 'fold' …」
+                    // 「Refactor …」は本体内 lambda(ヘルパ関数で wrap して call すれば
+                    // capture せずに済むケース)を語らず、契約節の lambda には適用困難。
+                    // 実行可能な選択肢に揃える: (a) 本体に降ろして外で計算してから lambda 引数の
+                    // 元になる値を構成、(b) lambda を取らない別形に直す、(c) 既知の v0.4 制約。
                     self.push(
                         codes::TYPE_MISMATCH,
                         format!(
@@ -1603,13 +1617,13 @@ impl FnChecker<'_> {
                         span,
                         vec![
                             direction(format!(
-                                "Inline the value if it is a constant (e.g., 'items.all(p => p.qty > 10)' instead of capturing '{name}')"
+                                "Move the lambda body to a top-level function that takes '{name}' as an explicit parameter, and call that function from the lambda"
+                            )),
+                            direction(format!(
+                                "Capture '{name}' before the call site and pass it as the receiver / fold seed (e.g. 'items.fold({name}, (acc, p) => ...)')"
                             )),
                             direction(
-                                "Use 'fold' with the value threaded through the accumulator (e.g., 'items.fold(threshold, (acc, p) => ...)')",
-                            ),
-                            direction(
-                                "Refactor the lambda body to not depend on external state",
+                                "Known v0.4 limitation: per-element predicates that depend on outer locals must be refactored away from lambdas",
                             ),
                         ],
                     );
@@ -1916,7 +1930,34 @@ impl FnChecker<'_> {
                     // 「lambdas are only allowed in combinators」と誤導的な二次エラーが出るため、
                     // ここで先に「receiver is not a List」を出して、lambda 引数は capture / 純粋性
                     // だけ走らせ、E2001 二重発火を抑える。
+                    //
+                    // [2]: ただし receiver が **record で同名 field を持つ** 場合は F7 文面が
+                    // 「List に変換せよ」と誤誘導する(`record Bag { map: Int }` で `b.map(...)`
+                    // と書いたユーザは field を関数として呼んでいる)。field 解決を先に試して、
+                    // 当たれば「field を関数として呼べない」専用診断を出す。
                     if is_list_combinator_name(&vname.name) && base_ty != Ty::Unknown {
+                        if let Ty::Record(r) = &base_ty {
+                            let fields = self.env.records.get(r).cloned().unwrap_or_default();
+                            if let Some((_, fty)) = fields.iter().find(|(n, _)| n == &vname.name) {
+                                let fty = fty.clone();
+                                let m = vname.name.clone();
+                                let r = r.clone();
+                                self.push(
+                                    codes::TYPE_MISMATCH,
+                                    format!(
+                                        "'{m}' is a field of type '{fty}' on record '{r}'; it cannot be called as a function"
+                                    ),
+                                    vname.span,
+                                    vec![direction(format!(
+                                        "Access the field value without parentheses: write '<receiver>.{m}'"
+                                    ))],
+                                );
+                                for a in args {
+                                    self.check_combinator_arg_for_body_diags(a);
+                                }
+                                return Ty::Unknown;
+                            }
+                        }
                         self.push(
                             codes::TYPE_MISMATCH,
                             format!(
@@ -2260,18 +2301,13 @@ impl FnChecker<'_> {
         method: &str,
     ) -> Ty {
         let arity_ok = lparams.len() == expected_params.len();
-        // N0 / M25: 0 引数ラムダは parser が KEI-E0101 を発火済み(spec §2.5 違反)。
-        // check 側で重ねて「arity mismatch」を出すと N0 の「diagnostic 1 件のみ」契約を
-        // 壊すため、body の追加検査だけ silent に走らせて戻る。
-        if lparams.is_empty() {
-            let prev_floor = self.lambda_floor;
-            self.scopes.push(HashMap::new());
-            self.lambda_floor = Some(self.scopes.len() - 1);
-            self.infer(body);
-            self.lambda_floor = prev_floor;
-            self.scopes.pop();
-            return Ty::Unknown;
-        }
+        // [6]: 0 引数ラムダは parser が `Expr::Error` sentinel で短絡するため、ここには
+        // 1 個以上の params を持つ `Expr::Lambda` だけが届く。旧 N0 銀弾(`lparams.is_empty()`
+        // 早期 return)は不要になった。debug_assert で前提を明示しておく。
+        debug_assert!(
+            !lparams.is_empty(),
+            "0-arg lambdas are routed through Expr::Error; check_combinator_lambda_arg never sees empty params"
+        );
         if !arity_ok {
             self.push(
                 codes::TYPE_MISMATCH,
@@ -2304,14 +2340,31 @@ impl FnChecker<'_> {
                 }
             }
         }
-        // N3: contract 文脈で lambda body 内の `old(...)` は **arg の中身に関わらず一律禁止**
-        // (旧 F3 は `old(p.qty)` のような param 参照のみ弾いていたが、
-        // `old(Database.maxLimit())` や `old(42)` は素通りして emit 側で
-        // `kei$old$N` を吐き、lambda 内 closure では到達不能 → ReferenceError になる)。
-        // 「old は関数入口で 1 回評価」「lambda は呼び出しごとに評価」という時相が根本的に
-        // 噛み合わないため、構造的に「lambda 内に old を書く意図そのものが成立しない」。
-        // 一律で KEI-E4002 を出し、「外で `let prev = old(...)` で取り出してから渡せ」と促す。
-        if matches!(self.mode, Mode::Requires | Mode::Ensures) {
+        // [4] / M25: TS 予約語と衝突するラムダパラメータを弾く。Kei では予約語でない
+        // 名前(`class` / `var` / `null` / `this` ...)でも、emit 後の `(class) => ...`
+        // は tsc が parse できない。check 段階で先に弾いて、ビルドが TS 側で死ぬ事故を
+        // 構造的に防ぐ。検出単位はラムダパラメータのみ(将来 let / 関数パラメータに拡張可)。
+        for lp in lparams {
+            if is_ts_reserved_word(&lp.name) {
+                let name = lp.name.clone();
+                self.push(
+                    codes::TYPE_MISMATCH,
+                    format!(
+                        "lambda parameter '{name}' collides with a TypeScript reserved word; the emitted TS would not parse"
+                    ),
+                    lp.span,
+                    vec![direction(format!(
+                        "Rename '{name}' to a non-reserved name (e.g. 'item', '{name}1')"
+                    ))],
+                );
+            }
+        }
+        // N3 + [3]: ensures 内 lambda body の `old(...)` は **一律禁止**(KEI-E4002)。
+        // 「old は関数入口で 1 回評価」「lambda は per-call 評価」という時相が根本的に
+        // 噛み合わないため、`old(p.qty)` も `old(Database.maxLimit())` も等しく違反。
+        // requires モードでは別の既存検査(`'old(...)' is only available in 'ensures' clauses`)が
+        // すでに optimal な診断を出すため、ここで重ねて発火させず ensures に限定する([3] 二重発火回避)。
+        if matches!(self.mode, Mode::Ensures) {
             forbid_old_inside_lambda_body(body, self.diags, self.env);
         }
         // ラムダパラメータを 1 段のスコープとして積む。`lambda_floor` を立てて
@@ -3533,6 +3586,27 @@ fn is_list_combinator_name(name: &str) -> bool {
     matches!(name, "map" | "filter" | "fold" | "all" | "any")
 }
 
+/// [4] / M25: lambda パラメータ名が TS 予約語と衝突するかを判定する。Kei では予約語でない
+/// 名前(`class` / `function` / `var` / `null` / `this` ...)でも、emit 後の TS では
+/// `tsc` が parse 不能になる(`(class) => class > 0` は SyntaxError)。check 段階で弾く。
+///
+/// 対象は **lambda パラメータ限定**(段階的導入)。将来、let 束縛 / 関数パラメータ全般に
+/// 拡張する場合は同じヘルパを再利用する。リストは ES2022 + TS 固有の strict mode reserved。
+fn is_ts_reserved_word(name: &str) -> bool {
+    matches!(
+        name,
+        // ES core reserved
+        "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger" | "default"
+        | "delete" | "do" | "else" | "enum" | "export" | "extends" | "false" | "finally"
+        | "for" | "function" | "if" | "import" | "in" | "instanceof" | "new" | "null"
+        | "return" | "super" | "switch" | "this" | "throw" | "true" | "try" | "typeof"
+        | "var" | "void" | "while" | "with" | "yield"
+        // TS / strict-mode reserved
+        | "let" | "static" | "implements" | "interface" | "package" | "private"
+        | "protected" | "public" | "await" | "async"
+    )
+}
+
 /// N3 / M25: contract 文脈の lambda body に **`old(...)` が含まれていないか** を再帰走査する。
 /// emit は contract 中の `old(expr)` を **関数入口で評価して `kei$old$N` に bind** するため、
 /// 呼び出しごとに評価される lambda body の中から `kei$old$N` を参照しても、closure 内では
@@ -3557,9 +3631,22 @@ fn forbid_old_inside_lambda_body(body: &ast::Expr, diags: &mut Vec<Diagnostic>, 
                             codes::CONTRACT_CONSTRUCT,
                             "'old(...)' is not allowed inside a lambda body; 'old' is evaluated once at function entry, but lambda bodies are evaluated per element — the two time-frames do not align".to_string(),
                             *span,
-                            vec![direction(
-                                "Lift 'old(...)' out of the lambda, e.g. 'let prev = old(seed); xs.all(p => p > prev)'",
-                            )],
+                            // [1]: 旧 fix「let prev = old(seed); xs.all(p => p > prev)」は
+                            // 契約節で `let` を書けないため実現不能。実現可能な選択肢に揃える:
+                            // (a) lambda body を関数化して外で `old` を取り回す、
+                            // (b) 契約を refactor して per-element + old の組合せを避ける、
+                            // (c) 既知の v0.4 制約として明示。
+                            vec![
+                                direction(
+                                    "Move the lambda body to a top-level function that takes the captured 'old' value as a parameter, and call it from the contract before the lambda",
+                                ),
+                                direction(
+                                    "Restructure the contract to not need per-element comparison against an 'old' value (e.g. capture the bound before the function call and pass it in as a parameter)",
+                                ),
+                                direction(
+                                    "Known v0.4 limitation: cross-element invariants with 'old' inside lambdas are not expressible",
+                                ),
+                            ],
                         );
                         // arg の中も走査しない: `old(...)` 自体が違反点で、入れ子の `old(old(x))`
                         // を二重に報告しても情報量が増えない(外側 1 件で根本原因を示せる)。
@@ -3599,6 +3686,8 @@ fn forbid_old_inside_lambda_body(body: &ast::Expr, diags: &mut Vec<Diagnostic>, 
             }
             // ネストラムダ本体は内側ラムダの check で別途 walk される(二重発火回避)。
             ast::Expr::Lambda { .. } => {}
+            // [6]: parser 既報告 sentinel。何もしない。
+            ast::Expr::Error { .. } => {}
             ast::Expr::Name { .. }
             | ast::Expr::Int { .. }
             | ast::Expr::Str { .. }
@@ -3733,6 +3822,10 @@ pub fn contract_expr_text(e: &ast::Expr) -> String {
                 format!("({}) => {}", ps.join(", "), body_text)
             }
         }
+        // [6]: parser 既報告 sentinel。contract レポートには「<error>」のプレースホルダーを残す。
+        // 実行時 condition 文字列としては不正だが、本パスは構文エラーがある時しか来ないので
+        // どのみち実行可能 TS を生成しない(emit が syntax_diagnostics 時点で exit 1)。
+        ast::Expr::Error { .. } => "<error>".to_string(),
     }
 }
 

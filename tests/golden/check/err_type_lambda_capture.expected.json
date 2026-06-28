@@ -4,15 +4,15 @@
     "fixes": [
       {
         "edits": [],
-        "title": "Inline the value if it is a constant (e.g., 'items.all(p => p.qty > 10)' instead of capturing 'threshold')"
+        "title": "Move the lambda body to a top-level function that takes 'threshold' as an explicit parameter, and call that function from the lambda"
       },
       {
         "edits": [],
-        "title": "Use 'fold' with the value threaded through the accumulator (e.g., 'items.fold(threshold, (acc, p) => ...)')"
+        "title": "Capture 'threshold' before the call site and pass it as the receiver / fold seed (e.g. 'items.fold(threshold, (acc, p) => ...)')"
       },
       {
         "edits": [],
-        "title": "Refactor the lambda body to not depend on external state"
+        "title": "Known v0.4 limitation: per-element predicates that depend on outer locals must be refactored away from lambdas"
       }
     ],
     "message": "lambda cannot reference 'threshold' from the enclosing function; lambdas may only use their own parameters and top-level functions",

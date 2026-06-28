@@ -286,6 +286,8 @@ impl<'a> RuntimeUses<'a> {
             // ランタイム import を拾うため)。パラメータは TS の素のシンボル名なので
             // ランタイム import 対象にならない。
             ast::Expr::Lambda { body, .. } => self.expr(body),
+            // [6]: parser 既報告 sentinel。RuntimeUses 収集は無視する。
+            ast::Expr::Error { .. } => {}
         }
     }
 }
@@ -940,6 +942,10 @@ impl Emitter<'_> {
                     self.out.frag(")");
                 }
             }
+            // [6]: parser 既報告 sentinel。emit に到達するのは check が pass した時のみで、
+            // SyntaxError があれば CLI が exit 1 する。万一到達した場合は `undefined` を出して
+            // tsc 段階で確実に検出されるようにする(silent な無効化を避ける)。
+            ast::Expr::Error { .. } => self.out.frag("undefined"),
         }
     }
 
