@@ -1498,16 +1498,29 @@ impl FnChecker<'_> {
     /// List リテラル(M22 / #57)の要素を unify し、`Ty::List(T)` を返す。
     /// 要素が空なら `Ty::List(Unknown)`(let の型注釈や引数位置で具体化される)。
     /// 要素間の型不一致は KEI-E2001(最初の要素の型を期待値として後続要素にぶつける)。
+    ///
+    /// 要素間に不整合がある場合は要素型を `Unknown` に倒して返す。caller の
+    /// `check_assign(Ty::List(expected), Ty::List(found))` が **同じ根本原因で
+    /// 二重診断** を出すのを防ぐため(`Unknown` は全型と互換)。
     fn infer_list_lit(&mut self, elements: &[ast::Expr], _span: SynSpan) -> Ty {
         if elements.is_empty() {
             return Ty::List(Box::new(Ty::Unknown));
         }
         let first = self.infer(&elements[0]);
+        let mut all_compatible = true;
         for e in &elements[1..] {
             let t = self.infer(e);
+            let before = self.diags.len();
             self.check_assign(&first, &t, e.span());
+            if self.diags.len() > before {
+                all_compatible = false;
+            }
         }
-        Ty::List(Box::new(first))
+        if all_compatible {
+            Ty::List(Box::new(first))
+        } else {
+            Ty::List(Box::new(Ty::Unknown))
+        }
     }
 
     fn lookup_scope(&self, name: &str) -> Option<Ty> {

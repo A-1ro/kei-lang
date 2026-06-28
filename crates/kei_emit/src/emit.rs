@@ -1171,6 +1171,15 @@ fn collect_old_exprs(ensures: &[ast::Expr]) -> Vec<&ast::Expr> {
                     walk(&arm.body, out);
                 }
             }
+            // M22 / #57: List リテラル要素も走査対象。これを忘れると
+            // `ensures result == [old(a), old(b)]` のように要素中の `old(...)` が
+            // キャプチャされず、生成 TS が未宣言 `kei$old$N` を参照して
+            // ランタイムで ReferenceError になる。
+            ast::Expr::ListLit { elements, .. } => {
+                for el in elements {
+                    walk(el, out);
+                }
+            }
             _ => {}
         }
     }

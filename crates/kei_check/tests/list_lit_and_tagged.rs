@@ -108,3 +108,18 @@ fn list_of_records_constructed_with_record_lit() {
     let diags = check(src);
     assert!(diags.is_empty(), "expected clean, got {diags:?}");
 }
+
+/// 異種要素の List リテラルは **要素位置のミスマッチだけ** を報告し、
+/// 戻り値型の List<...> でさらに重ねて報告しない(同じ根本原因の二重診断回避)。
+#[test]
+fn mixed_list_lit_does_not_double_report_at_return_site() {
+    let src = "module t\n\
+               func xs() -> List<Int> { return [1, \"two\", 3] }\n";
+    let diags = check(src);
+    let mismatch_count = diags.iter().filter(|(c, _)| c == "KEI-E2001").count();
+    assert_eq!(
+        mismatch_count, 1,
+        "mixed list must report exactly one KEI-E2001 (per-element), \
+         not also one at the return site; got {diags:?}"
+    );
+}
