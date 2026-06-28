@@ -31,7 +31,9 @@ pub fn format_source(source: &str) -> Result<String, Vec<SyntaxError>> {
 }
 
 /// コメント付きでモジュールを整形する。`comments` はソース順。
-pub fn format_with_comments(module: &Module, comments: &[Comment]) -> String {
+/// `format_module` / `format_source` の共通実装で、外部からは呼ばない
+/// (PR #73 review: 公開する必然性が無いので `pub(crate)`)。
+pub(crate) fn format_with_comments(module: &Module, comments: &[Comment]) -> String {
     let mut fmt = Fmt::new(comments);
     fmt.emit_module(module);
     fmt.finish()
@@ -45,6 +47,9 @@ struct Fmt<'a> {
     cursor: usize,
     /// 次のチャンクの前にセクション区切り(空行)が必要か。
     need_separator: bool,
+    /// 最後に emit したトップレベル要素の終端行(`finish` で末尾コメントの
+    /// 直前に空行を入れるかをソース行間で決めるため。PR #73 review)。
+    last_top_line: Option<u32>,
 }
 
 impl<'a> Fmt<'a> {
@@ -54,13 +59,29 @@ impl<'a> Fmt<'a> {
             comments,
             cursor: 0,
             need_separator: false,
+            last_top_line: None,
         }
     }
 
     fn finish(mut self) -> String {
-        // 末尾の余剰コメントを取り込む
+        // 末尾の余剰コメントを取り込む。PR #73 review: 旧実装は常に
+        // "\n\n" で区切っていたため、最後のチャンク直後に続くコメントでも
+        // 空行が挿入されていた。ソース行間(gap)を見て決める:
+        //   gap >= 2 → 空行を挟む(ソース上で意図的に間を空けていた)
+        //   gap == 1 → 改行 1 つだけ(ソース上で直後に書かれていた)
         if self.cursor < self.comments.len() {
-            self.write_separator_if_needed();
+            let comment_line = self.comments[self.cursor].span.start.line;
+            let gap = self
+                .last_top_line
+                .map(|l| comment_line.saturating_sub(l))
+                .unwrap_or(0);
+            if !self.out.is_empty() && !self.out.ends_with('\n') {
+                self.out.push('\n');
+            }
+            if gap >= 2 && !self.out.is_empty() {
+                self.out.push('\n');
+            }
+            self.need_separator = false;
             self.flush_remaining(0);
         }
         if !self.out.is_empty() && !self.out.ends_with('\n') {
@@ -157,6 +178,7 @@ impl<'a> Fmt<'a> {
             self.push(&path_text(&decl.path));
             self.flush_trailing_on(decl.span.end.line);
             self.need_separator = true;
+            self.last_top_line = Some(decl.span.end.line);
         }
 
         if !m.imports.is_empty() {
@@ -169,6 +191,7 @@ impl<'a> Fmt<'a> {
                 self.flush_leading(import.span.start.line, 0);
                 self.push(&import_text(import));
                 self.flush_trailing_on(import.span.end.line);
+                self.last_top_line = Some(import.span.end.line);
             }
             self.need_separator = true;
         }
@@ -186,6 +209,7 @@ impl<'a> Fmt<'a> {
                     self.flush_leading(e.span.start.line, 0);
                     self.push(&extern_text(e));
                     self.flush_trailing_on(e.span.end.line);
+                    self.last_top_line = Some(e.span.end.line);
                     i += 1;
                 }
                 self.need_separator = true;
@@ -195,6 +219,7 @@ impl<'a> Fmt<'a> {
                 self.flush_leading(item.span().start.line, 0);
                 self.emit_item(item);
                 self.flush_trailing_on(item.span().end.line);
+                self.last_top_line = Some(item.span().end.line);
                 self.need_separator = true;
                 i += 1;
             }
@@ -206,11 +231,55 @@ impl<'a> Fmt<'a> {
     fn emit_item(&mut self, item: &Item) {
         match item {
             Item::TypeAlias(t) => self.push(&type_alias_text(t)),
-            Item::Record(r) => self.push(&record_text(r)),
-            Item::Enum(e) => self.push(&enum_text(e)),
+            Item::Record(r) => self.emit_record(r),
+            Item::Enum(e) => self.emit_enum(e),
             Item::Func(f) => self.emit_func(f),
             Item::Extern(e) => self.push(&extern_text(e)),
         }
+    }
+
+    /// record 本体を Fmt メソッドとして出力(M19 / PR #73 review)。
+    /// 旧 `record_text` は AST だけのテキスト生成だったため、フィールド間の
+    /// `// comment` が走査されず消えていた。フィールド行ごとに
+    /// leading/trailing flush を入れ、最後のフィールドと `}` の間にも
+    /// 残コメントを取り込む。
+    fn emit_record(&mut self, r: &RecordDecl) {
+        if r.fields.is_empty() {
+            self.push(&format!("record {} {{}}", r.name.name));
+            return;
+        }
+        self.push(&format!("record {} {{", r.name.name));
+        self.newline();
+        for field in &r.fields {
+            self.flush_leading(field.span.start.line, 1);
+            self.indent(1);
+            self.push(&field_def_text(field));
+            self.flush_trailing_on(field.span.end.line);
+            self.newline();
+        }
+        // 最終フィールドの行と `}` の行の間に残った leading コメントを拾う。
+        self.flush_leading(r.span.end.line, 1);
+        self.push("}");
+    }
+
+    /// enum 本体を Fmt メソッドとして出力(M19 / PR #73 review)。`emit_record`
+    /// と同じ理由でバリアント間 / 末尾 `}` 前のコメントを保持する。
+    fn emit_enum(&mut self, decl: &EnumDecl) {
+        if decl.variants.is_empty() {
+            self.push(&format!("enum {} {{}}", decl.name.name));
+            return;
+        }
+        self.push(&format!("enum {} {{", decl.name.name));
+        self.newline();
+        for variant in &decl.variants {
+            self.flush_leading(variant.span.start.line, 1);
+            self.indent(1);
+            self.push(&variant_text(variant));
+            self.flush_trailing_on(variant.span.end.line);
+            self.newline();
+        }
+        self.flush_leading(decl.span.end.line, 1);
+        self.push("}");
     }
 
     fn emit_func(&mut self, func: &FuncDecl) {
@@ -228,10 +297,29 @@ impl<'a> Fmt<'a> {
         let has_clauses =
             !(func.uses.is_empty() && func.requires.is_empty() && func.ensures.is_empty());
 
+        // PR #73 review: シグネチャ行末の trailing コメントを取り込んでから改行する
+        // (これを忘れると後続の `flush_leading(requires.start)` がシグネチャ行の
+        //  comment を silently 消費して misplace する)。has_clauses=false の場合は
+        // `{` がシグネチャと同じ行に来るので、シグネチャ行 trailing は実は `{` 同行
+        // trailing と区別がつかない。その場合は emit_block の open brace 取り込みに
+        // 委ねて、ここでは取らない。
+        let sig_end_line = func
+            .ret
+            .as_ref()
+            .map(|r| r.span.end.line)
+            .or_else(|| func.params.last().map(|p| p.span.end.line))
+            .unwrap_or(func.name.span.end.line);
+        if has_clauses {
+            self.flush_trailing_on(sig_end_line);
+        }
+
         if !func.uses.is_empty() {
             self.newline();
-            // uses 行の直上 leading は v0.4 では拾わない(節の途中で
-            // コメントを置く構文が稀なため)。同行 trailing のみ対応。
+            // M19 / PR #73 review: uses 行の直上にも leading コメントを取り込む。
+            // 旧実装は uses 行手前で flush_leading を呼ばなかったため、その位置の
+            // コメントが後段の requires 冒頭まで遅延して付け替えられていた。
+            let first_uses_line = func.uses[0].span.start.line;
+            self.flush_leading(first_uses_line, 1);
             self.indent(1);
             self.push("uses ");
             let effects: Vec<String> = func.uses.iter().map(|e| path_text(&e.path)).collect();
@@ -271,6 +359,13 @@ impl<'a> Fmt<'a> {
     // ---- ブロック・文 ----
 
     fn emit_block(&mut self, block: &Block, level: usize) {
+        self.emit_block_inner(block, level, /* close_trailing = */ true);
+    }
+
+    /// `emit_block` の内部実装。`close_trailing` が false のときは `}` 同行 trailing を
+    /// **取り込まない**(emit_if の then-block 側で、後続の `else` 連結のために
+    /// 呼び出し側が改行を制御する)。
+    fn emit_block_inner(&mut self, block: &Block, level: usize, close_trailing: bool) {
         if block.stmts.is_empty() {
             let has_inside = match self.peek() {
                 Some(c) => c.span.start.line < block.span.end.line,
@@ -278,17 +373,29 @@ impl<'a> Fmt<'a> {
             };
             if !has_inside {
                 self.push("{}");
+                if close_trailing {
+                    self.flush_trailing_on(block.span.end.line);
+                }
                 return;
             }
             self.push("{");
+            // open brace 同行 trailing を取り込む(PR #73 review)。
+            self.flush_trailing_on(block.span.start.line);
             self.newline();
             self.flush_leading(block.span.end.line, level + 1);
             self.indent(level);
             self.push("}");
+            if close_trailing {
+                self.flush_trailing_on(block.span.end.line);
+            }
             return;
         }
 
         self.push("{");
+        // open brace 同行 trailing を取り込む。これを取り損ねると、後段の
+        // `flush_leading(stmt.start)` が `{` 同行コメントを body 内 leading として
+        // 吸収してしまう(`func f() { // hi` のケース)。PR #73 review。
+        self.flush_trailing_on(block.span.start.line);
         self.newline();
         for stmt in &block.stmts {
             let span = stmt.span();
@@ -301,6 +408,9 @@ impl<'a> Fmt<'a> {
         self.flush_leading(block.span.end.line, level + 1);
         self.indent(level);
         self.push("}");
+        if close_trailing {
+            self.flush_trailing_on(block.span.end.line);
+        }
     }
 
     fn emit_stmt(&mut self, stmt: &Stmt, level: usize) {
@@ -323,16 +433,32 @@ impl<'a> Fmt<'a> {
         self.push("if ");
         self.push(&expr_text(&stmt.cond, 0, true, level));
         self.push(" ");
-        self.emit_block(&stmt.then_block, level);
+        // else が続くとき、then-block の `}` 同行 trailing は emit_if 側で
+        // 取り扱う(取ってから改行+インデントを挟み、else を別行に出す)。
+        // emit_block 内で取ると `} // hi else { ... }` のような壊れた連結に
+        // なる(PR #73 review: emit_if が then-block `}` 直後のコメントを
+        // else 側に流入させる問題への対応)。
+        let has_else = stmt.else_branch.is_some();
+        self.emit_block_inner(&stmt.then_block, level, !has_else);
         match &stmt.else_branch {
             None => {}
-            Some(ElseBranch::Block(block)) => {
-                self.push(" else ");
-                self.emit_block(block, level);
-            }
-            Some(ElseBranch::If(nested)) => {
-                self.push(" else ");
-                self.emit_if(nested, level);
+            Some(branch) => {
+                let close_line = stmt.then_block.span.end.line;
+                let has_close_trailing =
+                    self.peek().is_some_and(|c| c.span.start.line == close_line);
+                if has_close_trailing {
+                    // `} // trailing then\n  else { ... }`
+                    self.flush_trailing_on(close_line);
+                    self.newline();
+                    self.indent(level);
+                } else {
+                    self.push(" ");
+                }
+                self.push("else ");
+                match branch {
+                    ElseBranch::Block(block) => self.emit_block(block, level),
+                    ElseBranch::If(nested) => self.emit_if(nested, level),
+                }
             }
         }
     }
@@ -401,34 +527,6 @@ fn type_alias_text(alias: &TypeAlias) -> String {
         s.push_str(" tagged ");
         s.push_str(&string_literal(tag));
     }
-    s
-}
-
-fn record_text(record: &RecordDecl) -> String {
-    if record.fields.is_empty() {
-        return format!("record {} {{}}", record.name.name);
-    }
-    let mut s = format!("record {} {{\n", record.name.name);
-    for field in &record.fields {
-        s.push_str(INDENT);
-        s.push_str(&field_def_text(field));
-        s.push('\n');
-    }
-    s.push('}');
-    s
-}
-
-fn enum_text(decl: &EnumDecl) -> String {
-    if decl.variants.is_empty() {
-        return format!("enum {} {{}}", decl.name.name);
-    }
-    let mut s = format!("enum {} {{\n", decl.name.name);
-    for variant in &decl.variants {
-        s.push_str(INDENT);
-        s.push_str(&variant_text(variant));
-        s.push('\n');
-    }
-    s.push('}');
     s
 }
 
