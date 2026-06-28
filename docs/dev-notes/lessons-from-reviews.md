@@ -49,3 +49,35 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #72 (auditor re-run): kei-invariant-auditor PostToolUse — 2026-06-27
 
 (no actionable patterns — hook triggered by invariant auditor `git diff --stat` tool use, not by `gh pr merge`; most recent merged PR #72 already documented above)
+
+## PR #79: chore(hooks): auto-run kei-code-review on gh pr create — 2026-06-28
+
+- **Pattern**: `gh pr view --json` の fields に `author` を含め忘れる
+  **Source**: A-1ro (owner) — general discussion (kei-code-review finding #1, CONFIRMED/correctness)
+  **Lesson**: hook prompt で dependabot PR をスキップする条件として `author.login` を参照する場合、`gh pr view <N> --json` に `author` を明示指定しないとフィールドが null になりスキップ条件が常に無効になる。`--json` に渡す fields リストは実際に参照する全フィールドを列挙すること。
+
+- **Pattern**: `--json` で取得した未使用フィールドを残さない
+  **Source**: A-1ro (owner) — general discussion (kei-code-review finding #2, CONFIRMED/correctness)
+  **Lesson**: hook スクリプトや prompt で `gh pr view --json body,...` のように `body` を取得しながら skip ロジックで一度も参照しないと dead field になる。使わないフィールドは `--json` から除いてノイズを減らす。逆に参照するフィールドは必ず取得リストに含めること(finding #1 と対になる教訓)。
+
+- **Pattern**: draft PR チェックはセッション起動前に行う
+  **Source**: A-1ro (owner) — general discussion (kei-code-review finding #3, PLAUSIBLE/pitfalls)
+  **Lesson**: 現行の hook は draft PR でも Sonnet 子セッションを起動してから `gh pr view` で draft 判定しスキップしている。セッション起動コストを避けるには、親フック側(`tool_response.stdout` の URL 確定直後)で `gh pr view <N> --json isDraft` を叩いて draft なら子セッションを起動しない分岐を入れる方が望ましい。
+
+## PR #81: feat(skills): kei-dogfood — auto-file next-version Issues from feedback — 2026-06-28
+
+- **Pattern**: `gh issue create --label` は複数ラベルをカンマ区切りで渡せない
+  **Source**: A-1ro (owner) — `.claude/skills/kei-dogfood/SKILL.md` line 292 (CONFIRMED/correctness)
+  **Lesson**: `gh issue create --label "dogfood, from-v0.4, fix-chain"` のようにカンマ区切り文字列を 1 つの `--label` に渡すと、それを単一ラベル名として扱い 404/422 で失敗する。複数ラベルは `--label "dogfood" --label "from-v0.4" --label "fix-chain"` のように flag を繰り返すか、動的に `label_args` 配列を組み立てること。
+
+- **Pattern**: `gh issue list --milestone` はマイルストーン番号で指定する
+  **Source**: A-1ro (owner) — `.claude/skills/kei-dogfood/SKILL.md` line 268 (PLAUSIBLE/correctness)
+  **Lesson**: `gh issue list --milestone v0.5` のようにタイトル文字列でフィルタすると、大文字小文字・空白の差異で silently 0 件になる。事前に `gh api repos/:owner/:repo/milestones --jq ".[] | select(.title==\"$milestone\") | .number"` でマイルストーン番号を解決し、番号で指定することで確実に dedup できる。
+
+- **Pattern**: 自然言語の承認ゲートはLLMが短絡しうる
+  **Source**: A-1ro (owner) — `.claude/skills/kei-dogfood/SKILL.md` line 286 (PLAUSIBLE/pitfalls)
+  **Lesson**: 「承認前に `gh issue create` を絶対実行しない」を自然言語指示のみで縛ると、LLM が好意的な曖昧メッセージを承認とみなして gate を抜ける可能性がある。`permissions.allow` から当該コマンドを外してパーミッションプロンプトをバックストップにするか、SKILL.md に `# HARD GATE` ブロックを設けて禁止コマンドを明示するなど機械的な防線を追加すること。
+
+- **Pattern**: `gh issue comment` の出力はコメント URL アンカーを含まない
+  **Source**: A-1ro (owner) — `.claude/skills/kei-dogfood/SKILL.md` line 293 (PLAUSIBLE/pitfalls)
+  **Lesson**: `gh issue comment <N> --body "..."` はデフォルトで Issue URL(`https://github.com/.../issues/N`)しか返さず、`#issuecomment-<id>` アンカーが付かない。ディープリンクを出力に含めたい場合は `--json url --jq '.url'` を追加して comment アンカー付き URL を取得すること(`gh` v2.17+ 必須)。
