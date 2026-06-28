@@ -1558,6 +1558,8 @@ impl Parser {
     fn parse_lambda(&mut self) -> Option<Expr> {
         let (params, start_span) = if self.at(T::LParen) {
             // `(a, b) =>`: `(` を消費して識別子並びを読み、`)` を消費する。
+            // 呼び出し前提として `try_parse_paren_lambda` が **1 つ以上の Ident** を伴う
+            // 形を確認済み(N0)。0 引数 `() =>` はそちらで先に弾かれるためここには来ない。
             let open = self.bump();
             let mut params: Vec<Ident> = Vec::new();
             loop {
@@ -1581,25 +1583,9 @@ impl Parser {
             };
             (vec![ident], tok.span)
         };
-        // F0 / M25: 0 引数ラムダは spec §2.5 に無いので構文段階で弾く。
-        // `() => expr` を許すと意味論(キャプチャ禁止・純粋限定)上の意義が薄く
-        // (定数式しか書けない)、コンビネータ引数位置でも arity 0 を期待する
-        // メソッドが存在しないため、ここで KEI-E0101 として拒否して
-        // 「単項 `p => expr` / 複数 `(a, b) => expr` のいずれかにせよ」と促す。
-        if params.is_empty() {
-            let here = self.cur().span;
-            self.error(
-                codes::UNEXPECTED_TOKEN,
-                "lambda must have at least one parameter; spec §2.5 allows 'p => expr' (single) or '(a, b) => expr' (multiple)".to_string(),
-                start_span,
-                FixHint::replace(
-                    "Add a lambda parameter, e.g. 'p => ...'",
-                    Span::point(here.start),
-                    "p",
-                ),
-            );
-            return None;
-        }
+        // 0 引数ラムダは `try_parse_paren_lambda` の peek 段階で弾く設計(N0)。
+        // ここに来た時点で params は必ず 1 個以上。
+        debug_assert!(!params.is_empty(), "0-arg lambdas are filtered upstream");
         // `=>` を消費。
         if !self.expect(T::FatArrow) {
             return None;
@@ -1628,11 +1614,19 @@ impl Parser {
     /// 確定したらラムダをパースする。`(expr)` の grouping と曖昧なくするための辺。
     /// マッチしなければ `None` を返し、位置は据え置く(呼び出し側が grouping を試す)。
     ///
-    /// 受理形: `( )` / `( Ident )` / `( Ident, Ident, ... )` の直後が `=>` のとき。
+    /// 受理形: `( Ident )` / `( Ident, Ident, ... )` の直後が `=>` のとき。
     /// それ以外(中に式・`a + b`・`Ident.Ident`・末尾カンマ・改行など)は grouping 扱い。
+    ///
+    /// N0 / M25: 0 引数 `( ) =>` は spec §2.5 で禁止。peek でこのパターンを見つけたら、
+    /// **位置を進めずに** KEI-E0101 を 1 件 push して `None` を返す **代わりに、
+    /// `(`・`)`・`=>` ・body 1 式を消費して `Lambda` を返す**(エラー回復付き)。
+    /// `None` で返すと呼び出し元の T::LParen フォールバック(`bump( → parse_expr → expect ))`)
+    /// が動き出し、`)` を期待する架空エラーが追加されてしまうため(前回のバグ)。
+    /// エラー回復モードでも 1 つの E0101 だけ出して位置を整合させる。
     fn try_parse_paren_lambda(&mut self) -> Option<Expr> {
         // pos[0] は `(`。pos[1] 以降をスキャン。
         let mut i = self.pos + 1;
+        let zero_arg = self.tokens.get(i).map(|t| t.kind) == Some(T::RParen);
         // 0 個または `Ident (Comma Ident)*` を許す。
         if self.tokens.get(i).map(|t| t.kind) == Some(T::Ident) {
             i += 1;
@@ -1651,6 +1645,37 @@ impl Parser {
         }
         if self.tokens.get(i + 1).map(|t| t.kind) != Some(T::FatArrow) {
             return None;
+        }
+        if zero_arg {
+            // N0: `() =>` を確実に lambda 経路として消費する。fallback の T::LParen
+            // grouping パスに落とすと「expected ')', found ...」の架空エラーが追加発生する。
+            // `(`・`)`・`=>` を消費し、body 1 式も parse_expr で食ってから(`true` を含む通常式)、
+            // KEI-E0101 を 1 件だけ push して **placeholder Lambda** を返す。
+            // 後続検査(kei_check)は Lambda として infer 経路に乗るが、params が空なので
+            // 直ちに combinator arity 経路で別エラーを出す可能性は許容(構文段階は 1 件で済む)。
+            let lparen = self.bump(); // '('
+            self.bump(); // ')'
+            self.bump(); // '=>'
+            self.error(
+                codes::UNEXPECTED_TOKEN,
+                "lambda must have at least one parameter; spec §2.5 allows 'p => expr' (single) or '(a, b) => expr' (multiple)".to_string(),
+                lparen.span,
+                FixHint::replace(
+                    "Add a lambda parameter, e.g. 'p => ...'",
+                    Span::point(lparen.span.end),
+                    "p",
+                ),
+            );
+            // body は通常通り parse_expr で食う(構文として正しい lambda 形に補正してから返す)。
+            // 失敗しても recovery 経路に乗せて Some(placeholder) を返すと cascade が増えるので、
+            // body が取れたときだけ Lambda を返し、取れなければ None で呼び出し元に委ねる。
+            let body = self.parse_expr(false)?;
+            let span = lparen.span.to(body.span());
+            return Some(Expr::Lambda {
+                params: Vec::new(),
+                body: Box::new(body),
+                span,
+            });
         }
         self.parse_lambda()
     }

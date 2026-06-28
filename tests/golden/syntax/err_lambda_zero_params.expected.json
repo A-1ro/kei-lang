@@ -8,12 +8,12 @@
             "new_text": "p",
             "span": {
               "end": {
-                "col": 23,
+                "col": 21,
                 "line": 4
               },
               "file": "tests/golden/syntax/err_lambda_zero_params.kei",
               "start": {
-                "col": 23,
+                "col": 21,
                 "line": 4
               }
             }
@@ -33,43 +33,6 @@
       "start": {
         "col": 20,
         "line": 4
-      }
-    }
-  },
-  {
-    "code": "KEI-E0101",
-    "fixes": [
-      {
-        "edits": [
-          {
-            "new_text": ")",
-            "span": {
-              "end": {
-                "col": 1,
-                "line": 5
-              },
-              "file": "tests/golden/syntax/err_lambda_zero_params.kei",
-              "start": {
-                "col": 1,
-                "line": 5
-              }
-            }
-          }
-        ],
-        "title": "Insert ')'"
-      }
-    ],
-    "message": "expected ')', found '}'",
-    "severity": "error",
-    "span": {
-      "end": {
-        "col": 2,
-        "line": 5
-      },
-      "file": "tests/golden/syntax/err_lambda_zero_params.kei",
-      "start": {
-        "col": 1,
-        "line": 5
       }
     }
   }

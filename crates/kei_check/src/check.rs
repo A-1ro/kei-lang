@@ -1590,15 +1590,28 @@ impl FnChecker<'_> {
                     );
                 } else {
                     let name = name.to_string();
+                    // N1: 旧 fix「lambda パラメータで受け渡し」/「外で計算」は両方とも実現不能
+                    // (前者は arity-1 / arity-2 のコンビネータに余分な引数を渡せない、
+                    // 後者は同じスコープを参照すれば capture 経路で再度違反)。
+                    // 実行可能な選択肢に置き換える: (a) 定数なら inline、(b) fold で acc 化、
+                    // (c) 設計を見直して外部状態に依存しない述語にする。
                     self.push(
                         codes::TYPE_MISMATCH,
                         format!(
                             "lambda cannot reference '{name}' from the enclosing function; lambdas may only use their own parameters and top-level functions"
                         ),
                         span,
-                        vec![direction(format!(
-                            "Pass '{name}' through the lambda parameter, or compute it outside the combinator"
-                        ))],
+                        vec![
+                            direction(format!(
+                                "Inline the value if it is a constant (e.g., 'items.all(p => p.qty > 10)' instead of capturing '{name}')"
+                            )),
+                            direction(
+                                "Use 'fold' with the value threaded through the accumulator (e.g., 'items.fold(threshold, (acc, p) => ...)')",
+                            ),
+                            direction(
+                                "Refactor the lambda body to not depend on external state",
+                            ),
+                        ],
                     );
                 }
                 return Ty::Unknown;
@@ -2247,6 +2260,18 @@ impl FnChecker<'_> {
         method: &str,
     ) -> Ty {
         let arity_ok = lparams.len() == expected_params.len();
+        // N0 / M25: 0 引数ラムダは parser が KEI-E0101 を発火済み(spec §2.5 違反)。
+        // check 側で重ねて「arity mismatch」を出すと N0 の「diagnostic 1 件のみ」契約を
+        // 壊すため、body の追加検査だけ silent に走らせて戻る。
+        if lparams.is_empty() {
+            let prev_floor = self.lambda_floor;
+            self.scopes.push(HashMap::new());
+            self.lambda_floor = Some(self.scopes.len() - 1);
+            self.infer(body);
+            self.lambda_floor = prev_floor;
+            self.scopes.pop();
+            return Ty::Unknown;
+        }
         if !arity_ok {
             self.push(
                 codes::TYPE_MISMATCH,
@@ -2279,13 +2304,15 @@ impl FnChecker<'_> {
                 }
             }
         }
-        // F3: contract 文脈で `old(<lambda param を参照する式>)` は実行時に必ず壊れる
-        // (emit が関数入口で `kei$old$N` を bind するので lambda の `p` は未定義)。
-        // 静的に検出して KEI-E2001 で弾く。emit 側でも walk を lambda 境界で停止する
-        // 二段防御を入れるが、診断はここで出す。
+        // N3: contract 文脈で lambda body 内の `old(...)` は **arg の中身に関わらず一律禁止**
+        // (旧 F3 は `old(p.qty)` のような param 参照のみ弾いていたが、
+        // `old(Database.maxLimit())` や `old(42)` は素通りして emit 側で
+        // `kei$old$N` を吐き、lambda 内 closure では到達不能 → ReferenceError になる)。
+        // 「old は関数入口で 1 回評価」「lambda は呼び出しごとに評価」という時相が根本的に
+        // 噛み合わないため、構造的に「lambda 内に old を書く意図そのものが成立しない」。
+        // 一律で KEI-E4002 を出し、「外で `let prev = old(...)` で取り出してから渡せ」と促す。
         if matches!(self.mode, Mode::Requires | Mode::Ensures) {
-            let lambda_param_names: Vec<&str> = lparams.iter().map(|p| p.name.as_str()).collect();
-            forbid_old_capturing_lambda_param(body, &lambda_param_names, self.diags, self.env);
+            forbid_old_inside_lambda_body(body, self.diags, self.env);
         }
         // ラムダパラメータを 1 段のスコープとして積む。`lambda_floor` を立てて
         // この位置より外のスコープは lookup_scope から見えなくする(キャプチャ禁止)。
@@ -3506,96 +3533,71 @@ fn is_list_combinator_name(name: &str) -> bool {
     matches!(name, "map" | "filter" | "fold" | "all" | "any")
 }
 
-/// F3 / M25: contract 文脈の lambda body に `old(<lambda param 参照>)` が無いかを再帰走査する。
+/// N3 / M25: contract 文脈の lambda body に **`old(...)` が含まれていないか** を再帰走査する。
 /// emit は contract 中の `old(expr)` を **関数入口で評価して `kei$old$N` に bind** するため、
-/// lambda 内変数(`p` 等)を含む `expr` は実行時に未定義参照になる。検査段階で弾く。
+/// 呼び出しごとに評価される lambda body の中から `kei$old$N` を参照しても、closure 内では
+/// 同名のバインディングが存在せず実行時 `ReferenceError` になる。
 ///
-/// 走査対象: contract 式そのもの(`requires` / `ensures`)の中の **lambda body** に対し、
-/// `Expr::Call(callee = Name("old"), args = [arg])` を見つけたら、`arg` 内のいずれかの
-/// `Expr::Name { name }` が `lambda_params` に含まれているかを確認する。含まれていれば
-/// `arg.span()` に KEI-E2001 を push。
+/// 旧版(F3)は「arg が lambda param を参照するときだけ」弾いていたが、
+/// `old(Database.maxLimit())` / `old(42)` / shorthand RecordLit のように
+/// param を文字列上参照しない `old` が見逃される穴があった。N3 で
+/// 「old は関数入口で 1 回評価」「lambda は per-call 評価」という時相が
+/// 根本的に噛み合わないため、引数の中身に関わらず **一律で KEI-E4002 を出す**。
 ///
-/// ネストラムダの内側 param への参照も同様に拒否する(各レベルでパラメータ集合は
-/// 親レベルで bind されていた param より厳しくなる方向で増えるが、ここでは
-/// 「現在のラムダ param 集合」に絞って判定。外側 param は capture 経路で別途エラーになる)。
-fn forbid_old_capturing_lambda_param(
-    body: &ast::Expr,
-    lambda_params: &[&str],
-    diags: &mut Vec<Diagnostic>,
-    env: &Env,
-) {
-    fn refs_any(expr: &ast::Expr, names: &[&str]) -> bool {
-        match expr {
-            ast::Expr::Name { name, .. } => names.iter().any(|n| n == name),
-            ast::Expr::Field { base, .. } => refs_any(base, names),
-            ast::Expr::Call { callee, args, .. } => {
-                refs_any(callee, names) || args.iter().any(|a| refs_any(a, names))
-            }
-            ast::Expr::Unary { expr, .. } => refs_any(expr, names),
-            ast::Expr::Binary { lhs, rhs, .. } => refs_any(lhs, names) || refs_any(rhs, names),
-            ast::Expr::RecordLit { fields, .. } => fields
-                .iter()
-                .any(|f| f.value.as_ref().is_some_and(|v| refs_any(v, names))),
-            ast::Expr::Match {
-                scrutinee, arms, ..
-            } => refs_any(scrutinee, names) || arms.iter().any(|a| refs_any(&a.body, names)),
-            ast::Expr::ListLit { elements, .. } => elements.iter().any(|e| refs_any(e, names)),
-            // ネストラムダの中に `old(...)` があった場合は、その内側 lambda の検査時に
-            // 同じ helper が走るので、ここではスキップ(同じ違反を二重に出さない)。
-            ast::Expr::Lambda { .. } => false,
-            ast::Expr::Int { .. } | ast::Expr::Str { .. } | ast::Expr::Bool { .. } => false,
-        }
-    }
-    fn walk(expr: &ast::Expr, params: &[&str], diags: &mut Vec<Diagnostic>, env: &Env) {
+/// ネストラムダの中身は内側ラムダの check で個別に walk されるため、ここでは
+/// スキップ(同じ違反の二重発火回避)。
+fn forbid_old_inside_lambda_body(body: &ast::Expr, diags: &mut Vec<Diagnostic>, env: &Env) {
+    fn walk(expr: &ast::Expr, diags: &mut Vec<Diagnostic>, env: &Env) {
         match expr {
             ast::Expr::Call { callee, args, span } => {
                 if let ast::Expr::Name { name, .. } = callee.as_ref() {
-                    if name == "old" && args.len() == 1 && refs_any(&args[0], params) {
+                    if name == "old" {
                         env.push(
                             diags,
                             codes::CONTRACT_CONSTRUCT,
-                            "'old(...)' inside a lambda body may not reference a lambda parameter; 'old' captures the snapshot at function entry where the parameter does not yet exist".to_string(),
+                            "'old(...)' is not allowed inside a lambda body; 'old' is evaluated once at function entry, but lambda bodies are evaluated per element — the two time-frames do not align".to_string(),
                             *span,
                             vec![direction(
-                                "Move 'old(...)' outside the combinator, e.g. 'let snap = old(seed); xs.all(p => p > snap)'",
+                                "Lift 'old(...)' out of the lambda, e.g. 'let prev = old(seed); xs.all(p => p > prev)'",
                             )],
                         );
+                        // arg の中も走査しない: `old(...)` 自体が違反点で、入れ子の `old(old(x))`
+                        // を二重に報告しても情報量が増えない(外側 1 件で根本原因を示せる)。
                         return;
                     }
                 }
-                walk(callee, params, diags, env);
+                walk(callee, diags, env);
                 for a in args {
-                    walk(a, params, diags, env);
+                    walk(a, diags, env);
                 }
             }
-            ast::Expr::Field { base, .. } => walk(base, params, diags, env),
-            ast::Expr::Unary { expr, .. } => walk(expr, params, diags, env),
+            ast::Expr::Field { base, .. } => walk(base, diags, env),
+            ast::Expr::Unary { expr, .. } => walk(expr, diags, env),
             ast::Expr::Binary { lhs, rhs, .. } => {
-                walk(lhs, params, diags, env);
-                walk(rhs, params, diags, env);
+                walk(lhs, diags, env);
+                walk(rhs, diags, env);
             }
             ast::Expr::RecordLit { fields, .. } => {
                 for f in fields {
                     if let Some(v) = &f.value {
-                        walk(v, params, diags, env);
+                        walk(v, diags, env);
                     }
                 }
             }
             ast::Expr::Match {
                 scrutinee, arms, ..
             } => {
-                walk(scrutinee, params, diags, env);
-                for a in &arms.iter().collect::<Vec<_>>() {
-                    walk(&a.body, params, diags, env);
+                walk(scrutinee, diags, env);
+                for a in arms {
+                    walk(&a.body, diags, env);
                 }
             }
             ast::Expr::ListLit { elements, .. } => {
                 for e in elements {
-                    walk(e, params, diags, env);
+                    walk(e, diags, env);
                 }
             }
-            // ネストラムダ本体は外側の `forbid_old_capturing_lambda_param` 呼び出しの
-            // 対象ではない(内側ラムダの check で個別に処理される)。
+            // ネストラムダ本体は内側ラムダの check で別途 walk される(二重発火回避)。
             ast::Expr::Lambda { .. } => {}
             ast::Expr::Name { .. }
             | ast::Expr::Int { .. }
@@ -3603,7 +3605,7 @@ fn forbid_old_capturing_lambda_param(
             | ast::Expr::Bool { .. } => {}
         }
     }
-    walk(body, lambda_params, diags, env);
+    walk(body, diags, env);
 }
 
 /// 契約式の Kei ソース表記の**唯一の正規実装**(#32)。

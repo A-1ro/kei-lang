@@ -11,10 +11,10 @@
     "severity": "error",
     "span": {
       "end": {
-        "col": 37,
+        "col": 51,
         "line": 8
       },
-      "file": "tests/golden/check/err_contract_old_lambda_param.kei",
+      "file": "tests/golden/check/err_contract_old_lambda_nonparam.kei",
       "start": {
         "col": 27,
         "line": 8
