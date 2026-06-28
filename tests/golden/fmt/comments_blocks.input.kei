@@ -1,0 +1,42 @@
+module t.blocks
+
+// before record
+record Box {
+  // before width
+  width: Int  // trailing on width
+  height: Int
+}
+
+// before enum
+enum Color {
+  // unit variant comment
+  Red  // trailing on Red
+  Green
+}
+
+// before func with no clauses; brace on same line
+func area(b: Box) -> Int { // open brace trailing
+  // body leading
+  return b.width * b.height
+}
+
+// before func with uses + contracts
+func draw(b: Box) -> Bool
+  // before uses
+  uses IO  // trailing on uses
+  // before requires
+  requires b.width > 0  // trailing on requires
+  ensures result == true
+{
+  return true
+}
+
+// before if/else demo
+func classify(n: Int) -> String {
+  if n > 0 {
+    return "positive"
+  } // trailing on then close brace
+  else {
+    return "non-positive"
+  }
+}
