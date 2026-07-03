@@ -76,6 +76,35 @@ fn operator_precedence_rem_and_or_are_in_expected_tiers() {
 }
 
 #[test]
+fn operator_precedence_and_binds_tighter_than_or_and_weaker_than_cmp() {
+    // a || b && c == d は Or(a, And(b, Eq(c, d))) になること
+    // (&& は comparison より弱く || より強い)
+    let src = "func f(a: Bool, b: Bool, c: Int, d: Int) -> Bool {\n  return a || b && c == d\n}\n";
+    let result = kei_syntax::parse_module(src);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let Item::Func(f) = &result.module.items[0] else {
+        panic!("expected func");
+    };
+    let Stmt::Return(ret) = &f.body.stmts[0] else {
+        panic!("expected return");
+    };
+    let Some(Expr::Binary { op, lhs, rhs, .. }) = &ret.value else {
+        panic!("expected binary expr");
+    };
+    assert_eq!(*op, BinOp::Or);
+    assert!(matches!(**lhs, Expr::Name { .. }));
+    let Expr::Binary {
+        op: BinOp::And,
+        rhs: and_rhs,
+        ..
+    } = rhs.as_ref()
+    else {
+        panic!("expected and");
+    };
+    assert!(matches!(**and_rhs, Expr::Binary { op: BinOp::Eq, .. }));
+}
+
+#[test]
 fn record_literal_is_not_parsed_in_if_condition() {
     // if 条件では `{` はブロック開始であり record リテラルにならない
     let src =

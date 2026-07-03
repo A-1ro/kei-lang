@@ -211,11 +211,11 @@ func classify(u: User) -> String {
 比較   ==  !=  <  >  <=  >=
 算術   +  -  *  /  %         // / は 0 方向切り捨て、% は同じ商での剰余
 単項   -x  !x                // - は Int、! は Bool
-論理   ||  implies           // a implies b は「a ならば b」(= !a || b)
+論理   &&  ||  implies        // && は || より強く結合する。a implies b は「a ならば b」(= !a || b)
 その他 =(let束縛)  ->(戻り型)  .(アクセス)
 ```
 
-- **`&&` は存在しない。** 「かつ」は `requires` を複数並べるか `if` を入れ子にして表す。`&` を書くと `KEI-E0001 unexpected character`。
+- **`&&` は Bool 専用。** 優先順位は comparison より弱く `||` より強い(`a || b && c` = `a || (b && c)`)。短絡評価。
 
 ### module と import
 

@@ -230,6 +230,10 @@ impl Lexer {
                 self.bump();
                 TokenKind::OrOr
             }
+            '&' if two('&', self) => {
+                self.bump();
+                TokenKind::AndAnd
+            }
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '{' => TokenKind::LBrace,

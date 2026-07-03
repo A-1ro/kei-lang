@@ -287,6 +287,51 @@ fn or_and_remainder_emit_with_kei_int_semantics() {
 }
 
 #[test]
+fn and_emits_plain_conjunction() {
+    let out = emit(concat!(
+        "func f(a: Bool, b: Bool) -> Bool\n",
+        "{\n",
+        "  return a && b\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return a && b;"),
+        "unexpected TS:\n{}",
+        out.ts
+    );
+}
+
+#[test]
+fn and_binds_tighter_than_or_without_parens() {
+    let out = emit(concat!(
+        "func f(a: Bool, b: Bool, c: Bool) -> Bool\n",
+        "{\n",
+        "  return a || b && c\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return a || b && c;"),
+        "unexpected TS:\n{}",
+        out.ts
+    );
+}
+
+#[test]
+fn or_wrapped_in_parens_keeps_parens_before_and() {
+    let out = emit(concat!(
+        "func f(a: Bool, b: Bool, c: Bool) -> Bool\n",
+        "{\n",
+        "  return (a || b) && c\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return (a || b) && c;"),
+        "unexpected TS:\n{}",
+        out.ts
+    );
+}
+
+#[test]
 fn remainder_emits_plain_percent() {
     let out = emit(concat!(
         "module a.b\n",

@@ -58,6 +58,7 @@ pub enum TokenKind {
     Percent,
     Bang,
     OrOr,
+    AndAnd,
     // 構造
     Newline,
     /// `//` 行コメント。テキストは `//` の後ろの内容(末尾改行を含まない)。
@@ -149,6 +150,7 @@ impl TokenKind {
             TokenKind::Percent => "%",
             TokenKind::Bang => "!",
             TokenKind::OrOr => "||",
+            TokenKind::AndAnd => "&&",
             TokenKind::Module => "module",
             TokenKind::Import => "import",
             TokenKind::As => "as",

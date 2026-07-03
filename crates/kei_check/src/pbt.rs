@@ -817,6 +817,19 @@ fn eval_expr(
             },
             _ => Err(EvalError::Unsupported),
         },
+        ast::Expr::Binary {
+            op: ast::BinOp::And,
+            lhs,
+            rhs,
+            ..
+        } => match eval_expr(lhs, env, funcs, in_ensures, depth)? {
+            Value::Bool(false) => Ok(Value::Bool(false)),
+            Value::Bool(true) => match eval_expr(rhs, env, funcs, in_ensures, depth)? {
+                v @ Value::Bool(_) => Ok(v),
+                _ => Err(EvalError::Unsupported),
+            },
+            _ => Err(EvalError::Unsupported),
+        },
         ast::Expr::Binary { op, lhs, rhs, .. } => {
             let l = eval_expr(lhs, env, funcs, in_ensures, depth)?;
             let r = eval_expr(rhs, env, funcs, in_ensures, depth)?;
@@ -1147,7 +1160,7 @@ fn eval_binary(op: ast::BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
         (Gt, Int(a), Int(b)) => Ok(Bool(a > b)),
         (Le, Int(a), Int(b)) => Ok(Bool(a <= b)),
         (Ge, Int(a), Int(b)) => Ok(Bool(a >= b)),
-        // `Or` / `Implies` は eval_expr が短絡処理するためここには来ない(到達不能)。
+        // `And` / `Or` / `Implies` は eval_expr が短絡処理するためここには来ない(到達不能)。
         _ => Err(EvalError::Unsupported),
     }
 }
@@ -2186,6 +2199,30 @@ mod tests {
         assert!(
             diags.is_empty(),
             "guarded helper under a false antecedent must not be a counterexample: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn and_short_circuits_avoiding_division_trap() {
+        // `b != 0 && a / b > 0` は左辺が偽(b == 0)なら右辺(0 除算)を評価しない。
+        // 短絡しなければ b=0 が偽の trap 反例になってしまう。
+        let m = module(
+            "module t\n\nfunc f(a: Int, b: Int) -> Bool\n  ensures result == (b != 0 && a / b > 0)\n{\n  return b != 0 && a / b > 0\n}\n",
+        );
+        // 生成経路: b == 0 を含む全入力で trap による反例が出ない → f は generative。
+        let out = run_module(&m);
+        let f = out.iter().find(|o| o.func == "f").expect("f analyzed");
+        assert!(
+            f.passed,
+            "&& must short-circuit; b == 0 must not trap: {:?}",
+            f.counterexample
+        );
+        // シード経路: b = 0 でも trap にならない。
+        let src = "seeds for f {\n  input { a: 1, b: 0 }\n}\n";
+        let diags = check_seeds("t.seeds", src, &m, &mut []);
+        assert!(
+            diags.is_empty(),
+            "b == 0 under && must not be a counterexample: {diags:?}"
         );
     }
 

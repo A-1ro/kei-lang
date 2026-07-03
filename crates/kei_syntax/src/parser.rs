@@ -1153,13 +1153,29 @@ impl Parser {
     }
 
     fn parse_or(&mut self, no_struct: bool) -> Option<Expr> {
-        let mut lhs = self.parse_cmp(no_struct)?;
+        let mut lhs = self.parse_and(no_struct)?;
         while self.at(T::OrOr) {
+            self.bump();
+            let rhs = self.parse_and(no_struct)?;
+            let span = lhs.span().to(rhs.span());
+            lhs = Expr::Binary {
+                op: BinOp::Or,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        }
+        Some(lhs)
+    }
+
+    fn parse_and(&mut self, no_struct: bool) -> Option<Expr> {
+        let mut lhs = self.parse_cmp(no_struct)?;
+        while self.at(T::AndAnd) {
             self.bump();
             let rhs = self.parse_cmp(no_struct)?;
             let span = lhs.span().to(rhs.span());
             lhs = Expr::Binary {
-                op: BinOp::Or,
+                op: BinOp::And,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 span,

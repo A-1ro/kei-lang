@@ -1,0 +1,3 @@
+func bad(x: Int) -> Bool {
+  return x && true
+}

@@ -3510,10 +3510,15 @@ impl FnChecker<'_> {
                     lt
                 }
             }
-            Or | Implies => {
+            And | Or | Implies => {
                 for (t, e) in [(&lt, lhs), (&rt, rhs)] {
                     if !t.compatible(&Ty::Bool) {
-                        let op_text = if matches!(op, Or) { "||" } else { "implies" };
+                        let op_text = match op {
+                            And => "&&",
+                            Or => "||",
+                            Implies => "implies",
+                            _ => unreachable!(),
+                        };
                         self.push(
                             codes::TYPE_MISMATCH,
                             format!("'{op_text}' requires Bool operands, found '{t}'"),
@@ -3709,10 +3714,11 @@ pub fn contract_expr_text(e: &ast::Expr) -> String {
         match op {
             Implies => 0,
             Or => 1,
-            Eq | Ne => 2,
-            Lt | Gt | Le | Ge => 3,
-            Add | Sub => 4,
-            Mul | Div | Rem => 5,
+            And => 2,
+            Eq | Ne => 3,
+            Lt | Gt | Le | Ge => 4,
+            Add | Sub => 5,
+            Mul | Div | Rem => 6,
         }
     }
     fn bin_op_text(op: ast::BinOp) -> &'static str {
@@ -3729,11 +3735,12 @@ pub fn contract_expr_text(e: &ast::Expr) -> String {
             Mul => "*",
             Div => "/",
             Rem => "%",
+            And => "&&",
             Or => "||",
             Implies => "implies",
         }
     }
-    // 子が二項式で親より弱く結合するときだけ括弧で包む。Postfix は 6 相当。
+    // 子が二項式で親より弱く結合するときだけ括弧で包む。Postfix は 7 相当。
     fn child(e: &ast::Expr, parent: u8) -> String {
         let needs_paren = matches!(e, ast::Expr::Binary { op, .. } if bin_prec(*op) < parent);
         let text = contract_expr_text(e);

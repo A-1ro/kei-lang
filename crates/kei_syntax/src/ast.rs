@@ -387,6 +387,7 @@ pub enum BinOp {
     Mul,
     Div,
     Rem,
+    And,
     Or,
     Implies,
 }
