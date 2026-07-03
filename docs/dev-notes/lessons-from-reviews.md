@@ -151,3 +151,13 @@ CLAUDE.md に落として、ここからは削除してよい。
 - **Pattern**: Source of Truth 一覧の欠番を残さない
   **Source**: A-1ro (owner) — CLAUDE.md:18 (inline, CONFIRMED/correctness)
   **Lesson**: 新バージョンのロードマップを追加して CLAUDE.md の Source of Truth 一覧を編集する際は、既存の中間バージョン(例: `docs/kei-roadmap-v0.4.md`)への参照が抜け落ちていないか確認し、v0.3 → v0.5 のような欠番を作らない — 一覧に無いロードマップは次セッションのエージェントが /goal 契約の参照先を解決できなくなる。なお CLAUDE.md は auto-fix 除外パスのため、この種の修正は人間側で反映してもらう。
+
+## PR #103: feat: M28 論理積 && を追加 (#91) — 2026-07-03 (merge 未完了: base branch policy によりブロック、レビュー教訓のみ先行記録)
+
+- **Pattern**: Prec renumber は全 emit 呼び出し側へ波及
+  **Source**: A-1ro (owner) — crates/kei_check/src/check.rs (inline, CONFIRMED/correctness)
+  **Lesson**: `bin_prec` の優先順位を renumber したら(例: Mul 5→6)、同ファイル内の postfix 系 `child(…, N)` 呼び出し(base/callee/expr)も必ず新しい数値に更新する — 片方だけ更新すると `ensures result == -(a * b)` の契約テキスト描画で括弧が落ち、再パース時に別 AST になる表示忠実性 regression を生む。kei_fmt 側と kei_check 側の両方を grep して突き合わせること(PR #69 教訓の再発)。
+
+## PR #103: feat: M28 論理積 && を追加 (#91) — 2026-07-03 merged
+
+(merge 完了を確認 — 2026-07-03T10:53:07Z、admin squash merge。レビュー教訓「Prec renumber は全 emit 呼び出し側へ波及」は直上の先行記録セクションに記載済みのため重複追記なし。新規の actionable pattern なし)

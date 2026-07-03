@@ -304,3 +304,26 @@
 **Why this matters for HANDOFF.md**: リリース bump 時に「なぜまだ 0.4.x なのか」を将来のコントリビュータが迷わないための運用上の不変条件。
 **Draft entry** (lift verbatim if approved):
 > ロードマップ v0.5 の Milestone が全て閉じた時点で初めて 0.5.0 をタグする。途中イテレーションで v0.5 向け機能がマージされても、それは 0.4.x のパッチ/プレリリースとして bump する(`docs/kei-roadmap-v0.5.md` の「バージョン運用」)。版番号はロードマップの完了状態を表す契約であり、機能の所属版とは切り離す。
+
+## PR #103: feat: M28 論理積 && を追加 (#91) — merge 未完了 (2026-07-03 時点)
+
+(no design-decision candidates for this PR — `gh pr merge 103` は base branch policy により失敗し、PR は OPEN のまま。実際のマージ時に hook が再実行され候補を追記する)
+
+## PR #103: feat: M28 論理積 && を追加 (#91) — 2026-07-03 merged
+
+(前回の hook 実行時は base branch policy でマージ失敗と記録したが、今回 `--admin` squash マージが成功。以下が候補)
+
+### Candidate: contract_expr_text の優先順位はパーサ準拠(kei_emit の TS Prec と意図的に別物)
+**Why this matters for HANDOFF.md**: 片方に合わせて「統一」すると suggested_contract が再パースでズレて KEI-E2001 になる、という非対称の理由がコードコメントだけでは埋もれやすい。
+**Draft entry** (lift verbatim if approved):
+> `contract_expr_text`(kei_check)の `bin_prec` は **Kei パーサと同じ単一比較階層**(`==` と `<` 等が同レベル・左結合)を使う。kei_emit の TS 用 `Prec`(JS 準拠で relational > equality)とは**意図的に異なる**。ここをパーサとズラすと `result == b < c` のようなテキストが再パースで `(result == b) < c` に化け、suggested_contract が適用不能(KEI-E2001)になる。「emit と check で優先順位表を統一する」リファクタは禁止。
+
+### Candidate: PBT eval の `&&` / `||` / `implies` は短絡が意味論上の要件
+**Why this matters for HANDOFF.md**: 短絡しない実装でもほとんどのテストは通るが、`b != 0 && a / b > 0` で b=0 が偽の trap 反例になる — 壊れ方が静かで気づきにくい。
+**Draft entry** (lift verbatim if approved):
+> kei_check/pbt の `eval_expr` は `&&` / `||` / `implies` を `eval_short_circuit` で短絡評価する。`eval_binary` にこれらを到達させてはいけない(到達不能アーム)。短絡を外すと `b != 0 && a / b > 0` のようなガード付き契約で b=0 入力が 0 除算 trap の偽反例になる。回帰テスト: `and_short_circuits_avoiding_division_trap`。
+
+### Candidate: 単独 `&` は lexer エラーとして予約
+**Why this matters for HANDOFF.md**: 将来 `&`(ビット演算や参照)を導入する余地を残すための意図的なエラーで、単なる未実装ではない。
+**Draft entry** (lift verbatim if approved):
+> lexer は `&&` のみ受理し、単独の `&` は明示的にエラーにする(黙って無視や `&&` への補正はしない)。将来の `&` 系構文のために表面を予約する意図。
