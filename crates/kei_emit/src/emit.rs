@@ -300,6 +300,7 @@ impl<'a> RuntimeUses<'a> {
 enum Prec {
     Implication,
     Or,
+    And,
     Equality,
     Relational,
     Additive,
@@ -312,6 +313,7 @@ fn bin_prec(op: BinOp) -> Prec {
     match op {
         BinOp::Implies => Prec::Implication,
         BinOp::Or => Prec::Or,
+        BinOp::And => Prec::And,
         BinOp::Eq | BinOp::Ne => Prec::Equality,
         BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => Prec::Relational,
         BinOp::Add | BinOp::Sub => Prec::Additive,
@@ -332,6 +334,7 @@ fn ts_bin_op(op: BinOp) -> &'static str {
         BinOp::Mul => "*",
         BinOp::Div => "/",
         BinOp::Rem => "%",
+        BinOp::And => "&&",
         BinOp::Or => "||",
         BinOp::Implies => "||", // emit_binary が `!(lhs) || rhs` に展開する
     }
@@ -1147,7 +1150,8 @@ impl Emitter<'_> {
                 Prec::Relational => Prec::Additive,
                 Prec::Additive => Prec::Multiplicative,
                 Prec::Multiplicative => Prec::Unary,
-                Prec::Or => Prec::Equality,
+                Prec::Or => Prec::And,
+                Prec::And => Prec::Equality,
                 p => p,
             };
             self.emit_expr(rhs, rhs_min);

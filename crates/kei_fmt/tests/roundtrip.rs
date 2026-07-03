@@ -127,6 +127,7 @@ fn bin_op() -> impl Strategy<Value = BinOp> {
         Just(BinOp::Mul),
         Just(BinOp::Div),
         Just(BinOp::Rem),
+        Just(BinOp::And),
         Just(BinOp::Or),
         Just(BinOp::Implies),
     ]

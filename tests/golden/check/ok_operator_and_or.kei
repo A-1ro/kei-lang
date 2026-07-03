@@ -1,0 +1,6 @@
+func inRange(x: Int) -> Bool
+  requires x >= 0 && x < 100
+  ensures result == (x >= 0 && x < 100)
+{
+  return x >= 0 && x < 100
+}

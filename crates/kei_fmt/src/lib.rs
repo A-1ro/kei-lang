@@ -585,9 +585,10 @@ fn bin_prec(op: BinOp) -> u8 {
     match op {
         BinOp::Implies => 1,
         BinOp::Or => 2,
-        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => 3,
-        BinOp::Add | BinOp::Sub => 4,
-        BinOp::Mul | BinOp::Div | BinOp::Rem => 5,
+        BinOp::And => 3,
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => 4,
+        BinOp::Add | BinOp::Sub => 5,
+        BinOp::Mul | BinOp::Div | BinOp::Rem => 6,
     }
 }
 
@@ -605,6 +606,7 @@ fn bin_op_text(op: BinOp) -> &'static str {
         BinOp::Mul => "*",
         BinOp::Div => "/",
         BinOp::Rem => "%",
+        BinOp::And => "&&",
         BinOp::Or => "||",
     }
 }
@@ -612,20 +614,20 @@ fn bin_op_text(op: BinOp) -> &'static str {
 fn prec(expr: &Expr) -> u8 {
     match expr {
         Expr::Binary { op, .. } => bin_prec(*op),
-        Expr::Unary { .. } => 5,
-        Expr::Field { .. } | Expr::Call { .. } | Expr::RecordLit { .. } => 6,
+        Expr::Unary { .. } => 6,
+        Expr::Field { .. } | Expr::Call { .. } | Expr::RecordLit { .. } => 7,
         Expr::Int { .. }
         | Expr::Str { .. }
         | Expr::Bool { .. }
         | Expr::Name { .. }
         | Expr::Match { .. }
-        | Expr::ListLit { .. } => 7,
+        | Expr::ListLit { .. } => 8,
         // M25 / #59: ラムダは最弱結合(明示的に括弧で囲まないと演算子と曖昧)。
         // 実際の出現位置はコンビネータ引数 ` (...)` の中だけなので括弧は不要に倒れる。
         Expr::Lambda { .. } => 0,
         // [6]: パーサが既にエラーを報告済みの sentinel。整形は元位置の括弧と同じ強度に倒し、
         // 整形済みテキストは「(...)」風の最小プレースホルダーで返す(下の expr_text 側)。
-        Expr::Error { .. } => 7,
+        Expr::Error { .. } => 8,
     }
 }
 
@@ -644,13 +646,13 @@ fn expr_text(expr: &Expr, min_prec: u8, no_struct: bool, level: usize) -> String
         Expr::Bool { value, .. } => value.to_string(),
         Expr::Name { name, .. } => name.clone(),
         Expr::Field { base, name, .. } => {
-            format!("{}.{}", expr_text(base, 6, no_struct, level), name.name)
+            format!("{}.{}", expr_text(base, 7, no_struct, level), name.name)
         }
         Expr::Call { callee, args, .. } => {
             let args: Vec<String> = args.iter().map(|a| expr_text(a, 0, false, level)).collect();
             format!(
                 "{}({})",
-                expr_text(callee, 6, no_struct, level),
+                expr_text(callee, 7, no_struct, level),
                 args.join(", ")
             )
         }
@@ -659,7 +661,7 @@ fn expr_text(expr: &Expr, min_prec: u8, no_struct: bool, level: usize) -> String
                 UnaryOp::Neg => "-",
                 UnaryOp::Not => "!",
             };
-            format!("{}{}", op, expr_text(expr, 6, no_struct, level))
+            format!("{}{}", op, expr_text(expr, 7, no_struct, level))
         }
         Expr::Binary { op, lhs, rhs, .. } => {
             let p = bin_prec(*op);

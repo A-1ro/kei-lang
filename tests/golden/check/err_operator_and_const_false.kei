@@ -1,0 +1,7 @@
+module contracts.operator_and_const_false
+
+func neverCallable(count: Int) -> Int
+  requires true && false
+{
+  return count
+}

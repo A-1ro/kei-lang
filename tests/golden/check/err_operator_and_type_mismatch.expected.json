@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Use Bool expressions"
+      }
+    ],
+    "message": "'&&' requires Bool operands, found 'Int'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 11,
+        "line": 2
+      },
+      "file": "tests/golden/check/err_operator_and_type_mismatch.kei",
+      "start": {
+        "col": 10,
+        "line": 2
+      }
+    }
+  }
+]
