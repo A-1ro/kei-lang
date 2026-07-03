@@ -161,3 +161,7 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #103: feat: M28 論理積 && を追加 (#91) — 2026-07-03 merged
 
 (merge 完了を確認 — 2026-07-03T10:53:07Z、admin squash merge。レビュー教訓「Prec renumber は全 emit 呼び出し側へ波及」は直上の先行記録セクションに記載済みのため重複追記なし。新規の actionable pattern なし)
+
+## PR #105: chore: bump version to 0.4.3 — 2026-07-03 merged
+
+(no actionable patterns — version bump PR, no inline comments / discussion / reviews)

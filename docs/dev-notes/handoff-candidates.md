@@ -327,3 +327,7 @@
 **Why this matters for HANDOFF.md**: 将来 `&`(ビット演算や参照)を導入する余地を残すための意図的なエラーで、単なる未実装ではない。
 **Draft entry** (lift verbatim if approved):
 > lexer は `&&` のみ受理し、単独の `&` は明示的にエラーにする(黙って無視や `&&` への補正はしない)。将来の `&` 系構文のために表面を予約する意図。
+
+## PR #105: chore: bump version to 0.4.3 — 2026-07-03 merged
+
+(no design-decision candidates for this PR)
