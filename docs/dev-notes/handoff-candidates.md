@@ -292,3 +292,15 @@
 ## PR #88: chore(deps): bump the npm-minor-patch group across 3 directories with 2 updates — 2026-07-03 merged
 
 (no design-decision candidates for this PR)
+
+## PR #102: docs: v0.5 ロードマップ + v1.0 到達戦略(Workers + Hono API) — 2026-07-03 merged
+
+### Candidate: v1.0 受け入れ基準からの逆算がロードマップの最上位判断軸
+**Why this matters for HANDOFF.md**: 今後の機能の取捨選択(何を v0.5 に入れ、何を後回しにするか)の「なぜ」が、この単一の受け入れ基準への逆算で決まっている。
+**Draft entry** (lift verbatim if approved):
+> v0.5 以降のロードマップは「v1.0 = Cloudflare Workers に Hono を使用した API としてデプロイできること」という単一の受け入れ基準から逆算して構成した(`docs/kei-roadmap-v0.5.md`)。欠落を blocker 層(async / npm import / HTTP 境界 → v0.6〜v0.8)・stdlib 層(v0.5)・検証経路層(v0.5)の3層に分けたのは、言語設計判断(🤝)を含むものを後ろに寄せ、既存機構の自然な拡張(`&&` / `List.contains` / 文字列 stdlib)を先頭に置くため。機能要望の優先度で迷ったら、この受け入れ基準に効くかどうかで判断する。
+
+### Candidate: バージョンタグ運用(0.5.0 はロードマップ完了時、途中は 0.4.x)
+**Why this matters for HANDOFF.md**: リリース bump 時に「なぜまだ 0.4.x なのか」を将来のコントリビュータが迷わないための運用上の不変条件。
+**Draft entry** (lift verbatim if approved):
+> ロードマップ v0.5 の Milestone が全て閉じた時点で初めて 0.5.0 をタグする。途中イテレーションで v0.5 向け機能がマージされても、それは 0.4.x のパッチ/プレリリースとして bump する(`docs/kei-roadmap-v0.5.md` の「バージョン運用」)。版番号はロードマップの完了状態を表す契約であり、機能の所属版とは切り離す。

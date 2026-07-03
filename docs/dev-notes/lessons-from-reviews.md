@@ -145,3 +145,9 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #88: chore(deps): bump the npm-minor-patch group across 3 directories with 2 updates — 2026-07-03 merged
 
 (no actionable patterns — dependabot dependency bump, no reviews or discussion)
+
+## PR #102: docs: v0.5 ロードマップ + v1.0 到達戦略(Workers + Hono API) — 2026-07-03 merged
+
+- **Pattern**: Source of Truth 一覧の欠番を残さない
+  **Source**: A-1ro (owner) — CLAUDE.md:18 (inline, CONFIRMED/correctness)
+  **Lesson**: 新バージョンのロードマップを追加して CLAUDE.md の Source of Truth 一覧を編集する際は、既存の中間バージョン(例: `docs/kei-roadmap-v0.4.md`)への参照が抜け落ちていないか確認し、v0.3 → v0.5 のような欠番を作らない — 一覧に無いロードマップは次セッションのエージェントが /goal 契約の参照先を解決できなくなる。なお CLAUDE.md は auto-fix 除外パスのため、この種の修正は人間側で反映してもらう。
