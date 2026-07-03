@@ -137,3 +137,11 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #84 (issue-check re-run): post-merge-lessons PostToolUse — 2026-06-29
 
 (no actionable patterns — hook triggered by Bash tool call checking issue states (`gh issue view` loop for issues #54–#62), not by `gh pr merge`; most recent merged PR #84 already documented above)
+
+## PR #87: chore(deps): bump lsp-server from 0.7.9 to 0.8.0 — 2026-07-03 merged
+
+(no actionable patterns — dependabot dependency bump, no reviews or discussion)
+
+## PR #88: chore(deps): bump the npm-minor-patch group across 3 directories with 2 updates — 2026-07-03 merged
+
+(no actionable patterns — dependabot dependency bump, no reviews or discussion)

@@ -284,3 +284,11 @@
 **Why this matters for HANDOFF.md**: spec §2.1–§2.3 の例に登場する `Money` や `core.money` が実際には存在しないことを知らないと、実プロジェクトでこれをインポートしようとしてコンパイルエラーに悩む。
 **Draft entry** (lift verbatim if approved):
 > M26(#61 / v0.4)で `spec/kei-spec-v0.1.md §2.4` に明記: `Money` / `core.money` は spec §2.1–§2.3 の例で登場する **説明用の架空型・架空モジュール** であり、stdlib に実装されていない。実プロジェクトでは (a) `Int`(最小通貨単位)をそのまま使う、または (b) `type Money = Int tagged "Money"` を自前定義する。`Money.zero` のような静的メンバアクセスは Kei 構文にないため `Money(0)` で構築すること。`examples/contracts/withdraw.kei` と `examples/effects/transfer.kei` は架空 Money 例として残り、e2e は `tests/e2e/stubs/core/money.ts` の差し替えで動く — 実装プロジェクトのひな型としては使わないこと。固定小数点(`Decimal`)と `core.money` の実在化は v0.5+ で別途検討予定。
+
+## PR #87: chore(deps): bump lsp-server from 0.7.9 to 0.8.0 — 2026-07-03 merged
+
+(no design-decision candidates for this PR)
+
+## PR #88: chore(deps): bump the npm-minor-patch group across 3 directories with 2 updates — 2026-07-03 merged
+
+(no design-decision candidates for this PR)
