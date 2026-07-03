@@ -451,6 +451,7 @@ fn const_eval(expr: &ast::Expr) -> Option<ConstVal> {
                 // 文字列定数の等値比較(`requires "a" == "b"` 等の恒偽/恒真を畳む。M17 / #35)。
                 (Eq, ConstVal::Str(a), ConstVal::Str(b)) => Some(ConstVal::Bool(a == b)),
                 (Ne, ConstVal::Str(a), ConstVal::Str(b)) => Some(ConstVal::Bool(a != b)),
+                (And, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a && b)),
                 (Or, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a || b)),
                 (Implies, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(!a || b)),
                 _ => None,
@@ -3513,12 +3514,7 @@ impl FnChecker<'_> {
             And | Or | Implies => {
                 for (t, e) in [(&lt, lhs), (&rt, rhs)] {
                     if !t.compatible(&Ty::Bool) {
-                        let op_text = match op {
-                            And => "&&",
-                            Or => "||",
-                            Implies => "implies",
-                            _ => unreachable!(),
-                        };
+                        let op_text = bin_op_text(op);
                         self.push(
                             codes::TYPE_MISMATCH,
                             format!("'{op_text}' requires Bool operands, found '{t}'"),
@@ -3702,45 +3698,50 @@ fn forbid_old_inside_lambda_body(body: &ast::Expr, diags: &mut Vec<Diagnostic>, 
     walk(body, diags, env);
 }
 
+/// 二項演算子の Kei ソース表記(`contract_expr_text` と型検査の診断メッセージで共有する)。
+fn bin_op_text(op: ast::BinOp) -> &'static str {
+    use ast::BinOp::*;
+    match op {
+        Eq => "==",
+        Ne => "!=",
+        Lt => "<",
+        Gt => ">",
+        Le => "<=",
+        Ge => ">=",
+        Add => "+",
+        Sub => "-",
+        Mul => "*",
+        Div => "/",
+        Rem => "%",
+        And => "&&",
+        Or => "||",
+        Implies => "implies",
+    }
+}
+
 /// 契約式の Kei ソース表記の**唯一の正規実装**(#32)。
 ///
 /// `CheckReport.contracts[].expr`(検証レポート)と実行時 `KeiContractViolation.condition`
 /// は**バイト一致が要件**。後者を生成する `kei_emit` はこの関数へ委譲するため、優先順位表・
 /// 結合方向・文字列エスケープを二重実装しない(片方だけ変えてサイレント乖離する事故を構造的に防ぐ)。
 pub fn contract_expr_text(e: &ast::Expr) -> String {
-    // kei_emit と同じ優先順位(Equality < Relational)。括弧を最小化する。
+    // Kei パーサと同じ優先順位(比較は単一階層。kei_emit の TS 用 Prec とは意図的に
+    // 異なる — JS は relational > equality だが Kei テキストはパーサの読みと一致させる)。
+    // パーサ(parse_cmp)は `==` と `<` 等を同一ループ・単一左結合階層で読むため、ここで
+    // 別階層に分けると `result == b < c` を再パースしたときに `(result == b) < c` へ
+    // ズレて suggested_contract が適用不能になる(KEI-E2001)。括弧を最小化する。
     fn bin_prec(op: ast::BinOp) -> u8 {
         use ast::BinOp::*;
         match op {
             Implies => 0,
             Or => 1,
             And => 2,
-            Eq | Ne => 3,
-            Lt | Gt | Le | Ge => 4,
-            Add | Sub => 5,
-            Mul | Div | Rem => 6,
+            Eq | Ne | Lt | Gt | Le | Ge => 3,
+            Add | Sub => 4,
+            Mul | Div | Rem => 5,
         }
     }
-    fn bin_op_text(op: ast::BinOp) -> &'static str {
-        use ast::BinOp::*;
-        match op {
-            Eq => "==",
-            Ne => "!=",
-            Lt => "<",
-            Gt => ">",
-            Le => "<=",
-            Ge => ">=",
-            Add => "+",
-            Sub => "-",
-            Mul => "*",
-            Div => "/",
-            Rem => "%",
-            And => "&&",
-            Or => "||",
-            Implies => "implies",
-        }
-    }
-    // 子が二項式で親より弱く結合するときだけ括弧で包む。Postfix は 7 相当。
+    // 子が二項式で親より弱く結合するときだけ括弧で包む。Postfix は最大 bin_prec(Mul=5)+1 の 6 相当。
     fn child(e: &ast::Expr, parent: u8) -> String {
         let needs_paren = matches!(e, ast::Expr::Binary { op, .. } if bin_prec(*op) < parent);
         let text = contract_expr_text(e);
@@ -3995,6 +3996,46 @@ mod tests {
         assert_eq!(
             verification_of(&requires_expr("x > 0")),
             Verification::Runtime
+        );
+    }
+
+    /// `contract_expr_text(source)` の結果を返す。`requires_expr` と違い、比較・算術・
+    /// 論理演算子を混在させたテストのために任意個のパラメータを許す。
+    fn contract_text(params: &[&str], src: &str) -> String {
+        let param_list = params
+            .iter()
+            .map(|p| format!("{p}: Int"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let module = kei_syntax::parse_module(&format!(
+            "module t\n\nfunc f({param_list}) -> Int\n  requires {src}\n{{\n  return 0\n}}\n"
+        ));
+        assert!(
+            module.errors.is_empty(),
+            "test contract must parse: {:?}",
+            module.errors
+        );
+        let ast::Item::Func(f) = &module.module.items[0] else {
+            panic!("expected a function item");
+        };
+        contract_expr_text(&f.requires[0])
+    }
+
+    #[test]
+    fn contract_expr_text_parenthesization() {
+        // (a) 比較演算子はパーサと同一の単一階層(タスク2): Eq の rhs にある Lt は
+        // 同優先度なので、左結合の非対称ルール(rhs_min = p + 1)により括弧が必要。
+        assert_eq!(
+            contract_text(&["result", "b", "c"], "result == (b < c)"),
+            "result == (b < c)"
+        );
+        // (b) postfix 閾値の退行修正(タスク3): Unary の子が Rem(Mul 相当)のときも
+        // 括弧を保つ。
+        assert_eq!(contract_text(&["a", "b"], "-(a % b)"), "-(a % b)");
+        // (c) Or/And は正しい優先順位(And > Or)なので、変更不要なら括弧なしで描画される。
+        assert_eq!(
+            contract_text(&["a", "b", "c"], "a || b && c"),
+            "a || b && c"
         );
     }
 }

@@ -765,6 +765,30 @@ fn eval_block_opt(
     Ok(None)
 }
 
+/// `implies` / `||` / `&&` の短絡評価を共有する。`short_circuit_on` に lhs が一致したら
+/// rhs を評価せず `short_circuit_value` を返し、一致しなければ rhs を評価してその値を返す
+/// (lhs が Bool 以外、または rhs が Bool 以外なら `Unsupported`)。
+fn eval_short_circuit(
+    lhs: &ast::Expr,
+    rhs: &ast::Expr,
+    env: &HashMap<String, Value>,
+    funcs: &HashMap<&str, &ast::FuncDecl>,
+    in_ensures: bool,
+    depth: usize,
+    // (lhs がこの値に一致したら短絡する, その場合に返す結果)
+    short_circuit: (bool, bool),
+) -> Result<Value, EvalError> {
+    let (short_circuit_on, short_circuit_value) = short_circuit;
+    match eval_expr(lhs, env, funcs, in_ensures, depth)? {
+        Value::Bool(b) if b == short_circuit_on => Ok(Value::Bool(short_circuit_value)),
+        Value::Bool(_) => match eval_expr(rhs, env, funcs, in_ensures, depth)? {
+            v @ Value::Bool(_) => Ok(v),
+            _ => Err(EvalError::Unsupported),
+        },
+        _ => Err(EvalError::Unsupported),
+    }
+}
+
 fn eval_expr(
     e: &ast::Expr,
     env: &HashMap<String, Value>,
@@ -796,40 +820,19 @@ fn eval_expr(
             lhs,
             rhs,
             ..
-        } => match eval_expr(lhs, env, funcs, in_ensures, depth)? {
-            Value::Bool(false) => Ok(Value::Bool(true)),
-            Value::Bool(true) => match eval_expr(rhs, env, funcs, in_ensures, depth)? {
-                v @ Value::Bool(_) => Ok(v),
-                _ => Err(EvalError::Unsupported),
-            },
-            _ => Err(EvalError::Unsupported),
-        },
+        } => eval_short_circuit(lhs, rhs, env, funcs, in_ensures, depth, (false, true)),
         ast::Expr::Binary {
             op: ast::BinOp::Or,
             lhs,
             rhs,
             ..
-        } => match eval_expr(lhs, env, funcs, in_ensures, depth)? {
-            Value::Bool(true) => Ok(Value::Bool(true)),
-            Value::Bool(false) => match eval_expr(rhs, env, funcs, in_ensures, depth)? {
-                v @ Value::Bool(_) => Ok(v),
-                _ => Err(EvalError::Unsupported),
-            },
-            _ => Err(EvalError::Unsupported),
-        },
+        } => eval_short_circuit(lhs, rhs, env, funcs, in_ensures, depth, (true, true)),
         ast::Expr::Binary {
             op: ast::BinOp::And,
             lhs,
             rhs,
             ..
-        } => match eval_expr(lhs, env, funcs, in_ensures, depth)? {
-            Value::Bool(false) => Ok(Value::Bool(false)),
-            Value::Bool(true) => match eval_expr(rhs, env, funcs, in_ensures, depth)? {
-                v @ Value::Bool(_) => Ok(v),
-                _ => Err(EvalError::Unsupported),
-            },
-            _ => Err(EvalError::Unsupported),
-        },
+        } => eval_short_circuit(lhs, rhs, env, funcs, in_ensures, depth, (false, false)),
         ast::Expr::Binary { op, lhs, rhs, .. } => {
             let l = eval_expr(lhs, env, funcs, in_ensures, depth)?;
             let r = eval_expr(rhs, env, funcs, in_ensures, depth)?;
