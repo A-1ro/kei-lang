@@ -1086,7 +1086,7 @@ impl Emitter<'_> {
                     }
                     // contains(item) → includes(item)(Array.prototype.includes は
                     // SameValueZero 比較。Kei の等値対象=スカラーでは === と一致する)。
-                    "contains" if args.len() == 1 => {
+                    "contains" => {
                         self.emit_expr(base, Prec::Postfix);
                         self.out.frag(".includes(");
                         self.emit_expr(&args[0], Prec::Implication);
