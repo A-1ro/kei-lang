@@ -1,0 +1,11 @@
+module ok.list_contains
+
+func hasQty(items: List<Int>, target: Int) -> Bool
+  ensures result == items.contains(target)
+{
+  return items.contains(target)
+}
+
+func containsName(names: List<String>, name: String) -> Bool {
+  return names.contains(name)
+}

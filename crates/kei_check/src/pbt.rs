@@ -994,6 +994,15 @@ fn eval_list_method(
             // Unsupported に倒す(get を使う関数は generative に上げない)。
             Err(EvalError::Unsupported)
         }
+        "contains" => {
+            // check がスカラー要素限定(is_equatable)にしているので、ここに来る xs は
+            // すべて Value の PartialEq(手書き実装)で比較できる。
+            if args.len() != 1 {
+                return Err(EvalError::Unsupported);
+            }
+            let v = eval_expr(&args[0], env, funcs, in_ensures, depth)?;
+            Ok(Value::Bool(xs.iter().any(|x| x == &v)))
+        }
         "all" | "any" | "map" | "filter" => {
             if args.len() != 1 {
                 return Err(EvalError::Unsupported);

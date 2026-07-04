@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2010",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Use 'xs.any(e => ...)' to compare scalar fields instead"
+      }
+    ],
+    "message": "equality is not supported on 'Item'; 'contains' compares scalars only (Int, String, Bool, and tagged scalars)",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 32,
+        "line": 8
+      },
+      "file": "tests/golden/check/err_list_contains_record.kei",
+      "start": {
+        "col": 10,
+        "line": 8
+      }
+    }
+  }
+]

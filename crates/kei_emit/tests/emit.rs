@@ -402,6 +402,20 @@ fn list_combinators_emit_to_array_methods() {
     );
 }
 
+#[test]
+fn list_contains_emits_to_includes() {
+    let out = emit(concat!(
+        "func hasIt(xs: List<Int>, target: Int) -> Bool {\n",
+        "  return xs.contains(target)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("xs.includes(target)"),
+        "contains → includes: {}",
+        out.ts
+    );
+}
+
 /// 回帰(PR #50 再レビュー P2): レコードが `isEmpty` フィールドを持っても、フィールド
 /// アクセス `bag.isEmpty` は書き換えない(`.length === 0` への誤写を防ぐ)。List の
 /// `xs.isEmpty()` はメソッド形なので衝突せず `.length === 0` に写る。

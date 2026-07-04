@@ -98,6 +98,7 @@ let empty = List<Int>()     // 空リスト(未実装 — フォローアップ)
 | `fold` | メソッド | `List<T>.fold(init: U, f: (U, T) -> U) -> U` | 左畳み込み |
 | `all` | メソッド | `List<T>.all(pred: (T) -> Bool) -> Bool` | 全要素が述語を満たすか(空なら真) |
 | `any` | メソッド | `List<T>.any(pred: (T) -> Bool) -> Bool` | いずれかの要素が述語を満たすか(空なら偽) |
+| `contains` | メソッド | `List<T>.contains(item: T) -> Bool` | 要素に `item` と等しいものがあるか(`T` が等値比較可能なスカラーのときのみ。M29 / #92) |
 
 これ以上は段階1に入れない(`reduce` / `flatMap` / `zip` / `take` 等は必要性が出てから別途)。
 
@@ -125,6 +126,7 @@ let empty = List<Int>()     // 空リスト(未実装 — フォローアップ)
 
 - `xs.length`(`Int`)、`xs.isEmpty()`(`Bool`)
 - `xs.all(pred)` / `xs.any(pred)` の結果(`Bool`)。`pred` は名前付き純粋関数。
+- `xs.contains(item)` の結果(`Bool`)。`item` は要素型と互換で、要素型は等値比較可能なスカラー限定(§5.1)。
 - `result.length` / `old(xs).length`(`ensures` 内、§4 と既存の `result` / `old` 規則のまま)
 
 書ける契約の例(段階1の範囲):
@@ -158,6 +160,11 @@ tagged 型)。`List<T>`・`Option<T>`・`Result<T, E>`・レコード・enum な
 要素を取り出して契約に使いたいときは、`xs.get(i)` の戻り(`Option<T>`)を直接
 `==` で比べず、長さや述語(`all` / `any`)、あるいはスカラー化したフィールドで
 表す。構造等価そのものの言語サポートは将来課題(導入時にこの制限を緩める)。
+
+`xs.contains(item)`(M29 / #92)も同じ制約を継承する。`List<T>` の `T` が
+record / enum / List など合成型のときは `KEI-E2010`(`==` と同一コード)で拒否し、
+`xs.any(e => ...)` でスカラーフィールドを比較する方向へ誘導する(構造等価の
+言語サポートが入るまでの回避策も `==` と共通)。
 
 ## 6. 段階2(将来): 量化契約 `forall` / `exists`
 
@@ -199,6 +206,7 @@ func planAllReorders(products: List<Product>, targetLevel: Int) -> List<ReorderP
 | `xs.get(i)` | `keiListGet(xs, i)`(範囲外 `None` を返す `@kei/runtime` ヘルパー) |
 | `xs.map(f)` / `xs.filter(p)` / `xs.fold(z, f)` | `xs.map(f)` / `xs.filter(p)` / `xs.reduce(f, z)`(`fold` は引数順が逆) |
 | `xs.all(p)` / `xs.any(p)` | `xs.every(p)` / `xs.some(p)` |
+| `xs.contains(item)` | `xs.includes(item)`(`Array.prototype.includes` は SameValueZero 比較。Kei の等値対象=Int/String/Bool のスカラーでは `===` と一致するため構造的に安全) |
 
 > **`get` はランタイムヘルパー方式を採用した。** `@kei/runtime` に `keiListGet<T>(xs, i): Option<T>`
 > を追加(emit 展開だと添字式を 2 回評価する懸念があるため)。

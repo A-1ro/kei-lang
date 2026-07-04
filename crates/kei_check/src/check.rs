@@ -1753,7 +1753,7 @@ impl FnChecker<'_> {
             // レコードは呼べるフィールドを持てない(検査が弾く)ので衝突しない。
             Ty::List(_) => match name.name.as_str() {
                 "length" => Ty::Int,
-                "isEmpty" | "get" | "map" | "filter" | "fold" | "all" | "any" => {
+                "isEmpty" | "get" | "map" | "filter" | "fold" | "all" | "any" | "contains" => {
                     let m = name.name.clone();
                     self.push(
                         codes::UNKNOWN_FIELD,
@@ -1766,6 +1766,7 @@ impl FnChecker<'_> {
                 _ => {
                     let members = [
                         "length", "isEmpty", "get", "map", "filter", "fold", "all", "any",
+                        "contains",
                     ];
                     let fix = match suggestion(&name.name, members.iter().copied()) {
                         Some(s) => {
@@ -2097,6 +2098,32 @@ impl FnChecker<'_> {
                 }
                 Ty::Bool
             }
+            // contains(item: T) -> Bool。要素が等値比較可能なスカラーのときだけ許す
+            // (KEI-E2010 と同じ制約。spec v0.3-collections §5.1 / M29)。emit は
+            // Array.prototype.includes(SameValueZero) に写す。
+            "contains" => {
+                if !self.expect_arity(&method.name, 1, args, span) {
+                    return Ty::Bool;
+                }
+                let at = self.infer(&args[0]);
+                if !at.compatible(elem) {
+                    self.check_assign(elem, &at, args[0].span());
+                } else if !elem.is_equatable() {
+                    let bad = elem.clone();
+                    self.push(
+                        codes::UNSUPPORTED_EQUALITY,
+                        format!(
+                            "equality is not supported on '{bad}'; 'contains' compares scalars \
+                             only (Int, String, Bool, and tagged scalars)"
+                        ),
+                        span,
+                        vec![direction(
+                            "Use 'xs.any(e => ...)' to compare scalar fields instead",
+                        )],
+                    );
+                }
+                Ty::Bool
+            }
             // isEmpty(引数なしメソッド)-> Bool。空か。emit 衝突回避のためメソッド形
             // (`xs.isEmpty()`)で持つ(field_on のコメント参照)。
             "isEmpty" => {
@@ -2121,7 +2148,7 @@ impl FnChecker<'_> {
             }
             other => {
                 let members = [
-                    "length", "isEmpty", "get", "map", "filter", "fold", "all", "any",
+                    "length", "isEmpty", "get", "map", "filter", "fold", "all", "any", "contains",
                 ];
                 let fix = match suggestion(other, members.iter().copied()) {
                     Some(s) => {
