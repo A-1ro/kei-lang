@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Concatenate using the underlying String values first, then rebuild via the tagged constructor: e.g. 'TagName(base1 + base2)'"
+      }
+    ],
+    "message": "'+' cannot concatenate tagged String types directly (found 'ProductId' and 'ProductId')",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 15,
+        "line": 6
+      },
+      "file": "tests/golden/check/err_string_concat_tagged.kei",
+      "start": {
+        "col": 10,
+        "line": 6
+      }
+    }
+  }
+]

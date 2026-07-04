@@ -940,44 +940,18 @@ fn eval_expr(
         }
         ast::Expr::Field { base, name, .. } => {
             let v = eval_expr(base, env, funcs, in_ensures, depth)?;
-            match v {
+            // tagged で包まれた値も underlying と同等に扱う(eval_binary と同じ入口アンラップ。
+            // PR #76 review 由来。List/String の `length` も Record フィールドも一本化)。
+            match unwrap_tagged(&v) {
                 Value::Record { fields, .. } => fields
                     .iter()
                     .find(|(n, _)| n == &name.name)
                     .map(|(_, val)| val.clone())
                     .ok_or(EvalError::Unsupported),
-                // List のフィールドアクセスは現状 `length` のみ(契約での `result.length` 等)。
-                // PR #76 review: tagged で包まれた List も同じく拾う。
                 Value::List(xs) if name.name == "length" => Ok(Value::Int(xs.len() as i64)),
-                Value::Tagged(_, inner)
-                    if matches!(*inner, Value::List(_)) && name.name == "length" =>
-                {
-                    if let Value::List(xs) = *inner {
-                        Ok(Value::Int(xs.len() as i64))
-                    } else {
-                        unreachable!()
-                    }
-                }
                 Value::Str(s) if name.name == "length" => {
                     Ok(Value::Int(s.encode_utf16().count() as i64))
                 }
-                Value::Tagged(_, inner)
-                    if matches!(*inner, Value::Str(_)) && name.name == "length" =>
-                {
-                    if let Value::Str(s) = *inner {
-                        Ok(Value::Int(s.encode_utf16().count() as i64))
-                    } else {
-                        unreachable!()
-                    }
-                }
-                Value::Tagged(_, inner) => match *inner {
-                    Value::Record { fields, .. } => fields
-                        .iter()
-                        .find(|(n, _)| n == &name.name)
-                        .map(|(_, val)| val.clone())
-                        .ok_or(EvalError::Unsupported),
-                    _ => Err(EvalError::Unsupported),
-                },
                 _ => Err(EvalError::Unsupported),
             }
         }

@@ -127,8 +127,10 @@ func totalStockValue(products: List<Product>) -> Int
 `String` は不変の UTF-16 シーケンス(TS の `string` に写る)。
 
 - `String + String -> String`(連結)。混在(`Int + String` 等)は型不一致(`KEI-E2001`)で拒否する。
+  tagged String(`type X = String tagged "X"`)同士、または tagged String と素の String の連結も `+` では不可(`KEI-E2001`)。基底 String で連結してからコンストラクタで再構築すること。
 - `s.length -> Int`(プロパティ)。UTF-16 code unit 長(V8 の `String.prototype.length` と同一。サロゲートペアは 2 として数える)。
 - `s.toInt() -> Option<Int>`(メソッド、引数0)。`^-?[0-9]+$` に一致し、かつ安全整数範囲(`Number.isSafeInteger`)に収まる文字列だけ `Some(n)`。それ以外(空文字・符号のみ・小数点・桁あふれ等)は `None`。
+  `toInt()` を含む式は `kei check --generative`(PBT 生成、spec-v0.2 §5)の bounded 評価器が Option 値を未サポートのため評価不能扱いとなり、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 で追跡)。
 - `n.toString() -> String`(`Int` のメソッド、引数0)。10進表記の文字列を返す。
 
 いずれも純粋で副作用を持たず、`requires` / `ensures` 内でも使える。

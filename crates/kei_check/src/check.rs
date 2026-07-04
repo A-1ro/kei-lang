@@ -57,6 +57,9 @@ const LIST_BUILTIN_METHODS: &[&str] = &[
 /// String の未知メンバー診断の did-you-mean 候補(field_on / string_method で共有)。
 const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt"];
 
+/// Int の未知メンバー診断の did-you-mean 候補(field_on / int_method で共有)。
+const INT_BUILTIN_MEMBERS: &[&str] = &["toString"];
+
 /// 検査オプション(M16 / #44)。既定はすべて off で、`check_module` /
 /// `check_module_report` の従来挙動を保つ。strict 系はすべて**オプトイン**で、
 /// 既存の golden を壊さない段階移行のための辺。
@@ -1839,12 +1842,13 @@ impl FnChecker<'_> {
                     Ty::Unknown
                 }
                 _ => {
-                    let fix = match suggestion(&name.name, ["toString"]) {
+                    let members = INT_BUILTIN_MEMBERS;
+                    let fix = match suggestion(&name.name, members.iter().copied()) {
                         Some(s) => {
                             self.env
                                 .replace_fix(format!("Did you mean '{s}'?"), name.span, &s)
                         }
-                        None => direction("Use one of: toString".to_string()),
+                        None => direction(format!("Use one of: {}", members.join(", "))),
                     };
                     self.push(
                         codes::UNKNOWN_FIELD,
@@ -2291,7 +2295,7 @@ impl FnChecker<'_> {
                     vec![fix],
                 );
                 for a in args {
-                    self.infer(a);
+                    self.check_combinator_arg_for_body_diags(a);
                 }
                 Ty::Unknown
             }
@@ -2312,12 +2316,13 @@ impl FnChecker<'_> {
                 Ty::Str
             }
             other => {
-                let fix = match suggestion(other, ["toString"]) {
+                let members = INT_BUILTIN_MEMBERS;
+                let fix = match suggestion(other, members.iter().copied()) {
                     Some(s) => {
                         self.env
                             .replace_fix(format!("Did you mean '{s}'?"), method.span, &s)
                     }
-                    None => direction("Use one of: toString".to_string()),
+                    None => direction(format!("Use one of: {}", members.join(", "))),
                 };
                 self.push(
                     codes::UNKNOWN_FIELD,
@@ -2326,7 +2331,7 @@ impl FnChecker<'_> {
                     vec![fix],
                 );
                 for a in args {
-                    self.infer(a);
+                    self.check_combinator_arg_for_body_diags(a);
                 }
                 Ty::Unknown
             }
@@ -3688,6 +3693,19 @@ impl FnChecker<'_> {
                 // String + String は連結として許す(spec §2.6 / M30)。それ以外の算術は
                 // 従来どおり Int(または Int 基底 tagged)限定。
                 if op == Add && lt.is_stringy() && rt.is_stringy() {
+                    if matches!(lt, Ty::Tagged { .. }) || matches!(rt, Ty::Tagged { .. }) {
+                        self.push(
+                            codes::TYPE_MISMATCH,
+                            format!(
+                                "'+' cannot concatenate tagged String types directly (found '{lt}' and '{rt}')"
+                            ),
+                            span,
+                            vec![direction(
+                                "Concatenate using the underlying String values first, then rebuild via the tagged constructor: e.g. 'TagName(base1 + base2)'"
+                            )],
+                        );
+                        return Ty::Unknown;
+                    }
                     if !lt.compatible(&rt) {
                         self.compare_mismatch(&lt, &rt, span);
                         return Ty::Unknown;
@@ -3730,12 +3748,18 @@ impl FnChecker<'_> {
         if t.is_numeric() {
             return true;
         }
+        let mut fixes = vec![direction("Use Int expressions")];
+        if t.is_stringy() {
+            fixes.push(direction(
+                "If concatenating, convert the Int first: e.g. 'n.toString() + s'",
+            ));
+        }
         let t = t.clone();
         self.push(
             codes::TYPE_MISMATCH,
             format!("{what} requires Int operands, found '{t}'"),
             span,
-            vec![direction("Use Int expressions")],
+            fixes,
         );
         false
     }
@@ -4277,5 +4301,26 @@ mod tests {
                  unknown List member; dispatch match arms are out of sync: {unknown_field:?}"
             );
         }
+    }
+
+    /// String/Int レシーバへの未知メソッド呼び出しにラムダを渡しても、
+    /// 二次エラー(「lambdas are only allowed as argument to List combinators...」)が
+    /// 追加発火しないこと(PR #108 レビュー対応)。診断は未知メソッド1件だけであるべき。
+    #[test]
+    fn unknown_method_with_lambda_arg_reports_single_diagnostic() {
+        let src = "module t\n\nfunc f(s: String) -> String\n{\n  return s.map(c => c)\n}\n";
+        let parsed = kei_syntax::parse_module(src);
+        assert!(
+            parsed.errors.is_empty(),
+            "test source must parse: {:?}",
+            parsed.errors
+        );
+        let diags = check_module("t.kei", &parsed.module);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (the unknown method), got {diags:?}"
+        );
+        assert_eq!(diags[0].code, codes::UNKNOWN_FIELD);
     }
 }

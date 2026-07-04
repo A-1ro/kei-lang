@@ -5,6 +5,10 @@
       {
         "edits": [],
         "title": "Use Int expressions"
+      },
+      {
+        "edits": [],
+        "title": "If concatenating, convert the Int first: e.g. 'n.toString() + s'"
       }
     ],
     "message": "arithmetic requires Int operands, found 'String'",

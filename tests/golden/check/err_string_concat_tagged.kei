@@ -1,0 +1,7 @@
+module string.tagged_concat
+
+type ProductId = String tagged "ProductId"
+
+func bad(a: ProductId, b: ProductId) -> String {
+  return a + b
+}
