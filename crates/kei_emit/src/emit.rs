@@ -1084,6 +1084,15 @@ impl Emitter<'_> {
                         self.out.frag(")");
                         return;
                     }
+                    // contains(item) → includes(item)(Array.prototype.includes は
+                    // SameValueZero 比較。Kei の等値対象=スカラーでは === と一致する)。
+                    "contains" => {
+                        self.emit_expr(base, Prec::Postfix);
+                        self.out.frag(".includes(");
+                        self.emit_expr(&args[0], Prec::Implication);
+                        self.out.frag(")");
+                        return;
+                    }
                     // all/any → every/some。map/filter は同名の配列メソッドへ素通り。
                     "all" | "any" => {
                         let js = if name.name == "all" { "every" } else { "some" };

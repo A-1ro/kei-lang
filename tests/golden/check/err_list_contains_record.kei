@@ -1,0 +1,9 @@
+module err.list_contains_record
+
+record Item {
+  qty: Int
+}
+
+func hasItem(items: List<Item>, target: Item) -> Bool {
+  return items.contains(target)
+}

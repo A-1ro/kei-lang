@@ -176,3 +176,23 @@ fn map_filter_length_ensures_lift_to_generative() {
         plan.counterexample
     );
 }
+
+/// M29 / #92: `xs.contains(item)` の bounded 評価が pbt の Value::PartialEq
+/// (手書き実装)経由で正しく判定できることを固定する。
+#[test]
+fn list_contains_ensures_lifts_to_bounded() {
+    let src = "module t\n\
+               func hasIt(xs: List<Int>, target: Int) -> Bool\n  ensures result == xs.contains(target)\n{\n  return xs.contains(target)\n}\n";
+    let m = module(src);
+    let outcomes = run_module(&m);
+    let has_it = outcomes
+        .iter()
+        .find(|o| o.func == "hasIt")
+        .expect("hasIt must be evaluated");
+    assert!(
+        has_it.passed,
+        "contains must agree with itself across sampled lists: {:?}",
+        has_it.counterexample
+    );
+    assert!(has_it.cases_checked > 0, "must check at least one case");
+}

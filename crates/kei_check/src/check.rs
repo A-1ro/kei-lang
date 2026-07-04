@@ -46,6 +46,14 @@ mod codes {
     pub const CONTRACT_MISSING: &str = "KEI-E4008";
 }
 
+/// `List<T>` の builtin メソッド名一覧(候補提示・エラーメッセージで使う唯一の定義元)。
+/// `field_on` / `infer_call` 内の match アーム(呼び出し形の分岐)とは文字列 match の
+/// 制約上ここでは自動同期できないため、手動で足並みを揃える必要がある —
+/// 下記の unit test `list_builtin_methods_match_dispatch_are_in_sync` で検査する。
+const LIST_BUILTIN_METHODS: &[&str] = &[
+    "length", "isEmpty", "get", "map", "filter", "fold", "all", "any", "contains",
+];
+
 /// 検査オプション(M16 / #44)。既定はすべて off で、`check_module` /
 /// `check_module_report` の従来挙動を保つ。strict 系はすべて**オプトイン**で、
 /// 既存の golden を壊さない段階移行のための辺。
@@ -1753,7 +1761,8 @@ impl FnChecker<'_> {
             // レコードは呼べるフィールドを持てない(検査が弾く)ので衝突しない。
             Ty::List(_) => match name.name.as_str() {
                 "length" => Ty::Int,
-                "isEmpty" | "get" | "map" | "filter" | "fold" | "all" | "any" => {
+                // LIST_BUILTIN_METHODS と同期を保つこと(length を除く全メソッド)。
+                "isEmpty" | "get" | "map" | "filter" | "fold" | "all" | "any" | "contains" => {
                     let m = name.name.clone();
                     self.push(
                         codes::UNKNOWN_FIELD,
@@ -1764,9 +1773,7 @@ impl FnChecker<'_> {
                     Ty::Unknown
                 }
                 _ => {
-                    let members = [
-                        "length", "isEmpty", "get", "map", "filter", "fold", "all", "any",
-                    ];
+                    let members = LIST_BUILTIN_METHODS;
                     let fix = match suggestion(&name.name, members.iter().copied()) {
                         Some(s) => {
                             self.env
@@ -2097,6 +2104,33 @@ impl FnChecker<'_> {
                 }
                 Ty::Bool
             }
+            // contains(item: T) -> Bool。要素が等値比較可能なスカラーのときだけ許す
+            // (KEI-E2010 と同じ制約。spec v0.3-collections §5.1 / M29)。emit は
+            // Array.prototype.includes(SameValueZero) に写す。
+            "contains" => {
+                if !self.expect_arity(&method.name, 1, args, span) {
+                    return Ty::Bool;
+                }
+                let at = self.infer(&args[0]);
+                if !at.compatible(elem) {
+                    self.check_assign(elem, &at, args[0].span());
+                } else if !elem.is_equatable() {
+                    let bad = elem.clone();
+                    self.push(
+                        codes::UNSUPPORTED_EQUALITY,
+                        format!(
+                            "equality is not supported on '{bad}'; 'contains' compares scalars \
+                             only (Int, String, Bool, and tagged scalars)"
+                        ),
+                        span,
+                        vec![direction(
+                            "Extract a scalar field first: 'xs.map(e => e.field).contains(value)' \
+                             (lambdas cannot capture outer variables)",
+                        )],
+                    );
+                }
+                Ty::Bool
+            }
             // isEmpty(引数なしメソッド)-> Bool。空か。emit 衝突回避のためメソッド形
             // (`xs.isEmpty()`)で持つ(field_on のコメント参照)。
             "isEmpty" => {
@@ -2120,9 +2154,7 @@ impl FnChecker<'_> {
                 Ty::Int
             }
             other => {
-                let members = [
-                    "length", "isEmpty", "get", "map", "filter", "fold", "all", "any",
-                ];
+                let members = LIST_BUILTIN_METHODS;
                 let fix = match suggestion(other, members.iter().copied()) {
                     Some(s) => {
                         self.env
@@ -4037,5 +4069,47 @@ mod tests {
             contract_text(&["a", "b", "c"], "a || b && c"),
             "a || b && c"
         );
+    }
+
+    /// `LIST_BUILTIN_METHODS` の各メソッドを正しい arity で呼んだとき、
+    /// `infer_call` / `field_on` の match アームが実際にそれを既知の List
+    /// メソッドとして処理し、`UNKNOWN_FIELD`(未知メンバー扱い)を出さないことを
+    /// 検査する。新しい List メソッドを `LIST_BUILTIN_METHODS` に足しても
+    /// 呼び出し形の match アームを更新し忘れると、この一覧から漏れた分だけ
+    /// ここで UNKNOWN_FIELD が出て失敗する。
+    #[test]
+    fn list_builtin_methods_match_dispatch_are_in_sync() {
+        for &method in LIST_BUILTIN_METHODS {
+            let call = match method {
+                "length" => "xs.length".to_string(),
+                "isEmpty" => "xs.isEmpty()".to_string(),
+                "get" => "xs.get(0)".to_string(),
+                "map" => "xs.map(e => e)".to_string(),
+                "filter" => "xs.filter(e => e > 0)".to_string(),
+                "fold" => "xs.fold(0, (a, e) => a + e)".to_string(),
+                "all" => "xs.all(e => e > 0)".to_string(),
+                "any" => "xs.any(e => e > 0)".to_string(),
+                "contains" => "xs.contains(1)".to_string(),
+                other => panic!("unhandled LIST_BUILTIN_METHODS entry in test: {other}"),
+            };
+            let src =
+                format!("module t\n\nfunc f(xs: List<Int>) -> Int\n{{\n  {call}\n  return 0\n}}\n");
+            let parsed = kei_syntax::parse_module(&src);
+            assert!(
+                parsed.errors.is_empty(),
+                "test source for '{method}' must parse: {:?}",
+                parsed.errors
+            );
+            let diags = check_module("t.kei", &parsed.module);
+            let unknown_field = diags
+                .iter()
+                .filter(|d| d.code == codes::UNKNOWN_FIELD)
+                .collect::<Vec<_>>();
+            assert!(
+                unknown_field.is_empty(),
+                "method '{method}' from LIST_BUILTIN_METHODS was rejected as an \
+                 unknown List member; dispatch match arms are out of sync: {unknown_field:?}"
+            );
+        }
     }
 }
