@@ -165,3 +165,19 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #105: chore: bump version to 0.4.3 — 2026-07-03 merged
 
 (no actionable patterns — version bump PR, no inline comments / discussion / reviews)
+
+## PR #105: chore: bump version to 0.4.3 — 2026-07-03 merged
+
+(no actionable patterns — hook re-ran on a non-merge command; latest merged PR is still #105, a version-bump PR already recorded above with no review activity)
+
+## PR #105: chore: bump version to 0.4.3 — 2026-07-03 merged
+
+(no actionable patterns — hook re-ran on a non-merge command (cargo check of a scratchpad repair.kei on the M29 PR branch); latest merged PR is still #105, a version-bump PR already recorded above with no review activity)
+
+## PR #105: chore: bump version to 0.4.3 — 2026-07-03 merged
+
+(no actionable patterns — hook re-ran on a non-merge command (cargo check of repair2.kei in a missing scratchpad worktree); latest merged PR is still #105, a version-bump PR already recorded above with no review activity)
+
+## PR #106: feat: M29 List.contains を追加 (#92) — 2026-07-04 merged
+
+(no actionable patterns — CI (clippy/fmt/test) all green, admin squash-merge; no inline review comments, no discussion comments, no reviews)

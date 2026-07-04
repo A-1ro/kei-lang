@@ -331,3 +331,31 @@
 ## PR #105: chore: bump version to 0.4.3 — 2026-07-03 merged
 
 (no design-decision candidates for this PR)
+
+## Hook run 2026-07-04 — no new merged PR
+
+PostToolUse hook が非 merge コマンド(M29 PR ブランチ上の `kei check`)で発火。
+最新 merged PR は #105 で、本ファイルに記録済み(候補なし)のため新規追記なし。
+
+## Hook run 2026-07-04 (2) — no new merged PR
+
+PostToolUse hook が非 merge コマンド(scratchpad worktree `wt-m29` での
+map+contains ワークアラウンド検証 `kei check` — worktree 不在で失敗)で発火。
+最新 merged PR は依然 #105(記録済み・候補なし)のため新規候補なし。
+
+## PR #106: feat: M29 List.contains を追加 (#92) — 2026-07-04 merged
+
+### Candidate: contains は「等値比較可能なスカラー」限定(KEI-E2010 の再利用)
+**Why this matters for HANDOFF.md**: `contains` の型制約が `==` と同一である理由と、合成型を独自エラーでなく KEI-E2010 で拒否する設計判断はコードからは自明でない。
+**Draft entry** (lift verbatim if approved):
+> `List<T>.contains(item)` は `T` が等値比較可能なスカラー(Int/String/Bool/tagged スカラー)のときだけ許可する。record/enum/List などの合成型は **`==` と同じコード KEI-E2010** で拒否し、`xs.any(e => ...)` への誘導 fix を出す。新しいエラーコードを作らないのは意図的:`contains` は意味的に「要素との `==`」なので、等値の制約とエラー体系をそのまま共有する。`contains` の制約を緩めるなら `==`(is_equatable)側と必ず同時に見直すこと。
+
+### Candidate: contains → Array.prototype.includes が安全な理由(SameValueZero)
+**Why this matters for HANDOFF.md**: emit が `.includes` に写せるのは Kei の等値対象がスカラーに限定されているからで、将来 Float や合成型を等値対象に加えると壊れる landmine。
+**Draft entry** (lift verbatim if approved):
+> TS emit では `xs.contains(item)` → `xs.includes(item)`。`Array.prototype.includes` は SameValueZero 比較(`NaN === NaN` 扱い、オブジェクトは参照比較)だが、Kei の等値対象が Int/String/Bool のスカラーに限られている現状では `===` と完全に一致するため安全。**等値対象を Float(NaN あり)や構造的等値の合成型に拡張する場合、この `.includes` 写像は成立しなくなる**ので、emit 側をランタイムヘルパー(`keiListGet` 方式)等に切り替える必要がある。
+
+### Candidate: 組み込みメソッド追加時の追従チェックリスト
+**Why this matters for HANDOFF.md**: PR #106 で List メソッド追加時に触る箇所が確定した。次にメソッドを足す人が漏らしやすい(did-you-mean 候補 3 箇所・pbt・MCP golden)。
+**Draft entry** (lift verbatim if approved):
+> List 組み込みメソッドを追加するときの追従箇所: (1) spec の コンビネータ表・§5.1・トランスパイル表、(2) `skills/kei/SKILL.md` のメソッド一覧、(3) `check.rs` の型検査 + **did-you-mean 候補リスト 3 箇所**、(4) `emit.rs` の写像、(5) `pbt.rs` の `eval_list_method`(bounded 検証が新メソッドを評価できないと contract 検証が落ちる)、(6) golden fixture 新規 + 既存 `err_collection_method` 系の候補リスト差分、(7) spec 本文を変えたら `tests/mcp/spec_*.response.json` の embedding golden 再生成。
