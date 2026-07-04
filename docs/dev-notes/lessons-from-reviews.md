@@ -181,3 +181,9 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #106: feat: M29 List.contains を追加 (#92) — 2026-07-04 merged
 
 (no actionable patterns — CI (clippy/fmt/test) all green, admin squash-merge; no inline review comments, no discussion comments, no reviews)
+
+## PR #106: feat: M29 List.contains を追加 (#92) — 2026-07-04 merged
+
+(no actionable patterns — hook re-ran on a non-merge command (cargo transpile of a tagged-string concat repro in scratchpad); latest merged PR is still #106, already recorded above with no inline comments / discussion / reviews)
+
+(no actionable patterns — hook re-ran 2026-07-04 on a non-merge command (`cargo run -p kei_cli -- check` of a String.map lambda repro in the wt-m30 scratchpad worktree); latest merged PR is still #106, already recorded above with no review activity)
