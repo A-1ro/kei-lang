@@ -1,0 +1,20 @@
+module string.stdlib
+
+func greet(name: String, suffix: String) -> String {
+  return name + suffix
+}
+
+func nameLength(name: String) -> Int {
+  return name.length
+}
+
+func describe(n: Int) -> String {
+  return "value=" + n.toString()
+}
+
+func parseOrZero(s: String) -> Int {
+  return match s.toInt() {
+    Some(n) => n
+    None => 0
+  }
+}

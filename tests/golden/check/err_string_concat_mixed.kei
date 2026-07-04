@@ -1,0 +1,5 @@
+module string.mismatch
+
+func bad(n: Int, s: String) -> String {
+  return n + s
+}

@@ -416,6 +416,73 @@ fn list_contains_emits_to_includes() {
     );
 }
 
+/// M30 / #107: String stdlib 段階1の emit マッピング。
+#[test]
+fn string_concat_stays_plus() {
+    let out = emit(concat!(
+        "func greet(name: String, suffix: String) -> String {\n",
+        "  return name + suffix\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return name + suffix;"),
+        "String + String stays '+': {}",
+        out.ts
+    );
+}
+
+#[test]
+fn int_to_string_emits_string_call() {
+    let out = emit(concat!(
+        "func describe(n: Int) -> String {\n",
+        "  return n.toString()\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return String(n);"),
+        "n.toString() -> String(n): {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_to_int_emits_runtime_helper() {
+    let out = emit(concat!(
+        "func parse(s: String) -> Option<Int> {\n",
+        "  return s.toInt()\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return keiStringToInt(s);"),
+        "s.toInt() -> keiStringToInt(s): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiStringToInt")
+            && out.ts.contains("from \"@kei/runtime\";")
+            && out
+                .ts
+                .lines()
+                .any(|l| l.starts_with("import") && l.contains("keiStringToInt")),
+        "keiStringToInt import: {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_length_stays_property() {
+    let out = emit(concat!(
+        "func nameLength(name: String) -> Int {\n",
+        "  return name.length\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return name.length;"),
+        "s.length stays a property: {}",
+        out.ts
+    );
+}
+
 /// 回帰(PR #50 再レビュー P2): レコードが `isEmpty` フィールドを持っても、フィールド
 /// アクセス `bag.isEmpty` は書き換えない(`.length === 0` への誤写を防ぐ)。List の
 /// `xs.isEmpty()` はメソッド形なので衝突せず `.length === 0` に写る。

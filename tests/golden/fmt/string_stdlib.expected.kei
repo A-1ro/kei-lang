@@ -1,0 +1,5 @@
+module fmt.string_stdlib
+
+func greet(name: String, suffix: String) -> String {
+  return name + suffix
+}

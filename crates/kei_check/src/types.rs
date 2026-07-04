@@ -54,6 +54,15 @@ impl Ty {
         }
     }
 
+    /// 文字列連結の対象になれるか(String または String 基底の tagged 型)。
+    pub fn is_stringy(&self) -> bool {
+        match self {
+            Ty::Str | Ty::Unknown => true,
+            Ty::Tagged { underlying, .. } => underlying.is_stringy(),
+            _ => false,
+        }
+    }
+
     /// 等値比較(`==` / `!=`)の対象になれるか。スカラー(Int / String / Bool と
     /// それらを基底にする tagged 型)のみ。合成型(Record / Enum / Option /
     /// Result / List / Unit)は emit が参照等価(`===`)しか出せず構造等価には
@@ -69,6 +78,14 @@ impl Ty {
             | Ty::Result(..)
             | Ty::List(_)
             | Ty::Unit => false,
+        }
+    }
+
+    /// tagged のラップを剥がして基底型を返す(stdlib メンバー解決の基底型判定用)。
+    pub fn peel_tagged(&self) -> &Ty {
+        match self {
+            Ty::Tagged { underlying, .. } => underlying.peel_tagged(),
+            other => other,
         }
     }
 }

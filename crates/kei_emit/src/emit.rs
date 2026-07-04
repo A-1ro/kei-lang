@@ -248,8 +248,12 @@ impl<'a> RuntimeUses<'a> {
                 } else {
                     // List.get(i) は範囲外 None を返すランタイムヘルパーへ写す(M9)。emit と
                     // 同じ判定(is_list_get)で、検査器が List.get と確定した位置だけ import する。
-                    if is_list_get(callee.as_ref(), args, self.list_ops) {
+                    if is_runtime_method(callee.as_ref(), args, self.list_ops, "get", 1) {
                         self.names.insert("keiListGet");
+                    }
+                    // String.toInt() は keiStringToInt ランタイムヘルパーへ写す(M30 / #107)。
+                    if is_runtime_method(callee.as_ref(), args, self.list_ops, "toInt", 0) {
+                        self.names.insert("keiStringToInt");
                     }
                     self.expr(callee);
                 }
@@ -1051,12 +1055,20 @@ impl Emitter<'_> {
         //
         // get -> keiListGet は import 収集(RuntimeUses)と同じ is_list_get で判定を共有する
         // (両者がずれて「呼び出しはあるが import 無し」になる事故を防ぐ)。
-        if is_list_get(callee, args, self.list_ops) {
+        if is_runtime_method(callee, args, self.list_ops, "get", 1) {
             if let ast::Expr::Field { base, .. } = callee {
                 self.out.frag("keiListGet(");
                 self.emit_expr(base, Prec::Implication);
                 self.out.frag(", ");
                 self.emit_expr(&args[0], Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
+        if is_runtime_method(callee, args, self.list_ops, "toInt", 0) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiStringToInt(");
+                self.emit_expr(base, Prec::Implication);
                 self.out.frag(")");
                 return;
             }
@@ -1072,6 +1084,13 @@ impl Emitter<'_> {
                         self.out.frag("(");
                         self.emit_expr(base, Prec::Postfix);
                         self.out.frag(".length === 0)");
+                        return;
+                    }
+                    // n.toString() → `String(n)`。
+                    "toString" if args.is_empty() => {
+                        self.out.frag("String(");
+                        self.emit_expr(base, Prec::Implication);
+                        self.out.frag(")");
                         return;
                     }
                     // fold(init, f) → reduce(f, init)(引数順が逆)。
@@ -1250,17 +1269,24 @@ fn ts_string(s: &str) -> String {
     serde_json::to_string(s).expect("strings are serializable")
 }
 
-/// `callee(args)` が「検査器が確定した List.get 呼び出し」か。`get` だけは `keiListGet`
-/// ランタイムヘルパーへ写るため、import 収集(`RuntimeUses`)と emit の両方が**同じ判定**を
-/// 必要とする。二つがずれると「呼び出しはあるが import が無い」TS になるので 1 か所に集約する。
+/// `callee(args)` が「検査器が確定したランタイムヘルパー行きメソッド呼び出し」か。
+/// `get`(→ `keiListGet`)・`toInt`(→ `keiStringToInt`)はどちらも組み込みランタイム
+/// ヘルパーへ写るため、import 収集(`RuntimeUses`)と emit の両方が**同じ判定**を必要とする。
+/// 二つがずれると「呼び出しはあるが import が無い」TS になるので 1 か所に集約する。
 /// 鍵はメソッド名トークンの位置(Call span は連鎖だと衝突する)。
-fn is_list_get(callee: &ast::Expr, args: &[ast::Expr], list_ops: &HashSet<(u32, u32)>) -> bool {
+fn is_runtime_method(
+    callee: &ast::Expr,
+    args: &[ast::Expr],
+    list_ops: &HashSet<(u32, u32)>,
+    name: &str,
+    arity: usize,
+) -> bool {
     matches!(
         callee,
-        ast::Expr::Field { name, .. }
-            if name.name == "get"
-                && args.len() == 1
-                && list_ops.contains(&(name.span.start.line, name.span.start.col))
+        ast::Expr::Field { name: field_name, .. }
+            if field_name.name == name
+                && args.len() == arity
+                && list_ops.contains(&(field_name.span.start.line, field_name.span.start.col))
     )
 }
 

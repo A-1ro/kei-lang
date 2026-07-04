@@ -64,6 +64,13 @@ export function keiListGet<T>(xs: readonly T[], index: number): Option<T> {
   return index >= 0 && index < xs.length ? Some(xs[index]) : None();
 }
 
+/** String.toInt(): 受理は `^-?[0-9]+$` かつ安全整数範囲、それ以外は None(spec §2.6 / M30)。 */
+export function keiStringToInt(s: string): Option<number> {
+  return /^-?[0-9]+$/.test(s) && Number.isSafeInteger(Number(s))
+    ? Some(Number(s))
+    : None();
+}
+
 // ---- 契約アサーション(spec §4: requires / ensures は実行時アサーション) ----
 
 export interface ContractViolationInfo {

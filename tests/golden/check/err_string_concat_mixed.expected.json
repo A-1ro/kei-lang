@@ -1,0 +1,28 @@
+[
+  {
+    "code": "KEI-E2001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Use Int expressions"
+      },
+      {
+        "edits": [],
+        "title": "If concatenating, convert the Int first: e.g. 'n.toString() + s'"
+      }
+    ],
+    "message": "arithmetic requires Int operands, found 'String'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 15,
+        "line": 4
+      },
+      "file": "tests/golden/check/err_string_concat_mixed.kei",
+      "start": {
+        "col": 14,
+        "line": 4
+      }
+    }
+  }
+]
