@@ -54,6 +54,9 @@ const LIST_BUILTIN_METHODS: &[&str] = &[
     "length", "isEmpty", "get", "map", "filter", "fold", "all", "any", "contains",
 ];
 
+/// String の未知メンバー診断の did-you-mean 候補(field_on / string_method で共有)。
+const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt"];
+
 /// 検査オプション(M16 / #44)。既定はすべて off で、`check_module` /
 /// `check_module_report` の従来挙動を保つ。strict 系はすべて**オプトイン**で、
 /// 既存の golden を壊さない段階移行のための辺。
@@ -125,10 +128,11 @@ pub fn check_module_with_resolver(
     diags
 }
 
-/// List コンビネータのメソッド呼び出しの位置(Call span の開始 `(line, col)`)を集める(M9)。
-/// emit はこの**権威的な型情報**だけを根拠に `get`/`fold`/`all`/`any`/`isEmpty` を配列メソッドへ
-/// 写す(構文だけでレシーバが List か判別すると、外部呼び出しの連鎖や同名フィールドを誤写する)。
-/// 検査器(型推論)そのものを使って収集するので、検査の再実装にはならない。
+/// List / String / Int の組み込みメソッド呼び出しの位置(Call span の開始 `(line, col)`)を
+/// 集める(M9、String/Int は M30 / #107 で拡張)。emit はこの**権威的な型情報**だけを根拠に
+/// `get`/`fold`/`all`/`any`/`isEmpty`(List)や `toInt`/`toString`(String/Int)を配列メソッド・
+/// ランタイム呼び出しへ写す(構文だけでレシーバの型を判別すると、外部呼び出しの連鎖や同名
+/// フィールドを誤写する)。検査器(型推論)そのものを使って収集するので、検査の再実装にはならない。
 ///
 /// resolver なしの版(後方互換)。import 由来の型は opaque 扱いなので、
 /// import 先 record の `List` フィールドに対するメソッド呼び出しは
@@ -456,6 +460,8 @@ fn const_eval(expr: &ast::Expr) -> Option<ConstVal> {
                 (Ge, ConstVal::Int(a), ConstVal::Int(b)) => Some(ConstVal::Bool(a >= b)),
                 (Eq, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a == b)),
                 (Ne, ConstVal::Bool(a), ConstVal::Bool(b)) => Some(ConstVal::Bool(a != b)),
+                // 文字列連結の定数畳み込み(M30 / #107)。
+                (Add, ConstVal::Str(a), ConstVal::Str(b)) => Some(ConstVal::Str(a + &b)),
                 // 文字列定数の等値比較(`requires "a" == "b"` 等の恒偽/恒真を畳む。M17 / #35)。
                 (Eq, ConstVal::Str(a), ConstVal::Str(b)) => Some(ConstVal::Bool(a == b)),
                 (Ne, ConstVal::Str(a), ConstVal::Str(b)) => Some(ConstVal::Bool(a != b)),
@@ -1186,8 +1192,9 @@ struct FnChecker<'a> {
     /// 内側ほど後ろ。`scopes[0]` はパラメータ。
     scopes: Vec<HashMap<String, Ty>>,
     opts: CheckOptions,
-    /// List コンビネータのメソッド呼び出し位置(Call span の開始 line,col)を収集する
-    /// 任意のシンク(M9 / emit の権威的な型情報)。通常検査では `None`。
+    /// List / String / Int の組み込みメソッド呼び出し位置(Call span の開始 line,col)を
+    /// 収集する任意のシンク(M9 / emit の権威的な型情報。M30 で String/Int に拡張)。
+    /// 通常検査では `None`。
     list_ops: Option<&'a mut HashSet<(u32, u32)>>,
     /// コンビネータ引数ラムダの中にいるときに `Some(floor)` を持つ(M25 / #59)。
     /// `floor` は `scopes` のインデックス。ラムダ body 内のシンボル解決は
@@ -1790,6 +1797,64 @@ impl FnChecker<'_> {
                     Ty::Unknown
                 }
             },
+            Ty::Str => match name.name.as_str() {
+                "length" => Ty::Int,
+                "toInt" => {
+                    let m = name.name.clone();
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("'{m}' is a String method; call it as 's.{m}()'"),
+                        name.span,
+                        vec![direction(format!("Call the method: 's.{m}()'"))],
+                    );
+                    Ty::Unknown
+                }
+                _ => {
+                    let members = STRING_BUILTIN_MEMBERS;
+                    let fix = match suggestion(&name.name, members.iter().copied()) {
+                        Some(s) => {
+                            self.env
+                                .replace_fix(format!("Did you mean '{s}'?"), name.span, &s)
+                        }
+                        None => direction(format!("Use one of: {}", members.join(", "))),
+                    };
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("no member '{}' on 'String'", name.name),
+                        name.span,
+                        vec![fix],
+                    );
+                    Ty::Unknown
+                }
+            },
+            Ty::Int => match name.name.as_str() {
+                "toString" => {
+                    let m = name.name.clone();
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("'{m}' is an Int method; call it as 'n.{m}()'"),
+                        name.span,
+                        vec![direction(format!("Call the method: 'n.{m}()'"))],
+                    );
+                    Ty::Unknown
+                }
+                _ => {
+                    let fix = match suggestion(&name.name, ["toString"]) {
+                        Some(s) => {
+                            self.env
+                                .replace_fix(format!("Did you mean '{s}'?"), name.span, &s)
+                        }
+                        None => direction("Use one of: toString".to_string()),
+                    };
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("no member '{}' on 'Int'", name.name),
+                        name.span,
+                        vec![fix],
+                    );
+                    Ty::Unknown
+                }
+            },
             other => {
                 let other = other.clone();
                 self.push(
@@ -1932,6 +1997,13 @@ impl FnChecker<'_> {
                     let base_ty = self.infer(base);
                     if let Ty::List(elem) = base_ty.clone() {
                         return self.list_method(&elem, vname, args, span);
+                    }
+                    // String / Int の組み込みメソッド呼び出し(M30 / #107)。tagged 経由でも
+                    // 基底型で判定する(peel_tagged)。
+                    match base_ty.peel_tagged() {
+                        Ty::Str => return self.string_method(vname, args, span),
+                        Ty::Int => return self.int_method(vname, args, span),
+                        _ => {}
                     }
                     // F7 / M25: 受信側が `List<T>` でないのに `map`/`filter`/`fold`/`all`/`any`
                     // を呼んでいるケースを専用に診断する。lambda 引数を `infer` に降ろすと
@@ -2165,6 +2237,91 @@ impl FnChecker<'_> {
                 self.push(
                     codes::UNKNOWN_FIELD,
                     format!("no method '{other}' on 'List'"),
+                    method.span,
+                    vec![fix],
+                );
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Unknown
+            }
+        }
+    }
+
+    /// String のメソッド呼び出し(M30 / #107)。tagged String も基底型で判定(呼び出し元で peel_tagged 済み)。
+    fn string_method(&mut self, method: &ast::Ident, args: &[ast::Expr], span: SynSpan) -> Ty {
+        // emit が「この呼び出し位置は String/Int 組み込みメソッドだと検査器が確定した」と
+        // 判定するための権威的な位置情報(list_method と同じ慣習。M9 コメント参照)。
+        if let Some(ops) = self.list_ops.as_deref_mut() {
+            ops.insert((method.span.start.line, method.span.start.col));
+        }
+        match method.name.as_str() {
+            "toInt" => {
+                self.expect_arity(&method.name, 0, args, span);
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Option(Box::new(Ty::Int))
+            }
+            "length" => {
+                self.push(
+                    codes::TYPE_MISMATCH,
+                    "'length' is a String property; write 's.length' without arguments".to_string(),
+                    span,
+                    vec![direction("Remove the call: 's.length'")],
+                );
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Int
+            }
+            other => {
+                let members = STRING_BUILTIN_MEMBERS;
+                let fix = match suggestion(other, members.iter().copied()) {
+                    Some(s) => {
+                        self.env
+                            .replace_fix(format!("Did you mean '{s}'?"), method.span, &s)
+                    }
+                    None => direction(format!("Use one of: {}", members.join(", "))),
+                };
+                self.push(
+                    codes::UNKNOWN_FIELD,
+                    format!("no method '{other}' on 'String'"),
+                    method.span,
+                    vec![fix],
+                );
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Unknown
+            }
+        }
+    }
+
+    /// Int のメソッド呼び出し(M30 / #107)。
+    fn int_method(&mut self, method: &ast::Ident, args: &[ast::Expr], span: SynSpan) -> Ty {
+        if let Some(ops) = self.list_ops.as_deref_mut() {
+            ops.insert((method.span.start.line, method.span.start.col));
+        }
+        match method.name.as_str() {
+            "toString" => {
+                self.expect_arity(&method.name, 0, args, span);
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Str
+            }
+            other => {
+                let fix = match suggestion(other, ["toString"]) {
+                    Some(s) => {
+                        self.env
+                            .replace_fix(format!("Did you mean '{s}'?"), method.span, &s)
+                    }
+                    None => direction("Use one of: toString".to_string()),
+                };
+                self.push(
+                    codes::UNKNOWN_FIELD,
+                    format!("no method '{other}' on 'Int'"),
                     method.span,
                     vec![fix],
                 );
@@ -3528,6 +3685,15 @@ impl FnChecker<'_> {
                 Ty::Bool
             }
             Add | Sub | Mul | Div | Rem => {
+                // String + String は連結として許す(spec §2.6 / M30)。それ以外の算術は
+                // 従来どおり Int(または Int 基底 tagged)限定。
+                if op == Add && lt.is_stringy() && rt.is_stringy() {
+                    if !lt.compatible(&rt) {
+                        self.compare_mismatch(&lt, &rt, span);
+                        return Ty::Unknown;
+                    }
+                    return if lt == Ty::Unknown { rt } else { lt };
+                }
                 let lok = self.expect_numeric(&lt, lhs.span(), "arithmetic");
                 let rok = self.expect_numeric(&rt, rhs.span(), "arithmetic");
                 if lok && rok && !lt.compatible(&rt) {

@@ -251,6 +251,10 @@ impl<'a> RuntimeUses<'a> {
                     if is_list_get(callee.as_ref(), args, self.list_ops) {
                         self.names.insert("keiListGet");
                     }
+                    // String.toInt() は keiStringToInt ランタイムヘルパーへ写す(M30 / #107)。
+                    if is_string_to_int(callee.as_ref(), args, self.list_ops) {
+                        self.names.insert("keiStringToInt");
+                    }
                     self.expr(callee);
                 }
                 for a in args {
@@ -1061,6 +1065,14 @@ impl Emitter<'_> {
                 return;
             }
         }
+        if is_string_to_int(callee, args, self.list_ops) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiStringToInt(");
+                self.emit_expr(base, Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
         if let ast::Expr::Field { base, name, .. } = callee {
             let is_list_op = self
                 .list_ops
@@ -1072,6 +1084,13 @@ impl Emitter<'_> {
                         self.out.frag("(");
                         self.emit_expr(base, Prec::Postfix);
                         self.out.frag(".length === 0)");
+                        return;
+                    }
+                    // n.toString() → `String(n)`。
+                    "toString" if args.is_empty() => {
+                        self.out.frag("String(");
+                        self.emit_expr(base, Prec::Implication);
+                        self.out.frag(")");
                         return;
                     }
                     // fold(init, f) → reduce(f, init)(引数順が逆)。
@@ -1260,6 +1279,22 @@ fn is_list_get(callee: &ast::Expr, args: &[ast::Expr], list_ops: &HashSet<(u32, 
         ast::Expr::Field { name, .. }
             if name.name == "get"
                 && args.len() == 1
+                && list_ops.contains(&(name.span.start.line, name.span.start.col))
+    )
+}
+
+/// `callee(args)` が「検査器が確定した String.toInt 呼び出し」か。is_list_get と同じ
+/// 判定パターン(メソッド名トークンの位置を list_ops で確認)。
+fn is_string_to_int(
+    callee: &ast::Expr,
+    args: &[ast::Expr],
+    list_ops: &HashSet<(u32, u32)>,
+) -> bool {
+    matches!(
+        callee,
+        ast::Expr::Field { name, .. }
+            if name.name == "toInt"
+                && args.is_empty()
                 && list_ops.contains(&(name.span.start.line, name.span.start.col))
     )
 }

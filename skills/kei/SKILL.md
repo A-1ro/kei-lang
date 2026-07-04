@@ -111,6 +111,7 @@ enum FetchError {
 ```
 
 - 組み込み型は `Int`(i64)・`String`・`Bool`・`Result<T, E>`・`Option<T>` のみ。それ以外は同一ファイルの `record` / `enum` / `type` 宣言か `import` が要る。
+- **文字列 stdlib 段階1(v0.5 / M30)**: `String + String -> String`(混在は `KEI-E2001`)。`s.length -> Int`(UTF-16 code unit 長)。`s.toInt() -> Option<Int>`(受理は `^-?[0-9]+$` かつ安全整数範囲、それ以外は `None`)。`n.toString() -> String`。すべて契約式内でも使える。
 - ユーザー定義型は **型引数を取れない**(ジェネリクスは組み込みの `Result`(2)・`Option`(1)・`List`(1)だけ)。
 - **コレクション `List<T>` は v0.3 で利用可能。** 要素は不変・opaque。9 コンビネータ — `length`・`isEmpty()`・`get(i)`(→ `Option<T>`)・`map`・`filter`・`fold`・`all`・`any`・`contains(item)`(v0.5 / M29) — で反復・集計・絞り込み・所属判定を書く。`map`/`filter`/`fold`/`all`/`any` の関数引数は **名前付き純粋関数の参照** または **コンビネータ引数位置限定ラムダ(v0.4 / M25)** `p => expr` / `(a, b) => expr`。ラムダはキャプチャ禁止・純粋限定で、`let f = (ラムダ)`(関数値束縛)は引き続き `KEI-E2001`。lambda body 内で `old(...)` は **一律禁止**(`KEI-E4002`、関数入口で評価される構造制約のため意味的に整合しない)。lambda param 名が TypeScript 予約語(`class` / `var` / `null` / `this` 等)と衝突する場合も `KEI-E2001`。`contains(item)` は要素型が等値比較可能なスカラー(Int/String/Bool/tagged スカラー)のときだけ `Bool` を返し、record/enum/List 等の合成型要素では `KEI-E2010`(`==` と同じ診断)で拒否される(`xs.map(e => e.field).contains(value)` へ誘導)。契約では `length`・`isEmpty()`・`all`・`any`・`contains`・`result.length` を参照できる。`Map` は未実装。詳細は `spec/kei-spec-v0.3-collections.md` と spec §2.5、実例は `examples/collections/inventory.kei`。
 - **List リテラル `[a, b, c]`(v0.4 / M22)**: 要素は文脈推論で `List<T>` に型付く。空 `[]` は let や戻り型などの注釈と組み合わせて型が決まる(例: `func xs() -> List<Int> { return [] }`)。要素間の型不一致は `KEI-E2001`。
@@ -216,6 +217,7 @@ func classify(u: User) -> String {
 ```
 
 - **`&&` は Bool 専用。** 優先順位は comparison より弱く `||` より強い(`a || b && c` = `a || (b && c)`)。短絡評価。
+- `+` は `Int` 同士の算術に加えて `String` 同士の連結にも使える(混在は不可、v0.5 / M30)。
 
 ### module と import
 

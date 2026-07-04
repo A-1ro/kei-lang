@@ -122,6 +122,17 @@ func totalStockValue(products: List<Product>) -> Int
 
 合意書原則への影響: 述語/射影が `requires` の上に直書きされることで、`products.all(p => p.quantity >= 0)` のように **その関数が前提とする不変条件** をその場で読める。トップレベルに `hasNonNegativeQuantity` のような使い捨て関数を散布する必要が無くなる(命名の汚染を避けつつ、契約は依然として静的に解析可能)。
 
+### 2.6 String / Int 組み込み一覧(v0.5 / M30)
+
+`String` は不変の UTF-16 シーケンス(TS の `string` に写る)。
+
+- `String + String -> String`(連結)。混在(`Int + String` 等)は型不一致(`KEI-E2001`)で拒否する。
+- `s.length -> Int`(プロパティ)。UTF-16 code unit 長(V8 の `String.prototype.length` と同一。サロゲートペアは 2 として数える)。
+- `s.toInt() -> Option<Int>`(メソッド、引数0)。`^-?[0-9]+$` に一致し、かつ安全整数範囲(`Number.isSafeInteger`)に収まる文字列だけ `Some(n)`。それ以外(空文字・符号のみ・小数点・桁あふれ等)は `None`。
+- `n.toString() -> String`(`Int` のメソッド、引数0)。10進表記の文字列を返す。
+
+いずれも純粋で副作用を持たず、`requires` / `ensures` 内でも使える。
+
 ## 3. エフェクトシステム(v0.1の範囲)
 
 ### 3.1 意味論
@@ -178,7 +189,7 @@ IO
 | postfix | `.` / `()` | 左 | フィールドアクセス・呼び出し |
 | unary | `-x` / `!x` | 右 | `-`: `Int`、`!`: `Bool` |
 | multiplicative | `*` / `/` / `%` | 左 | `Int` |
-| additive | `+` / `-` | 左 | `Int` |
+| additive | `+` / `-` | 左 | `Int`(`+` は `String` 同士の連結にも使える。混在不可) |
 | comparison | `==` / `!=` / `<` / `>` / `<=` / `>=` | 左 | 比較結果は `Bool` |
 | logical and | `&&` | 左 | `Bool` |
 | logical or | `\|\|` | 左 | `Bool` |

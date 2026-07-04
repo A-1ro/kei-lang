@@ -884,16 +884,26 @@ fn eval_expr(
             if let ast::Expr::Field { base, name, .. } = callee.as_ref() {
                 let recv = eval_expr(base, env, funcs, in_ensures, depth)?;
                 let unwrapped = unwrap_tagged(&recv);
-                if let Value::List(xs) = unwrapped {
-                    return eval_list_method(
-                        name.name.as_str(),
-                        xs,
-                        args,
-                        env,
-                        funcs,
-                        in_ensures,
-                        depth,
-                    );
+                match unwrapped {
+                    Value::List(xs) => {
+                        return eval_list_method(
+                            name.name.as_str(),
+                            xs,
+                            args,
+                            env,
+                            funcs,
+                            in_ensures,
+                            depth,
+                        );
+                    }
+                    Value::Int(n) if name.name == "toString" => {
+                        return Ok(Value::Str(n.to_string()));
+                    }
+                    // Option 値を評価器は持たないため Unsupported に倒す(get と同じ扱い。M30 / #107)。
+                    Value::Str(_) if name.name == "toInt" => {
+                        return Err(EvalError::Unsupported);
+                    }
+                    _ => {}
                 }
                 return Err(EvalError::Unsupported);
             }
@@ -944,6 +954,18 @@ fn eval_expr(
                 {
                     if let Value::List(xs) = *inner {
                         Ok(Value::Int(xs.len() as i64))
+                    } else {
+                        unreachable!()
+                    }
+                }
+                Value::Str(s) if name.name == "length" => {
+                    Ok(Value::Int(s.encode_utf16().count() as i64))
+                }
+                Value::Tagged(_, inner)
+                    if matches!(*inner, Value::Str(_)) && name.name == "length" =>
+                {
+                    if let Value::Str(s) = *inner {
+                        Ok(Value::Int(s.encode_utf16().count() as i64))
                     } else {
                         unreachable!()
                     }
@@ -1147,7 +1169,7 @@ fn unwrap_tagged(v: &Value) -> &Value {
 
 fn eval_binary(op: ast::BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
     use ast::BinOp::*;
-    use Value::{Bool, Int};
+    use Value::{Bool, Int, Str};
     // PR #76 review: tagged スカラの算術・比較は underlying と同等扱い。
     // 入口でアンラップしてから既存パターンに乗せる。
     let l = unwrap_tagged(&l).clone();
@@ -1165,6 +1187,7 @@ fn eval_binary(op: ast::BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
                 .map(Int)
                 .ok_or(EvalError::Trap)
         }
+        (Add, Str(a), Str(b)) => Ok(Str(format!("{a}{b}"))),
         (Eq, a, b) => Ok(Bool(a == b)),
         (Ne, a, b) => Ok(Bool(a != b)),
         // 順序比較は Int 限定(checker が KEI-E2001 で String/合成型を弾く)。
