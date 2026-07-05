@@ -1,0 +1,7 @@
+module collections.old_lambda_no_vars
+
+func f(xs: List<Int>) -> Bool
+  ensures xs.all(p => p > old(0))
+{
+  return xs.all(p => p > 0)
+}

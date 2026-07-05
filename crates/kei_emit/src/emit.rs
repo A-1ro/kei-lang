@@ -3,7 +3,7 @@
 //! 検査(型・名前・エフェクト)は kei_check 済みであることを前提とし、
 //! ここでは構文情報のみを使って出力を組み立てる(検査の再実装禁止)。
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use kei_check::contract_expr_text as kei_expr_text;
@@ -32,7 +32,7 @@ pub fn emit_checked(
         module,
         list_ops,
         out: Out::default(),
-        old_counter: 0,
+        old_index: HashMap::new(),
         in_ensures: false,
         match_counter: 0,
     };
@@ -354,8 +354,10 @@ struct Emitter<'a> {
     /// List コンビネータ呼び出し位置(Call span 開始)。検査器由来の権威的な型情報。
     list_ops: &'a HashSet<(u32, u32)>,
     out: Out,
-    /// ensures 内 `old(...)` の通し番号。事前キャプチャと同じ走査順で消費する。
-    old_counter: usize,
+    /// ensures 内 `old(...)` の割当。span をキーに kei$old$N の割当を引く。fold など引数の
+    /// emit 順が AST 順と一致しないコンビネータがあるため、位置カウンタではなく式の同一性
+    /// (span)で対応付ける。
+    old_index: HashMap<Span, usize>,
     in_ensures: bool,
     /// match 式ごとに一意なスクルティニ変数名(`kei$m0`, `kei$m1`, ...)を割り当てる。
     match_counter: usize,
@@ -650,6 +652,11 @@ impl Emitter<'_> {
         }
 
         let old_exprs = collect_old_exprs(&f.ensures);
+        self.old_index = old_exprs
+            .iter()
+            .enumerate()
+            .map(|(i, expr)| (expr.span(), i))
+            .collect();
         for (i, expr) in old_exprs.iter().enumerate() {
             self.out.start_line();
             self.out.map(expr.span());
@@ -668,7 +675,6 @@ impl Emitter<'_> {
             self.emit_block_stmts(&f.body);
             self.out.indent -= 1;
             self.out.line("})();");
-            self.old_counter = 0;
             self.in_ensures = true;
             for clause in &f.ensures {
                 self.emit_contract_check(clause, "ensures", &f.name.name, Some("kei$result"));
@@ -1039,9 +1045,15 @@ impl Emitter<'_> {
     fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) {
         if let ast::Expr::Name { name, .. } = callee {
             if name == "old" {
-                // 事前キャプチャ済みの値を参照する(収集と同じ走査順)。
-                let i = self.old_counter;
-                self.old_counter += 1;
+                // 事前キャプチャ済みの値を span で引く(fold など emit 順が AST 順と
+                // ずれるコンビネータがあるため、位置カウンタではなく同一性で対応付ける)。
+                let span = args
+                    .first()
+                    .map(|a| a.span())
+                    .expect("old(...) always has exactly one argument (parser enforces arity)");
+                let i = *self.old_index.get(&span).expect(
+                    "old(...) arg span must be present in old_index (populated in emit_func from the same ensures clauses)",
+                );
                 self.out.frag(&format!("kei$old${i}"));
                 return;
             }

@@ -4,7 +4,7 @@
     "fixes": [
       {
         "edits": [],
-        "title": "Extract a scalar field first: 'xs.map(e => e.field).contains(value)' (lambdas cannot capture outer variables)"
+        "title": "Compare a field directly: 'xs.any(e => e.field == value)'"
       }
     ],
     "message": "equality is not supported on 'Item'; 'contains' compares scalars only (Int, String, Bool, and tagged scalars)",

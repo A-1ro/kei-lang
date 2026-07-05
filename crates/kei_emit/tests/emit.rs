@@ -812,3 +812,42 @@ fn old_inside_lambda_capturing_enclosing_param_binds_at_entry() {
         out.ts
     );
 }
+
+/// PR #114 レビュー対応: `fold(init, f)` の emit は `.reduce(f, init)` の引数順に合わせて
+/// `f`(第2引数)を先に、`init`(第1引数)を後に走査する。`old(...)` の対応付けが位置
+/// カウンタ(emit 走査順で消費)だった頃は、`ensures xs.fold(old(seed), (acc, x) => acc +
+/// old(bonus))` のような式で `old(seed)` と `old(bonus)` の `kei$old$N` 割当が入れ替わって
+/// いた(collect_old_exprs は AST 順=引数の並び順で `old(seed)` を 0 番目に集めるが、fold の
+/// emit はラムダ側の `old(bonus)` を先に走査して 0 番目を消費してしまうため)。span ベースの
+/// `old_index` マップに変えたことで、宣言順と参照側の対応が emit 走査順に依らず一致することを
+/// 固定する。
+#[test]
+fn fold_old_args_map_by_identity_not_emit_order() {
+    let out = emit(concat!(
+        "func total(xs: List<Int>, seed: Int, bonus: Int) -> Int\n",
+        "  ensures result == xs.fold(old(seed), (acc, x) => acc + old(bonus))\n",
+        "{\n",
+        "  return xs.fold(seed, (acc, x) => acc + bonus)\n",
+        "}\n",
+    ));
+    // 宣言順は ensures 内の AST 順(引数の並び順): seed が先、bonus が後。
+    let decl_seed = out.ts.find("const kei$old$0 = seed;");
+    let decl_bonus = out.ts.find("const kei$old$1 = bonus;");
+    assert!(
+        decl_seed.is_some() && decl_bonus.is_some(),
+        "expected both old(...) captures to be declared in AST order:\n{}",
+        out.ts
+    );
+    assert!(
+        decl_seed.unwrap() < decl_bonus.unwrap(),
+        "kei$old$0 (seed) must be declared before kei$old$1 (bonus):\n{}",
+        out.ts
+    );
+    // 参照側: fold の init 位置(kei$old$0)は seed の値、ラムダ本体(kei$old$1)は bonus の値
+    // を参照しなければならない(値の入れ替わりバグの回帰防止)。
+    assert!(
+        out.ts.contains(".reduce((acc, x) => acc + kei$old$1, kei$old$0)"),
+        "fold init must reference kei$old$0 (seed) and lambda body must reference kei$old$1 (bonus):\n{}",
+        out.ts
+    );
+}

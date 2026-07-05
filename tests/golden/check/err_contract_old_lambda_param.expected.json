@@ -9,10 +9,6 @@
       {
         "edits": [],
         "title": "Restructure the contract to not need per-element comparison against an 'old' value (e.g. capture the bound before the function call and pass it in as a parameter)"
-      },
-      {
-        "edits": [],
-        "title": "Known v0.4 limitation: cross-element invariants with 'old' inside lambdas are not expressible"
       }
     ],
     "message": "'old(...)' is not allowed inside a lambda body; 'old' is evaluated once at function entry, but lambda bodies are evaluated per element — the two time-frames do not align",

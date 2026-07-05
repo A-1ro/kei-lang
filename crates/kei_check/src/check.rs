@@ -1207,6 +1207,24 @@ enum Mode {
     Ensures,
 }
 
+/// `lookup_scope` の結果。`result` 遮断(ensures 文脈限定、#113)を診断発火と
+/// 分離するための三値。
+enum ScopeLookup {
+    Found(Ty),
+    /// ensures 文脈でラムダの外側にある特殊束縛 `result` を参照した(遮断対象)。
+    ResultBlocked,
+    NotFound,
+}
+
+impl ScopeLookup {
+    fn into_option(self) -> Option<Ty> {
+        match self {
+            ScopeLookup::Found(t) => Some(t),
+            ScopeLookup::ResultBlocked | ScopeLookup::NotFound => None,
+        }
+    }
+}
+
 struct FnChecker<'a> {
     env: &'a Env,
     diags: &'a mut Vec<Diagnostic>,
@@ -1605,39 +1623,34 @@ impl FnChecker<'_> {
         }
     }
 
-    fn lookup_scope(&self, name: &str) -> Option<Ty> {
-        // M31 / #59 後続: ラムダ body は読み取り専用キャプチャを許可する。通常の
-        // レキシカルスコープと同じ innermost-first で全スコープを探索する
-        // (ラムダパラメータ → 囲みスコープの let / 関数パラメータ → 外側ラムダの
-        // パラメータ、の順に見える)。唯一の例外は `result`(ensures の特殊束縛):
-        // ラムダ内から見えてはいけない(#113 で検討中)。ヒットしたスコープが
-        // `lambda_floor` より外側(=ラムダの外)で、かつ name が "result" の場合だけ
-        // None を返して `infer_name` の専用診断に委ねる。
+    fn lookup_scope(&self, name: &str) -> ScopeLookup {
+        // M31 / #59 後続、#113: ラムダ body は読み取り専用キャプチャを許可する。通常の
+        // レキシカルスコープと同じ innermost-first で全スコープを探索する。唯一の例外は
+        // ensures 文脈での `result`(ensures の特殊束縛、ensures_scope 挿入箇所参照):
+        // Mode::Ensures かつ、ヒットしたスコープが `lambda_floor` より外側のときだけ
+        // 遮断する。Mode::Body の通常の `let result` はこの遮断の対象外(#113 で誤拒否が
+        // 判明した箇所。契約と無関係な `let result` はラムダから普通にキャプチャできる)。
         for (idx, scope) in self.scopes.iter().enumerate().rev() {
             if let Some(ty) = scope.get(name) {
-                if let Some(floor) = self.lambda_floor {
-                    if idx < floor && name == "result" {
-                        return None;
+                if self.mode == Mode::Ensures && name == "result" {
+                    if let Some(floor) = self.lambda_floor {
+                        if idx < floor {
+                            return ScopeLookup::ResultBlocked;
+                        }
                     }
                 }
-                return Some(ty.clone());
+                return ScopeLookup::Found(ty.clone());
             }
         }
-        None
+        ScopeLookup::NotFound
     }
 
     fn infer_name(&mut self, name: &str, span: SynSpan) -> Ty {
-        if let Some(t) = self.lookup_scope(name) {
-            return t;
-        }
-        // M31 / #59 後続: ラムダ body は読み取り専用キャプチャを許可するようになったため、
-        // `lookup_scope` が None を返すのは「本当にどこにも無い」か「ラムダ内から
-        // `result` を参照した」場合だけ。`result` は ensures の特殊束縛でキャプチャ対象外
-        // のまま(issue #113 で検討中)。後者を明確に案内する。
-        // メッセージ・fix 文面は M25 導入時から変更しない
-        // (golden `err_type_lambda_capture_result` が固定)。
-        if let Some(floor) = self.lambda_floor {
-            if name == "result" && self.scopes[..floor].iter().any(|s| s.contains_key(name)) {
+        match self.lookup_scope(name) {
+            ScopeLookup::Found(t) => return t,
+            ScopeLookup::ResultBlocked => {
+                // メッセージ・fix 文面は M25 導入時から変更しない
+                // (golden `err_type_lambda_capture_result` が固定)。
                 // [1]: 旧 fix「let r = result before the lambda」は ensures 節で `let` を
                 // 書けないため実現不能。`result` を lambda 越しに参照する設計そのものが
                 // v0.4 段階の射程外なので、その旨を明示する。
@@ -1660,6 +1673,7 @@ impl FnChecker<'_> {
                 );
                 return Ty::Unknown;
             }
+            ScopeLookup::NotFound => {}
         }
         if self.mode == Mode::Requires && name == "result" {
             self.push(
@@ -1716,7 +1730,7 @@ impl FnChecker<'_> {
 
     fn infer_field(&mut self, base: &ast::Expr, name: &ast::Ident, _span: SynSpan) -> Ty {
         if let ast::Expr::Name { name: root, .. } = base {
-            if self.lookup_scope(root).is_none() {
+            if self.lookup_scope(root).into_option().is_none() {
                 match self.env.kinds.get(root.as_str()) {
                     Some(NameKind::Enum) => return self.variant_ref(root.clone(), name),
                     Some(NameKind::Import) => return Ty::Unknown,
@@ -1968,14 +1982,16 @@ impl FnChecker<'_> {
 
     fn infer_call(&mut self, callee: &ast::Expr, args: &[ast::Expr], span: SynSpan) -> Ty {
         match callee {
-            ast::Expr::Name { name, span: nspan } if self.lookup_scope(name).is_none() => {
+            ast::Expr::Name { name, span: nspan }
+                if self.lookup_scope(name).into_option().is_none() =>
+            {
                 self.call_named(&name.clone(), *nspan, args, span)
             }
             ast::Expr::Field {
                 base, name: vname, ..
             } => {
                 if let ast::Expr::Name { name: root, .. } = base.as_ref() {
-                    if self.lookup_scope(root).is_none()
+                    if self.lookup_scope(root).into_option().is_none()
                         && self.env.kinds.get(root.as_str()) == Some(&NameKind::Enum)
                     {
                         return self.call_variant(&root.clone(), vname, args, span);
@@ -1985,7 +2001,7 @@ impl FnChecker<'_> {
                 // あれば照合する。無ければ従来どおり opaque(M11 段階移行)。strict-extern
                 // 時のみ、未宣言の外部呼び出しを警告する(M16 / #44)。
                 if let Some(path) = field_path(callee) {
-                    if self.lookup_scope(&path[0]).is_none()
+                    if self.lookup_scope(&path[0]).into_option().is_none()
                         && self.env.kinds.get(&path[0]) == Some(&NameKind::Import)
                     {
                         let key = path.join(".");
@@ -2005,7 +2021,7 @@ impl FnChecker<'_> {
                 // List コンビネータのメソッド呼び出し(M9)。レシーバが値のときだけ
                 // 型を推論して List を見分ける(型名・未定義名の従来のエラー経路を保つ)。
                 let base_is_value = match base.as_ref() {
-                    ast::Expr::Name { name, .. } => self.lookup_scope(name).is_some(),
+                    ast::Expr::Name { name, .. } => self.lookup_scope(name).into_option().is_some(),
                     _ => true,
                 };
                 if base_is_value {
@@ -2211,8 +2227,7 @@ impl FnChecker<'_> {
                         ),
                         span,
                         vec![direction(
-                            "Extract a scalar field first: 'xs.map(e => e.field).contains(value)' \
-                             (lambdas cannot capture outer variables)",
+                            "Compare a field directly: 'xs.any(e => e.field == value)'",
                         )],
                     );
                 }
@@ -2408,7 +2423,9 @@ impl FnChecker<'_> {
             return Ty::Unknown;
         };
         // スコープ変数は関数参照になれない(関数は値ではない)。
-        if self.lookup_scope(name).is_some() || self.env.kinds.get(name) != Some(&NameKind::Func) {
+        if self.lookup_scope(name).into_option().is_some()
+            || self.env.kinds.get(name) != Some(&NameKind::Func)
+        {
             self.push(
                 codes::TYPE_MISMATCH,
                 format!("'{name}' is not a function; '{method}' takes a named function reference"),
@@ -3904,22 +3921,38 @@ fn forbid_old_inside_lambda_body(
             _ => info.has_call = true,
         }
     }
-    fn is_allowed(arg: &ast::Expr, forbidden_names: &HashSet<String>) -> bool {
+    /// `old(arg)` を拒否する理由。優先順位は判定順のまま維持する: Call を最優先、
+    /// 次に変数参照ゼロ、最後に禁止集合との交差(#114 レビュー: 理由ごとにメッセージを
+    /// 分けるため `bool` から enum に統合)。
+    enum OldArgRejection {
+        /// old(...) の中身が Call を含む(関数呼び出しの結果が per-element 再評価されるべきか
+        /// 静的判断不能)。
+        HasCall,
+        /// old(...) が変数参照を1つも含まず、キャプチャする意味がない。
+        NoVariables,
+        /// old(...) が禁止集合(このラムダ/外側ラムダのパラメータ、result)を参照し、
+        /// 時相(関数入口1回評価 vs per-element評価)が噛み合わない。
+        ForbiddenName,
+    }
+    fn check_old_arg(
+        arg: &ast::Expr,
+        forbidden_names: &HashSet<String>,
+    ) -> Option<OldArgRejection> {
         let mut info = ArgInfo {
             has_call: false,
             names: HashSet::new(),
         };
         analyze(arg, &mut info);
         if info.has_call {
-            return false;
+            return Some(OldArgRejection::HasCall);
         }
         if info.names.is_empty() {
-            return false;
+            return Some(OldArgRejection::NoVariables);
         }
         if info.names.iter().any(|n| forbidden_names.contains(n)) {
-            return false;
+            return Some(OldArgRejection::ForbiddenName);
         }
-        true
+        None
     }
     fn walk(
         expr: &ast::Expr,
@@ -3931,30 +3964,51 @@ fn forbid_old_inside_lambda_body(
             ast::Expr::Call { callee, args, span } => {
                 if let ast::Expr::Name { name, .. } = callee.as_ref() {
                     if name == "old" {
-                        let allowed = args.len() == 1 && is_allowed(&args[0], forbidden_names);
-                        if !allowed {
-                            env.push(
-                                diags,
-                                codes::CONTRACT_CONSTRUCT,
-                                "'old(...)' is not allowed inside a lambda body; 'old' is evaluated once at function entry, but lambda bodies are evaluated per element — the two time-frames do not align".to_string(),
-                                *span,
+                        if let Some(rejection) =
+                            args.first().and_then(|a| check_old_arg(a, forbidden_names))
+                        {
+                            match rejection {
                                 // [1]: 旧 fix「let prev = old(seed); xs.all(p => p > prev)」は
                                 // 契約節で `let` を書けないため実現不能。実現可能な選択肢に揃える:
                                 // (a) lambda body を関数化して外で `old` を取り回す、
-                                // (b) 契約を refactor して per-element + old の組合せを避ける、
-                                // (c) 既知の v0.4 制約として明示。
-                                vec![
-                                    direction(
-                                        "Move the lambda body to a top-level function that takes the captured 'old' value as a parameter, and call it from the contract before the lambda",
-                                    ),
-                                    direction(
-                                        "Restructure the contract to not need per-element comparison against an 'old' value (e.g. capture the bound before the function call and pass it in as a parameter)",
-                                    ),
-                                    direction(
-                                        "Known v0.4 limitation: cross-element invariants with 'old' inside lambdas are not expressible",
-                                    ),
-                                ],
-                            );
+                                // (b) 契約を refactor して per-element + old の組合せを避ける。
+                                OldArgRejection::ForbiddenName => {
+                                    env.push(
+                                        diags,
+                                        codes::CONTRACT_CONSTRUCT,
+                                        "'old(...)' is not allowed inside a lambda body; 'old' is evaluated once at function entry, but lambda bodies are evaluated per element — the two time-frames do not align".to_string(),
+                                        *span,
+                                        vec![
+                                            direction(
+                                                "Move the lambda body to a top-level function that takes the captured 'old' value as a parameter, and call it from the contract before the lambda",
+                                            ),
+                                            direction(
+                                                "Restructure the contract to not need per-element comparison against an 'old' value (e.g. capture the bound before the function call and pass it in as a parameter)",
+                                            ),
+                                        ],
+                                    );
+                                }
+                                OldArgRejection::HasCall => {
+                                    env.push(
+                                        diags,
+                                        codes::CONTRACT_CONSTRUCT,
+                                        "'old(...)' cannot contain a function call; its argument must reference only captured variables (enclosing let-bindings or function parameters), optionally combined with field access, unary, or binary operators".to_string(),
+                                        *span,
+                                        vec![direction(
+                                            "Capture the call's result before the contract (e.g. as a parameter or a value computed earlier) and reference that captured value inside 'old(...)' instead",
+                                        )],
+                                    );
+                                }
+                                OldArgRejection::NoVariables => {
+                                    env.push(
+                                        diags,
+                                        codes::CONTRACT_CONSTRUCT,
+                                        "'old(...)' argument does not reference any variable, so capturing it is meaningless — its value cannot change between function entry and exit".to_string(),
+                                        *span,
+                                        vec![direction("Remove 'old(...)' and use the expression directly")],
+                                    );
+                                }
+                            }
                         }
                         // arg の中も走査しない: `old(...)` 自体が判定点で、入れ子の `old(old(x))`
                         // を二重に報告しても情報量が増えない(外側 1 件で根本原因を示せる)。
