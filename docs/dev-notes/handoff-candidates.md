@@ -424,3 +424,27 @@ KEI-E2001「lambdas are only allowed as arguments to List combinators」を
 **Why this matters for HANDOFF.md**: MCP はソース文字列のみを受け取り M20 の import 解決経路(FS 参照)に乗らないため、import 由来の型は `Ty::Unknown` で照合されない。この制約を知らないと「MCP で clean だったのに CLI で型エラー」を不整合バグと誤診したり、MCP に FS アクセスを安易に足して sandbox 前提を壊しやすい。
 **Draft entry** (lift verbatim if approved):
 > MCP `kei_check` はソース文字列のみを入力とし、ファイルシステムを参照しない(M20 の import 解決には乗らない)。よって宣言された import は **常に全て opaque**(型は `Ty::Unknown`、照合されない)。M34 以降、応答の `opaque_imports` にドット区切りモジュールパス(sort + dedup 済み)を列挙し、「非空なら clean でも import 由来の型は未検証」をツール description に明記するのが API 契約。import 跨ぎの保証が要る検証は CLI `kei check <dir>` に誘導する。MCP に import 解決用の FS アクセスを足す変更は、この「source-only」前提の設計判断を覆すので先に issue で議論すること。
+
+## PR #112: fix: M34 レビュー対応 — generative スキップ可視化と応答の構造化 — 2026-07-05 merged
+
+### Candidate: generative 上限超過は「部分検査」ではなく関数丸ごと無検査スキップ — 可視化は `run_module_with_limit_reporting` の `skipped` が唯一の経路
+**Why this matters for HANDOFF.md**: 「反例なし=充足」という誤読が M34 レビューで実際に問題化した。スキップは outcomes に一切現れないため、`skipped` を見ない呼び出し元(将来の kei_lsp 等)は同じ誤読を再生産する。また「上限内だけ部分検査する」最適化は安全側の哲学(部分検査で generative に格上げしない)に反する。
+**Draft entry** (lift verbatim if approved):
+> `kei_check::pbt` は候補ケース総数(候補数の積)が上限を超える関数を **丸ごと無検査スキップ**する(部分検査はしない — 部分検査で `[generative]` に格上げしない安全側の哲学)。スキップは `PropertyOutcome` に現れないため、可視化が要る呼び出し元は `run_module_with_limit_reporting` を使い `GenerativeRun.skipped`(関数名 + `required_cases`)を読むこと。既存 `run_module_with_limit` は `outcomes` だけ返す薄いラッパーで CLI 経路は不変。積が usize でオーバーフローする場合 `required_cases` は `usize::MAX`(「途方もなく大きい」の印であり正確な値ではない)。新しい呼び出し元(kei_lsp 等)を作るときは skipped を必ずユーザーに露出する — 出さないと「反例なし=充足」の誤読が再発する。
+
+### Candidate: MCP 応答のキー順は `CheckResponse` 構造体の宣言順が契約 — `json!` 手組みに戻すとアルファベット順に変わり golden が全滅する
+**Why this matters for HANDOFF.md**: `json!` マクロはキーをアルファベット順に出す一方、serde Serialize 構造体は宣言順。PR #112 で後者に統一し `tests/mcp/` golden を再生成済みなので、「シンプルだから」と `json!` に戻すリファクタは全 golden を壊す。また `#[serde(flatten)] CheckReport` により CheckReport の将来フィールドが自動でトップレベルに現れる設計。
+**Draft entry** (lift verbatim if approved):
+> MCP `kei_check` の応答は `tools.rs` の `CheckResponse` 構造体(`#[serde(flatten)] CheckReport` + `opaque_imports` + `generative`)で組み立てる。キー順は **struct 宣言順**(`diagnostics, contracts, opaque_imports, generative`)で `tests/mcp/` golden に固定済み — `json!` 手組みに戻すとアルファベット順になり golden が全滅する。`CheckReport` 本体には手を入れない(CLI `--json` フィクスチャ・golden を巻き込まないため)。flatten 経由なので CheckReport に将来フィールドを足すと MCP 応答にも自動で現れる — その際は `tests/mcp/` golden の再生成が必要。JSON 上のスキップ関数キー名は `function`(kei_check 側の `SkippedFunction.func` ではない)— MCP 応答契約としての意図的な改名。
+
+### Candidate: MCP 引数の暗黙型降格は禁止 — 省略/null は既定値、型不一致は `invalid_arg` エラーが方針
+**Why this matters for HANDOFF.md**: 旧実装は `generative: "true"`(文字列)を黙って false に降格しており、ユーザーは generative を頼んだつもりで走っていない状態に気づけなかった。新しい引数を足すときに `and_then(Value::as_*)` + `unwrap_or(default)` パターンを踏襲すると同じ罠を再導入する。
+**Draft entry** (lift verbatim if approved):
+> MCP ツール引数の扱いは「省略 / null → 既定値、値はあるが型不一致 → `tools::invalid_arg` で明示エラー(`isError: true`)」が方針(M34 レビューで確立)。`args.get(k).and_then(Value::as_bool).unwrap_or(false)` のような暗黙降格パターンは、型を間違えたユーザーが黙って既定値で走らされるため禁止。`server.rs` の `bool_arg` が参照実装(`Result<T, Value>` を返し、Err はそのまま tool_result として応答)。新しい任意引数を足すときは同じ形にする。
+
+## Hook run 2026-07-05 — no new merged PR
+
+PostToolUse hook が非 merge コマンド(scratchpad での lambda capture repro —
+`let result = 5` を `xs.map(x => x + result)` で参照する `result_capture.kei` の
+`kei check --json`。scratchpad に Cargo.toml が無く `cargo run` 自体は失敗)で発火。
+最新 merged PR は #112 で、本ファイルに記録済み(候補 3 件登録済み)のため新規候補なし。

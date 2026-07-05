@@ -211,3 +211,27 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #111: feat: M34 MCP 検証経路強化 — kei_check generative + opaque import 可視化 (#89, #90) — 2026-07-05 merged
 
 (no actionable patterns — hook ran on a status-check command (PR #111 merge state + PR #112 build check), not `gh pr merge`; latest merged PR is still #111, which has 0 inline review comments, 0 discussion comments, 0 reviews; already recorded in prior sections)
+
+## PR #112: fix: M34 レビュー対応 — generative スキップ可視化と応答の構造化 — 2026-07-05 merged
+
+- **Pattern**: ゲート条件と診断生成のタイミング不一致
+  **Source**: A-1ro (inline, crates/kei_mcp/src/tools.rs:273)
+  **Lesson**: 「静的エラーなし」を条件にする場合は、後段(PBT/generative)が積む診断(KEI-E4005 など)を評価対象から除外し、check.rs 側の「PBT 実行前クリーン」判定と厳密に一致させること — さもないと反例 1 件で skipped 一覧が丸ごと消え、不可視スキップが再発する。
+- **Pattern**: 検証パイプラインの二重実行
+  **Source**: A-1ro (inline, crates/kei_mcp/src/tools.rs:275)
+  **Lesson**: CheckOptions 経由で generative 実行済みのモジュールに対して MCP 側で run_module_with_limit_reporting を再実行しない — 最悪 10,000 ケース × 2 になる。kei_check に `GenerativeRun` の結果を返す経路を足し、1 回の実行から outcomes と skipped の両方を得る形が本筋。
+- **Pattern**: usize::MAX を JSON sentinel に使わない
+  **Source**: A-1ro (inline, crates/kei_check/src/pbt.rs:294)
+  **Lesson**: JSON 応答に載せる数値 sentinel は JS の `Number.MAX_SAFE_INTEGER`(2^53-1)以内(例: 9007199254740991)に収めるか、overflow 時に不正確である旨をスキーマにドキュメント化する — `usize::MAX` は JS クライアントで丸まる。
+
+## PR #112: fix: M34 レビュー対応 — generative スキップ可視化と応答の構造化 — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (scratchpad transpile test `fold_old.kei` via kei_emit example, exit=0); latest merged PR is still #112, whose review lessons are already recorded in the section above)
+
+## PR #112: fix: M34 レビュー対応 — generative スキップ可視化と応答の構造化 — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (kei_emit transpile scratch test for fold+old counter swap, exit=0); latest merged PR is still #112, whose 3 inline review comments (A-1ro) are already recorded in the prior PR #112 section; 0 discussion comments, no new review activity)
+
+## PR #112: fix: M34 レビュー対応 — generative スキップ可視化と応答の構造化 — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (scratchpad lambda-capture repro `result_capture.kei`, cargo run failed: no Cargo.toml in scratchpad); latest merged PR is still #112, whose 3 inline review lessons (A-1ro) are already recorded above; no new review activity)
