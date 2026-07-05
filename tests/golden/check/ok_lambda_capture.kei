@@ -1,0 +1,18 @@
+module collections.lambda_capture_ok
+
+record Item {
+  qty: Int
+}
+
+func atLeast(items: List<Item>, threshold: Int) -> Bool {
+  return items.all(p => p.qty > threshold)
+}
+
+func pick(items: List<Item>) -> List<Item> {
+  let floor = 10
+  return items.filter(p => p.qty >= floor)
+}
+
+func hasAbove(items: List<Item>, limit: Int) -> Bool {
+  return items.any(p => p.qty > limit)
+}

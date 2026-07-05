@@ -1056,10 +1056,11 @@ fn eval_list_method(
             if args.len() != 1 {
                 return Err(EvalError::Unsupported);
             }
-            // F4 / M25: 関数引数は名前付き関数参照 **または** lambda(spec §2.5)。
-            // 両者で per-element 適用関数(`apply`)を Box<dyn Fn> として組み、
-            // all/any/map/filter の本体ロジックは引き続き共有する。
-            // lambda は pure scope なので外側 env を持ち込まず、param のみ bind。
+            // F4 / M25、M31 で読み取り専用キャプチャに対応: 関数引数は名前付き関数参照
+            // **または** lambda(spec §2.5)。両者で per-element 適用関数(`apply`)を
+            // Box<dyn Fn> として組み、all/any/map/filter の本体ロジックは引き続き共有する。
+            // lambda body は囲みスコープの let / パラメータを読み取れるため、外側 env を
+            // クローンした上にパラメータを重ねる(同名ならパラメータが勝つ = シャドーイング)。
             let apply: ApplyOne<'_> = match &args[0] {
                 ast::Expr::Name { name, .. } => {
                     let f = funcs
@@ -1082,9 +1083,10 @@ fn eval_list_method(
                         return Err(EvalError::Unsupported);
                     }
                     let pname = lparams[0].name.clone();
+                    let outer_env = env.clone();
                     Box::new(move |x: &Value| {
-                        // キャプチャ禁止: lambda 専用 env を都度作る(外側 env は持ち込まない)。
-                        let mut lenv = HashMap::new();
+                        // M31: 外側 env を透過(読み取り専用キャプチャ)しつつパラメータを重ねる。
+                        let mut lenv = outer_env.clone();
                         lenv.insert(pname.clone(), x.clone());
                         eval_expr(body, &lenv, funcs, in_ensures, depth + 1)
                     })
@@ -1165,8 +1167,10 @@ fn eval_list_method(
                     }
                     let accname = lparams[0].name.clone();
                     let elname = lparams[1].name.clone();
+                    let outer_env = env.clone();
                     Box::new(move |acc: Value, x: &Value| {
-                        let mut lenv = HashMap::new();
+                        // M31: 外側 env を透過(読み取り専用キャプチャ)しつつパラメータを重ねる。
+                        let mut lenv = outer_env.clone();
                         lenv.insert(accname.clone(), acc);
                         lenv.insert(elname.clone(), x.clone());
                         eval_expr(body, &lenv, funcs, in_ensures, depth + 1)

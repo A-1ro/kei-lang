@@ -1248,12 +1248,13 @@ fn collect_old_exprs(ensures: &[ast::Expr]) -> Vec<&ast::Expr> {
                     walk(el, out);
                 }
             }
-            // F3 / M25: ラムダ境界で走査を**停止する**。lambda body 内の `old(...)` は
-            // emit が関数入口で `kei$old$N` に bind するため、引数が lambda param を参照
-            // していると ReferenceError になる。check 側で `forbid_old_capturing_lambda_param`
-            // が静的に弾くが、emit 側でも収集を止めることで二段防御する。
-            // ラムダの外で書く `let snap = old(xs); xs.all(p => p > snap)` パターンに誘導される。
-            ast::Expr::Lambda { .. } => {}
+            // M31 / #59 後続: ラムダ body も走査する。check (`forbid_old_inside_lambda_body`)
+            // が「ラムダパラメータ参照・Call を含む式・キャプチャ変数を参照しない式」の
+            // `old(...)` を KEI-E4002 で拒否済みなので、check がエラーなしで通した module
+            // だけが emit に到達する(不変条件 2)。したがってここに届く lambda 内 `old(...)`
+            // は必ず「囲みスコープの let / パラメータ(キャプチャ変数)だけを参照する式」で、
+            // 関数入口での 1 回評価(`kei$old$N` bind)がそのまま安全に成立する。
+            ast::Expr::Lambda { body, .. } => walk(body, out),
             _ => {}
         }
     }

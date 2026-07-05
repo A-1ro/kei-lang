@@ -762,3 +762,53 @@ fn all_examples_emit_cleanly() {
         assert!(!out.map.is_empty());
     }
 }
+
+/// M31 / #59 後続: コンビネータ引数ラムダの読み取り専用キャプチャ(囲み関数のパラメータ)。
+/// emit 自体は無変更(JS クロージャが同じ意味論)なので、生成 TS のラムダは
+/// 通常の `(i) => ...` アロー関数のまま、囲みスコープの `target` をそのまま参照する。
+#[test]
+fn lambda_capture_of_enclosing_param_emits_as_closure() {
+    let out = emit(concat!(
+        "record Item {\n",
+        "  sku: String\n",
+        "}\n",
+        "\n",
+        "func findBySku(items: List<Item>, target: String) -> List<Item> {\n",
+        "  return items.filter(i => i.sku == target)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("items.filter((i) => i.sku === target)"),
+        "expected filter lambda to close over 'target':\n{}",
+        out.ts
+    );
+}
+
+/// M31 / #59 後続: `old(...)` がラムダ内でキャプチャ変数(囲み関数のパラメータ)だけを
+/// 参照する場合、check は許可し(KEI-E4002 対象外)、emit は従来どおり関数入口で
+/// `kei$old$N` にバインドする。`collect_old_exprs` がラムダ境界を越えて走査するように
+/// なったことで、ラムダ内の参照が `kei$old$N` に正しく写ることを固定する。
+#[test]
+fn old_inside_lambda_capturing_enclosing_param_binds_at_entry() {
+    let out = emit(concat!(
+        "record Item {\n",
+        "  qty: Int\n",
+        "}\n",
+        "\n",
+        "func clamp(items: List<Item>, limit: Int) -> Bool\n",
+        "  ensures result implies items.all(i => i.qty <= old(limit))\n",
+        "{\n",
+        "  return items.all(i => i.qty <= limit)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("const kei$old$0 = limit;"),
+        "old(limit) must be captured at function entry:\n{}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("items.every((i) => i.qty <= kei$old$0)"),
+        "lambda body should reference the captured kei$old$0:\n{}",
+        out.ts
+    );
+}

@@ -1,0 +1,11 @@
+module collections.lambda_capture_old_ok
+
+record Item {
+  qty: Int
+}
+
+func clamp(items: List<Item>, limit: Int) -> List<Item>
+  ensures items.all(i => i.qty <= old(limit))
+{
+  return items
+}
