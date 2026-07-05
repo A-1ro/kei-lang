@@ -235,3 +235,16 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #112: fix: M34 レビュー対応 — generative スキップ可視化と応答の構造化 — 2026-07-05 merged
 
 (no actionable patterns — hook ran on a non-merge command (scratchpad lambda-capture repro `result_capture.kei`, cargo run failed: no Cargo.toml in scratchpad); latest merged PR is still #112, whose 3 inline review lessons (A-1ro) are already recorded above; no new review activity)
+
+## PR #114: feat: M31 ラムダの読み取り専用キャプチャ (#59 後続 / dogfood critical) — 2026-07-05 merged
+
+- **Pattern**: 意味論反転時の stale コメント残留
+  **Source**: A-1ro (inline, crates/kei_check/src/check.rs:2607)
+  **Lesson**: あるフィールドやフラグの役割を反転させる変更(例: `lambda_floor` が M25「キャプチャ禁止の隔離壁」→ M31「今ラムダ中かのフラグ」)を入れたら、`grep` で旧意味論を語るコメント(「キャプチャ禁止」等)を全箇所洗い出して一括更新すること — 改変行の直近だけ直すと、未改変箇所の古いコメント(L2381/L2537)を信じた次の変更が capture 意味論を壊す。
+- **Pattern**: golden 削除は承認記録を PR に残す
+  **Source**: A-1ro (general discussion)
+  **Lesson**: `tests/golden/` の削除・転用(不変条件1)はセッション内承認だけでなく、契約根拠(roadmap/spec の該当節)を添えた承認記録コメントを PR に残す運用を継続すること — 後から監査可能になる。
+
+## PR #114: feat: M31 ラムダの読み取り専用キャプチャ (#59 後続 / dogfood critical) — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (CI 完了待ち: `gh run list --branch main`、直近 2 run とも completed success); latest merged PR is still #114, whose 2 review lessons (A-1ro inline + general discussion) are already recorded in the section above; no new review activity)

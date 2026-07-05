@@ -448,3 +448,25 @@ PostToolUse hook が非 merge コマンド(scratchpad での lambda capture repr
 `let result = 5` を `xs.map(x => x + result)` で参照する `result_capture.kei` の
 `kei check --json`。scratchpad に Cargo.toml が無く `cargo run` 自体は失敗)で発火。
 最新 merged PR は #112 で、本ファイルに記録済み(候補 3 件登録済み)のため新規候補なし。
+
+## PR #114: feat: M31 ラムダの読み取り専用キャプチャ (#59 後続 / dogfood critical) — 2026-07-05 merged
+
+### Candidate: `lambda_floor` は M31 以降「隔離壁」ではない — 純粋性・`result` 遮断・`old` 検査の 3 箇所で使うフラグに役割変更
+**Why this matters for HANDOFF.md**: M25 時代の「`scopes[floor..]` しか見えない」という理解のまま `lambda_floor` を読むと、キャプチャ許可後のシンボル解決を誤解する。逆に「もう使っていない」と誤って削除すると純粋性検査と `result` 遮断が壊れる。
+**Draft entry** (lift verbatim if approved):
+> `FnChecker.lambda_floor` は M25 では「ラムダ body から外側ローカルを見えなくする隔離壁」だったが、M31(読み取り専用キャプチャ)以降 `lookup_scope` は `scopes` 全体を innermost-first で探索する(通常のレキシカルスコープ。シャドーイングはラムダパラメータが勝つ)。`lambda_floor` は現在 (a) 純粋性検査 — `check_call_effects` が `is_some()` を見て `uses` 付き呼び出しを拒否、(b) `result` 遮断 — `floor` より外側の `result` だけ見えなくする、(c) `old(...)` 検査 — キャプチャ変数のみ参照する `old` の許可判定、の 3 用途のフラグ。ネストラムダは従来どおり save/restore パターン。「隔離壁」の意味で読み書きしないこと。
+
+### Candidate: emit の `collect_old_exprs` がラムダ内 `old` を入口巻き上げできるのは「E4002 module は emit に到達しない」ゲートが理由
+**Why this matters for HANDOFF.md**: emit 単体を見ると「ラムダは要素ごとに評価されるのに `old` を関数入口で一度だけ評価して大丈夫か?」という疑問が生じる。安全性の根拠は check 側(`forbid_old_inside_lambda_body` がキャプチャ変数のみ参照する `old` だけを通す)にあり、check と emit をまたぐ暗黙の契約になっている。
+**Draft entry** (lift verbatim if approved):
+> ラムダ内 `old(...)` は「キャプチャ変数のみを参照する式」に限り許可(M31)。ラムダパラメータ参照・Call を含む式・キャプチャ変数を参照しない式は従来どおり KEI-E4002。emit の `collect_old_exprs` はラムダ body も走査して `kei$old$N` に関数入口で一度だけ巻き上げるが、これが安全なのは **check が E4002 を出した module は emit に到達しない**ため、emit に届くラムダ内 `old` は必ずキャプチャ変数のみ(= 入口時点の値で固定してよい)だから。check 側の許可条件を緩めるときは emit の巻き上げ前提も同時に見直すこと。
+
+### Candidate: `result` はラムダからキャプチャ不可(#113 保留)— `ScopeLookup` 三値で「診断発火」と「見つからない」を分離
+**Why this matters for HANDOFF.md**: `ensures items.all(i => i.qty <= result)` が通らないのはバグではなく保留中の設計判断。また `lookup_scope` が `Option` でなく三値 enum を返すのは `result` 遮断時だけ専用診断を出すためで、`into_option()` に潰すリファクタは診断を消す。
+**Draft entry** (lift verbatim if approved):
+> ラムダの読み取り専用キャプチャ(M31)は `let` 束縛と関数パラメータが対象。ensures 文脈の特殊束縛 `result` は **意図的にキャプチャ対象外**(#113 で検討中。既存診断を維持)。実装は `lookup_scope` が `ScopeLookup::{Found, ResultBlocked, NotFound}` の三値を返し、`ResultBlocked` のときだけ専用診断を出す。`Option<Ty>` に単純化すると診断が失われるので注意。#113 の結論が出たら golden `err_type_lambda_capture_result` / `ok_lambda_capture_result_name` を見直す。
+
+### Candidate: golden の削除・転用は「言語契約の変更」— 人間承認を経て行う前例(err_type_lambda_capture → ok_lambda_capture)
+**Why this matters for HANDOFF.md**: `tests/golden/` は仕様の固定化装置であり、Milestone が意図的に契約を変えるときだけ、承認のうえ削除・転用できる — この手続きの前例として記録価値がある。あわせて PR 本文の「follow-up に回す」記載が最終 diff と食い違う(`err_list_contains_record` の stale fix 文面は結局本 PR 内で修正済み)ことも、PR 本文だけを信じない教訓になる。
+**Draft entry** (lift verbatim if approved):
+> M31 で golden `err_type_lambda_capture`(関数パラメータのキャプチャを KEI-E2001 で拒否する契約を固定していた)を人間承認のうえ削除し、同 fixture を正常系 `ok_lambda_capture` に転用した。golden の削除・転用は「言語契約の意図的変更」のときだけ、承認を経て行う。また `List.contains` の fix 文面「(lambdas cannot capture outer variables)」は M31 で stale になるため同 PR 内で「Compare a field directly: 'xs.any(e => e.field == value)'」に更新済み(golden `err_list_contains_record` も追従)— 診断・fix 文面がスコープ規則に言及している箇所は、スコープ規則を変える Milestone で grep して巻き取ること。
