@@ -4,7 +4,7 @@
   "result": {
     "content": [
       {
-        "text": "{\n  \"contracts\": [],\n  \"diagnostics\": [],\n  \"generative\": {\n    \"max_cases\": 10000,\n    \"requested\": false\n  },\n  \"opaque_imports\": [\n    \"tickets.types\"\n  ]\n}",
+        "text": "{\n  \"diagnostics\": [],\n  \"contracts\": [],\n  \"opaque_imports\": [\n    \"tickets.types\"\n  ],\n  \"generative\": {\n    \"requested\": false,\n    \"max_cases\": 10000,\n    \"skipped\": []\n  }\n}",
         "type": "text"
       }
     ],

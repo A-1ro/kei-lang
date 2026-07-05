@@ -1,0 +1,13 @@
+{
+  "id": 19,
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "text": "{\n  \"diagnostics\": [],\n  \"contracts\": [\n    {\n      \"func\": \"sum4\",\n      \"kind\": \"ensures\",\n      \"expr\": \"result == a + b + c + d\",\n      \"verification\": \"runtime\",\n      \"span\": {\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"line\": 4,\n          \"col\": 11\n        },\n        \"end\": {\n          \"line\": 4,\n          \"col\": 34\n        }\n      }\n    }\n  ],\n  \"opaque_imports\": [],\n  \"generative\": {\n    \"requested\": true,\n    \"max_cases\": 10000,\n    \"skipped\": [\n      {\n        \"function\": \"sum4\",\n        \"required_cases\": 14641\n      }\n    ]\n  }\n}",
+        "type": "text"
+      }
+    ],
+    "isError": false
+  }
+}

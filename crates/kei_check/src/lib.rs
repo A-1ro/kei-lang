@@ -19,8 +19,8 @@ pub use check::{
 };
 pub use diagnostic::{Diagnostic, Fix, Position, Severity, Span, SuggestedContract, TextEdit};
 pub use imports::{
-    module_type_defs, ModuleResolver, NoopResolver, ResolvedModule, ResolvedTypeDef,
-    ResolvedVariant,
+    module_type_defs, opaque_import_paths, ModuleResolver, NoopResolver, ResolvedModule,
+    ResolvedTypeDef, ResolvedVariant,
 };
 pub use report::{CheckReport, ContractInfo, ContractKind, Verification};
 pub use syntax::syntax_diagnostics;

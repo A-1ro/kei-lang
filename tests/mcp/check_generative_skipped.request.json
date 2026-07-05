@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "method": "tools/call",
+  "params": {
+    "name": "kei_check",
+    "arguments": {
+      "source": "module math.sum4\n\nfunc sum4(a: Int, b: Int, c: Int, d: Int) -> Int\n  ensures result == a + b + c + d\n{\n  return a + b + c + d\n}\n",
+      "generative": true
+    }
+  }
+}

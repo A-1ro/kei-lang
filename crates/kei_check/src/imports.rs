@@ -46,6 +46,26 @@ pub trait ModuleResolver {
     fn resolve(&self, path: &[String]) -> Option<ResolvedModule>;
 }
 
+/// import が opaque(FS 未参照のため型情報が引けない)になった一覧。kei_mcp のように
+/// ソース文字列のみ受け取り import 先ファイルを解決できない呼び出し元向けに、
+/// 宣言された import のドット区切りパスを sort + dedup して返す。
+pub fn opaque_import_paths(module: &ast::Module) -> Vec<String> {
+    let mut paths: Vec<String> = module
+        .imports
+        .iter()
+        .map(|imp| {
+            imp.path
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect::<Vec<_>>()
+                .join(".")
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 /// 何も解決しないリゾルバ(既存の単一ファイル検査と等価)。
 pub struct NoopResolver;
 
