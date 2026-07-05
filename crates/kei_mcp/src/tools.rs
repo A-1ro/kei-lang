@@ -199,23 +199,67 @@ fn spec_index() -> String {
 
 // ---- kei_check ----
 
-/// 構文+意味検査。`CheckReport`(`{ diagnostics, contracts }`)の整形 JSON を返す
-/// (検査成功は is_error=false。Diagnostic はエラーではなくデータとして返す)。
-/// 契約には達成検証レベル(static / runtime / …)が載る(M12)。
-pub fn run_check(source: &str) -> ToolOutcome {
+/// MCP 経由の generative 実行の保守的な上限(CLI 既定の `pbt::MAX_GENERATIVE_CASES` = 100,000 より
+/// 小さい)。インタラクティブなツール呼び出しの応答時間を抑えるための MCP 固有ポリシー
+/// (kei_check 側の検査ロジックは変えない)。
+pub const MCP_GENERATIVE_MAX_CASES: usize = 10_000;
+
+/// 構文+意味検査。応答 JSON は `{ diagnostics, contracts, opaque_imports, generative }`。
+/// - `diagnostics` / `contracts` は従来通り(`CheckReport`)。
+/// - `opaque_imports`: このツールはソース文字列のみを受け取りファイルシステムを参照できないため、
+///   宣言された import は常に全て opaque になる(M20 の import 解決経路には乗らない)。
+///   非空なら、その import 由来の型は Ty::Unknown として検査対象外(照合されない)。
+/// - `generative`: `{ requested, max_cases }`。`generative` 引数が true のとき、CLI
+///   `kei check --generative` と同じ機構(kei_check::pbt)で契約から PBT を生成・実行し、
+///   反例があれば KEI-E4005 を diagnostics に積む(kei_check::CheckOptions.generative_max_cases
+///   経由で MCP_GENERATIVE_MAX_CASES を上限として渡す。検査ロジックの再実装ではなく委譲)。
+pub fn run_check(source: &str, generative: bool) -> ToolOutcome {
     let parsed = kei_syntax::parse_module(source);
+    let opaque_imports = opaque_import_paths(&parsed.module);
     // 構文エラーがあるときは壊れた AST に意味検査をかけない(golden_check と同方針)。
     let report = if parsed.errors.is_empty() {
-        kei_check::check_module_report(SYNTHETIC_FILE, &parsed.module)
+        let opts = kei_check::CheckOptions {
+            generative,
+            generative_max_cases: MCP_GENERATIVE_MAX_CASES,
+            ..kei_check::CheckOptions::default()
+        };
+        kei_check::check_module_report_with(SYNTHETIC_FILE, &parsed.module, opts)
     } else {
         kei_check::CheckReport {
             diagnostics: kei_check::syntax_diagnostics(SYNTHETIC_FILE, &parsed.errors),
             contracts: Vec::new(),
         }
     };
-    let json = serde_json::to_string_pretty(&report)
-        .unwrap_or_else(|_| "{ \"diagnostics\": [], \"contracts\": [] }".to_string());
+    let body = serde_json::json!({
+        "diagnostics": report.diagnostics,
+        "contracts": report.contracts,
+        "opaque_imports": opaque_imports,
+        "generative": {
+            "requested": generative,
+            "max_cases": MCP_GENERATIVE_MAX_CASES,
+        },
+    });
+    let json = serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".to_string());
     ToolOutcome::ok(json)
+}
+
+/// import が opaque(FS 未参照のため型情報が引けない)になった一覧。kei_mcp はソース文字列
+/// のみ受け取り import 先ファイルを解決できないため、宣言された import は常に全て opaque になる。
+fn opaque_import_paths(module: &kei_syntax::ast::Module) -> Vec<String> {
+    let mut paths: Vec<String> = module
+        .imports
+        .iter()
+        .map(|imp| {
+            imp.path
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect::<Vec<_>>()
+                .join(".")
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 // ---- kei_fmt ----

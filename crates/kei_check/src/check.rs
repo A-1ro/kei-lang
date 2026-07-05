@@ -63,7 +63,7 @@ const INT_BUILTIN_MEMBERS: &[&str] = &["toString"];
 /// 検査オプション(M16 / #44)。既定はすべて off で、`check_module` /
 /// `check_module_report` の従来挙動を保つ。strict 系はすべて**オプトイン**で、
 /// 既存の golden を壊さない段階移行のための辺。
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct CheckOptions {
     /// `extern` 未宣言の外部 namespace 呼び出しを警告する(KEI-E3004)。
     /// 既定 off。`kei check --strict-extern` で on。
@@ -75,6 +75,20 @@ pub struct CheckOptions {
     /// 構造化修正提案(M18 / #24)を出す。既定 off。`kei check --suggest-contracts` で on。
     /// 契約の無い純粋関数に ContractMissing(KEI-E4008 / suggested_contract)を提案する。
     pub suggest_contracts: bool,
+    /// generative 実行時の生成ケース上限(M34 / #89)。既定は `pbt::MAX_GENERATIVE_CASES`
+    /// (100,000)。MCP など呼び出し元がより保守的な値を渡して応答時間を抑えるためのフック。
+    pub generative_max_cases: usize,
+}
+
+impl Default for CheckOptions {
+    fn default() -> Self {
+        CheckOptions {
+            strict_extern: false,
+            generative: false,
+            suggest_contracts: false,
+            generative_max_cases: crate::pbt::MAX_GENERATIVE_CASES,
+        }
+    }
 }
 
 /// 1 モジュールを検査し、出現位置に対応した順序で Diagnostic を返す(既定オプション)。
@@ -206,7 +220,13 @@ pub fn check_module_report_with_resolver(
     // 評価器をかけない)。純粋関数の ensures を全生成入力で検証し、反例ゼロなら generative へ
     // 格上げ、反例があれば KEI-E4005 を出す。
     if opts.generative && !diagnostics.iter().any(|d| d.severity == Severity::Error) {
-        apply_generative(file, module, &mut diagnostics, &mut contracts);
+        apply_generative(
+            file,
+            module,
+            &mut diagnostics,
+            &mut contracts,
+            opts.generative_max_cases,
+        );
     }
 
     CheckReport {
@@ -222,8 +242,9 @@ fn apply_generative(
     module: &ast::Module,
     diagnostics: &mut Vec<Diagnostic>,
     contracts: &mut [ContractInfo],
+    max_cases: usize,
 ) {
-    for outcome in crate::pbt::run_module(module) {
+    for outcome in crate::pbt::run_module_with_limit(module, max_cases) {
         if outcome.passed {
             // 反例ゼロ: この関数の ensures(runtime 止まり)を格上げ。
             // PR #76 review: List / record / tagged 引数を持つ関数は

@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "method": "tools/call",
+  "params": {
+    "name": "kei_check",
+    "arguments": {
+      "source": "module math.numeric_utils\n\nrecord CaseSplit {\n  full: Int\n  remainder: Int\n}\n\nfunc splitIntoCases(total: Int, caseSize: Int) -> CaseSplit\n  requires caseSize >= 1\n  ensures result.full * caseSize + result.remainder == total\n  ensures result.remainder >= 0\n  ensures result.remainder < caseSize\n{\n  let full = total / caseSize\n  let remainder = total % caseSize\n  return CaseSplit { full, remainder }\n}\n",
+      "generative": true
+    }
+  }
+}

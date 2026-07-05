@@ -26,6 +26,7 @@ pub fn run(
         strict_extern,
         generative,
         suggest_contracts,
+        ..CheckOptions::default()
     };
 
     // kei_mcp::tools::run_check と同方針: 構文エラーがあるときは壊れた AST に

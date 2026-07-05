@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "method": "tools/call",
+  "params": {
+    "name": "kei_check",
+    "arguments": {
+      "source": "module tickets.service\n\nimport tickets.types { Ticket }\n\nfunc describe(t: Ticket) -> String {\n  return t.status\n}\n"
+    }
+  }
+}

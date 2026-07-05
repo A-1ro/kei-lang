@@ -735,6 +735,8 @@ tagged 型と基底型、または別の tagged 型を混同した。`type Accou
 
 `--json` を付けない既定出力は同じ情報の散文(`error[KEI-E3001]: ...` と `--> file:line:col`、`= fix: ...`)。契約があれば末尾に `verification:` ブロック(`<func> <kind> <expr> [<level>]`)も出る。機械処理は `--json`、目視は既定で。
 
+MCP 経由(`kei_check` ツール)でも検証ループは同様に回せる。応答は `{ diagnostics, contracts, opaque_imports, generative }`。`generative: true` を渡すと CLI `--generative` と同じ機構で契約から反例探索まで回せる(上限は応答の `generative.max_cases` に明記される)。ただしこのツールはソース文字列のみを受け取りファイルシステムを参照しないため、応答の `opaque_imports` が非空ならその import 由来の型は検査されていない(完全性が欠ける)。import を跨いだ保証まで欲しければ CLI `kei check <dir>` を使う。
+
 ### 整形
 
 正規形は `kei fmt <file>`(既定 stdout、`--check` で未整形を検出、`--write` で上書き)。生成後に `--write` で整えておくとレビュー diff が意味的差分だけになる。
