@@ -196,3 +196,25 @@ fn list_contains_ensures_lifts_to_bounded() {
     );
     assert!(has_it.cases_checked > 0, "must check at least one case");
 }
+
+/// M31 / #59 後続: コンビネータ引数ラムダの読み取り専用キャプチャ(囲み関数の
+/// パラメータ `threshold`)が bounded 評価器でも外側 env 透過で正しく評価されることを
+/// 固定する。lambda env が「外側 env のクローン + パラメータ挿入」でないと、
+/// `threshold` が未束縛のまま `EvalError::Unsupported` になり bounded に昇格しない。
+#[test]
+fn lambda_capturing_enclosing_param_lifts_to_bounded() {
+    let src = "module t\n\
+               func f(xs: List<Int>, threshold: Int) -> Bool\n  requires threshold >= 0 && threshold <= 3\n  ensures result == xs.all(x => x <= threshold)\n{\n  return xs.all(x => x <= threshold)\n}\n";
+    let m = module(src);
+    let outcomes = run_module(&m);
+    let f = outcomes
+        .iter()
+        .find(|o| o.func == "f")
+        .expect("f must be evaluated");
+    assert!(
+        f.passed,
+        "lambda capturing 'threshold' must evaluate consistently: {:?}",
+        f.counterexample
+    );
+    assert!(f.cases_checked > 0, "must check at least one case");
+}

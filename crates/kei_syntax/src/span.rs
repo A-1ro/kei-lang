@@ -8,7 +8,7 @@ use std::fmt;
 
 use serde::{Serialize, Serializer};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position {
     pub line: u32,
     pub col: u32,
@@ -21,7 +21,7 @@ impl Position {
 }
 
 /// ソース上の範囲。start は含み、end は含まない(排他)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start: Position,
     pub end: Position,

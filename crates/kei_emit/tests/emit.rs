@@ -762,3 +762,92 @@ fn all_examples_emit_cleanly() {
         assert!(!out.map.is_empty());
     }
 }
+
+/// M31 / #59 後続: コンビネータ引数ラムダの読み取り専用キャプチャ(囲み関数のパラメータ)。
+/// emit 自体は無変更(JS クロージャが同じ意味論)なので、生成 TS のラムダは
+/// 通常の `(i) => ...` アロー関数のまま、囲みスコープの `target` をそのまま参照する。
+#[test]
+fn lambda_capture_of_enclosing_param_emits_as_closure() {
+    let out = emit(concat!(
+        "record Item {\n",
+        "  sku: String\n",
+        "}\n",
+        "\n",
+        "func findBySku(items: List<Item>, target: String) -> List<Item> {\n",
+        "  return items.filter(i => i.sku == target)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("items.filter((i) => i.sku === target)"),
+        "expected filter lambda to close over 'target':\n{}",
+        out.ts
+    );
+}
+
+/// M31 / #59 後続: `old(...)` がラムダ内でキャプチャ変数(囲み関数のパラメータ)だけを
+/// 参照する場合、check は許可し(KEI-E4002 対象外)、emit は従来どおり関数入口で
+/// `kei$old$N` にバインドする。`collect_old_exprs` がラムダ境界を越えて走査するように
+/// なったことで、ラムダ内の参照が `kei$old$N` に正しく写ることを固定する。
+#[test]
+fn old_inside_lambda_capturing_enclosing_param_binds_at_entry() {
+    let out = emit(concat!(
+        "record Item {\n",
+        "  qty: Int\n",
+        "}\n",
+        "\n",
+        "func clamp(items: List<Item>, limit: Int) -> Bool\n",
+        "  ensures result implies items.all(i => i.qty <= old(limit))\n",
+        "{\n",
+        "  return items.all(i => i.qty <= limit)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("const kei$old$0 = limit;"),
+        "old(limit) must be captured at function entry:\n{}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("items.every((i) => i.qty <= kei$old$0)"),
+        "lambda body should reference the captured kei$old$0:\n{}",
+        out.ts
+    );
+}
+
+/// PR #114 レビュー対応: `fold(init, f)` の emit は `.reduce(f, init)` の引数順に合わせて
+/// `f`(第2引数)を先に、`init`(第1引数)を後に走査する。`old(...)` の対応付けが位置
+/// カウンタ(emit 走査順で消費)だった頃は、`ensures xs.fold(old(seed), (acc, x) => acc +
+/// old(bonus))` のような式で `old(seed)` と `old(bonus)` の `kei$old$N` 割当が入れ替わって
+/// いた(collect_old_exprs は AST 順=引数の並び順で `old(seed)` を 0 番目に集めるが、fold の
+/// emit はラムダ側の `old(bonus)` を先に走査して 0 番目を消費してしまうため)。span ベースの
+/// `old_index` マップに変えたことで、宣言順と参照側の対応が emit 走査順に依らず一致することを
+/// 固定する。
+#[test]
+fn fold_old_args_map_by_identity_not_emit_order() {
+    let out = emit(concat!(
+        "func total(xs: List<Int>, seed: Int, bonus: Int) -> Int\n",
+        "  ensures result == xs.fold(old(seed), (acc, x) => acc + old(bonus))\n",
+        "{\n",
+        "  return xs.fold(seed, (acc, x) => acc + bonus)\n",
+        "}\n",
+    ));
+    // 宣言順は ensures 内の AST 順(引数の並び順): seed が先、bonus が後。
+    let decl_seed = out.ts.find("const kei$old$0 = seed;");
+    let decl_bonus = out.ts.find("const kei$old$1 = bonus;");
+    assert!(
+        decl_seed.is_some() && decl_bonus.is_some(),
+        "expected both old(...) captures to be declared in AST order:\n{}",
+        out.ts
+    );
+    assert!(
+        decl_seed.unwrap() < decl_bonus.unwrap(),
+        "kei$old$0 (seed) must be declared before kei$old$1 (bonus):\n{}",
+        out.ts
+    );
+    // 参照側: fold の init 位置(kei$old$0)は seed の値、ラムダ本体(kei$old$1)は bonus の値
+    // を参照しなければならない(値の入れ替わりバグの回帰防止)。
+    assert!(
+        out.ts.contains(".reduce((acc, x) => acc + kei$old$1, kei$old$0)"),
+        "fold init must reference kei$old$0 (seed) and lambda body must reference kei$old$1 (bonus):\n{}",
+        out.ts
+    );
+}

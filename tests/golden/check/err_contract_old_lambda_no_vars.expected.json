@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E4002",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Remove 'old(...)' and use the expression directly"
+      }
+    ],
+    "message": "'old(...)' argument does not reference any variable, so capturing it is meaningless — its value cannot change between function entry and exit",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 33,
+        "line": 4
+      },
+      "file": "tests/golden/check/err_contract_old_lambda_no_vars.kei",
+      "start": {
+        "col": 27,
+        "line": 4
+      }
+    }
+  }
+]

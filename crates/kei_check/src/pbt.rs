@@ -24,9 +24,9 @@ use crate::{Diagnostic, Fix, Position, Severity, Span};
 
 /// F4 / M25: `eval_list_method` の per-element apply 関数(map / filter / all / any 用)。
 /// `Box<dyn Fn>` で Name 経路と Lambda 経路の閉包形状の差を均す。
-type ApplyOne<'a> = Box<dyn Fn(&Value) -> Result<Value, EvalError> + 'a>;
+type ApplyOne<'a> = Box<dyn FnMut(&Value) -> Result<Value, EvalError> + 'a>;
 /// F4 / M25: `eval_list_method` の fold 用 apply 関数(`acc` と要素を取る)。
-type ApplyTwo<'a> = Box<dyn Fn(Value, &Value) -> Result<Value, EvalError> + 'a>;
+type ApplyTwo<'a> = Box<dyn FnMut(Value, &Value) -> Result<Value, EvalError> + 'a>;
 
 mod seed_codes {
     /// シードファイルの文法エラー(期待値フィールド混入を含む)。
@@ -1056,11 +1056,12 @@ fn eval_list_method(
             if args.len() != 1 {
                 return Err(EvalError::Unsupported);
             }
-            // F4 / M25: 関数引数は名前付き関数参照 **または** lambda(spec §2.5)。
-            // 両者で per-element 適用関数(`apply`)を Box<dyn Fn> として組み、
-            // all/any/map/filter の本体ロジックは引き続き共有する。
-            // lambda は pure scope なので外側 env を持ち込まず、param のみ bind。
-            let apply: ApplyOne<'_> = match &args[0] {
+            // F4 / M25、M31 で読み取り専用キャプチャに対応: 関数引数は名前付き関数参照
+            // **または** lambda(spec §2.5)。両者で per-element 適用関数(`apply`)を
+            // Box<dyn Fn> として組み、all/any/map/filter の本体ロジックは引き続き共有する。
+            // lambda body は囲みスコープの let / パラメータを読み取れるため、外側 env を
+            // クローンした上にパラメータを重ねる(同名ならパラメータが勝つ = シャドーイング)。
+            let mut apply: ApplyOne<'_> = match &args[0] {
                 ast::Expr::Name { name, .. } => {
                     let f = funcs
                         .get(name.as_str())
@@ -1082,9 +1083,12 @@ fn eval_list_method(
                         return Err(EvalError::Unsupported);
                     }
                     let pname = lparams[0].name.clone();
+                    // クロージャ構築時に1回だけ clone する。eval_expr は env を読み取るだけ
+                    // (書き換えない)ので、パラメータ束縛は要素ごとに同じキーを上書きすれば
+                    // 十分で、全体の再 clone は不要(PR #114 レビュー: per-element clone 削減)。
+                    let mut lenv = env.clone();
                     Box::new(move |x: &Value| {
-                        // キャプチャ禁止: lambda 専用 env を都度作る(外側 env は持ち込まない)。
-                        let mut lenv = HashMap::new();
+                        // M31: 外側 env を透過(読み取り専用キャプチャ)しつつパラメータを重ねる。
                         lenv.insert(pname.clone(), x.clone());
                         eval_expr(body, &lenv, funcs, in_ensures, depth + 1)
                     })
@@ -1142,7 +1146,7 @@ fn eval_list_method(
             // `old(...)` を入れると Unsupported で落ちていた。外側の文脈を伝播する。
             let init = eval_expr(&args[0], env, funcs, in_ensures, depth)?;
             // F4 / M25: fold の関数引数も Name | Lambda の両対応。
-            let apply: ApplyTwo<'_> = match &args[1] {
+            let mut apply: ApplyTwo<'_> = match &args[1] {
                 ast::Expr::Name { name, .. } => {
                     let f = funcs
                         .get(name.as_str())
@@ -1165,8 +1169,10 @@ fn eval_list_method(
                     }
                     let accname = lparams[0].name.clone();
                     let elname = lparams[1].name.clone();
+                    // クロージャ構築時に1回だけ clone する(map/filter/all/any 側と同様)。
+                    let mut lenv = env.clone();
                     Box::new(move |acc: Value, x: &Value| {
-                        let mut lenv = HashMap::new();
+                        // M31: 外側 env を透過(読み取り専用キャプチャ)しつつパラメータを重ねる。
                         lenv.insert(accname.clone(), acc);
                         lenv.insert(elname.clone(), x.clone());
                         eval_expr(body, &lenv, funcs, in_ensures, depth + 1)

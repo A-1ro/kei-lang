@@ -1,0 +1,6 @@
+module collections.lambda_capture_result_name
+
+func addResultToEach(xs: List<Int>) -> List<Int> {
+  let result = 5
+  return xs.map(x => x + result)
+}
