@@ -234,6 +234,7 @@ dependencies = [
  "kei_check",
  "kei_fmt",
  "kei_syntax",
+ "serde",
  "serde_json",
 ]
 

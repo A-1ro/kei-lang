@@ -44,6 +44,11 @@ pub fn unknown_tool(name: &str) -> ToolOutcome {
     ToolOutcome::err(format!("Unknown tool '{name}'."))
 }
 
+/// 引数の型不一致(例: boolean 期待の引数に文字列が来た)。
+pub fn invalid_arg(name: &str, expected: &str) -> ToolOutcome {
+    ToolOutcome::err(format!("Argument '{name}' must be a {expected}."))
+}
+
 // ---- kei_spec ----
 
 /// 仕様セクション・エラーコード解説の即引き。
@@ -204,18 +209,46 @@ fn spec_index() -> String {
 /// (kei_check 側の検査ロジックは変えない)。
 pub const MCP_GENERATIVE_MAX_CASES: usize = 10_000;
 
+/// `run_check` の応答本体。`#[serde(flatten)]` で `CheckReport` の `diagnostics` /
+/// `contracts` をトップレベルに展開する(`CheckReport` 自体には手を入れない)。
+#[derive(serde::Serialize)]
+struct CheckResponse {
+    #[serde(flatten)]
+    report: kei_check::CheckReport,
+    opaque_imports: Vec<String>,
+    generative: GenerativeInfo,
+}
+
+#[derive(serde::Serialize)]
+struct GenerativeInfo {
+    requested: bool,
+    max_cases: usize,
+    skipped: Vec<SkippedInfo>,
+}
+
+/// 生成ケース総数の上限超過で無検査スキップされた関数(M34 レビュー対応)。JSON 上のキー名は
+/// `function`(kei_check 側の `SkippedFunction.func` ではない)— MCP 応答契約としての指定。
+#[derive(serde::Serialize)]
+struct SkippedInfo {
+    function: String,
+    required_cases: usize,
+}
+
 /// 構文+意味検査。応答 JSON は `{ diagnostics, contracts, opaque_imports, generative }`。
 /// - `diagnostics` / `contracts` は従来通り(`CheckReport`)。
 /// - `opaque_imports`: このツールはソース文字列のみを受け取りファイルシステムを参照できないため、
 ///   宣言された import は常に全て opaque になる(M20 の import 解決経路には乗らない)。
 ///   非空なら、その import 由来の型は Ty::Unknown として検査対象外(照合されない)。
-/// - `generative`: `{ requested, max_cases }`。`generative` 引数が true のとき、CLI
+/// - `generative`: `{ requested, max_cases, skipped }`。`generative` 引数が true のとき、CLI
 ///   `kei check --generative` と同じ機構(kei_check::pbt)で契約から PBT を生成・実行し、
 ///   反例があれば KEI-E4005 を diagnostics に積む(kei_check::CheckOptions.generative_max_cases
 ///   経由で MCP_GENERATIVE_MAX_CASES を上限として渡す。検査ロジックの再実装ではなく委譲)。
+///   `skipped` は候補ケース総数が上限を超え無検査でスキップされた関数の一覧(M34 レビュー
+///   対応: 「反例なし=充足」という誤読を防ぐための可視化)。静的検査がクリーンなときだけ
+///   `apply_generative` と同じゲート条件で追加実行する。
 pub fn run_check(source: &str, generative: bool) -> ToolOutcome {
     let parsed = kei_syntax::parse_module(source);
-    let opaque_imports = opaque_import_paths(&parsed.module);
+    let opaque_imports = kei_check::opaque_import_paths(&parsed.module);
     // 構文エラーがあるときは壊れた AST に意味検査をかけない(golden_check と同方針)。
     let report = if parsed.errors.is_empty() {
         let opts = kei_check::CheckOptions {
@@ -230,36 +263,37 @@ pub fn run_check(source: &str, generative: bool) -> ToolOutcome {
             contracts: Vec::new(),
         }
     };
-    let body = serde_json::json!({
-        "diagnostics": report.diagnostics,
-        "contracts": report.contracts,
-        "opaque_imports": opaque_imports,
-        "generative": {
-            "requested": generative,
-            "max_cases": MCP_GENERATIVE_MAX_CASES,
+    // `apply_generative` と同じゲート(静的検査がクリーン)のときだけ、スキップされた
+    // 関数の一覧を追加で取得する(検査ロジックの再実装ではなく、いつ追加で呼ぶかの条件)。
+    let skipped: Vec<SkippedInfo> = if generative
+        && parsed.errors.is_empty()
+        && !report
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == kei_check::Severity::Error)
+    {
+        kei_check::pbt::run_module_with_limit_reporting(&parsed.module, MCP_GENERATIVE_MAX_CASES)
+            .skipped
+            .into_iter()
+            .map(|s| SkippedInfo {
+                function: s.func,
+                required_cases: s.required_cases,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let body = CheckResponse {
+        report,
+        opaque_imports,
+        generative: GenerativeInfo {
+            requested: generative,
+            max_cases: MCP_GENERATIVE_MAX_CASES,
+            skipped,
         },
-    });
+    };
     let json = serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".to_string());
     ToolOutcome::ok(json)
-}
-
-/// import が opaque(FS 未参照のため型情報が引けない)になった一覧。kei_mcp はソース文字列
-/// のみ受け取り import 先ファイルを解決できないため、宣言された import は常に全て opaque になる。
-fn opaque_import_paths(module: &kei_syntax::ast::Module) -> Vec<String> {
-    let mut paths: Vec<String> = module
-        .imports
-        .iter()
-        .map(|imp| {
-            imp.path
-                .iter()
-                .map(|i| i.name.as_str())
-                .collect::<Vec<_>>()
-                .join(".")
-        })
-        .collect();
-    paths.sort();
-    paths.dedup();
-    paths
 }
 
 // ---- kei_fmt ----

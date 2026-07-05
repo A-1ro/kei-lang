@@ -195,6 +195,29 @@ pub fn run_module(module: &ast::Module) -> Vec<PropertyOutcome> {
 /// モジュール内の純粋関数を生成テストする(生成ケース総数の上限を呼び出し元から指定)。
 /// 対象外の関数は結果に現れない。
 pub fn run_module_with_limit(module: &ast::Module, max_cases: usize) -> Vec<PropertyOutcome> {
+    run_module_with_limit_reporting(module, max_cases).outcomes
+}
+
+/// 生成ケース総数の上限超過で無検査スキップされた関数(MCP など呼び出し元に
+/// 「反例なし=充足」という誤読をさせないための可視化情報)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedFunction {
+    pub func: String,
+    pub required_cases: usize,
+}
+
+/// [`run_module_with_limit_reporting`] の戻り値。既存の [`run_module_with_limit`] は
+/// `outcomes` だけを返す薄いラッパーとして残る(CLI 経路の戻り値型・挙動は不変)。
+#[derive(Debug, Clone)]
+pub struct GenerativeRun {
+    pub outcomes: Vec<PropertyOutcome>,
+    pub skipped: Vec<SkippedFunction>,
+}
+
+/// [`run_module_with_limit`] に「上限超過でスキップされた関数」の一覧も添えて返す版
+/// (M34 レビュー対応)。呼び出し元(MCP)が「反例なし=充足」と誤読しないよう、
+/// 検査自体が行われなかった関数を機械的に判別できるようにする。
+pub fn run_module_with_limit_reporting(module: &ast::Module, max_cases: usize) -> GenerativeRun {
     let funcs: HashMap<&str, &ast::FuncDecl> = module
         .items
         .iter()
@@ -207,14 +230,24 @@ pub fn run_module_with_limit(module: &ast::Module, max_cases: usize) -> Vec<Prop
     // 「モジュール内の宣言だけ」(import 先の型は段階保守で対象外)。
     let ctx = DomainCtx::build(module);
 
-    let mut out = Vec::new();
+    let mut outcomes = Vec::new();
+    let mut skipped = Vec::new();
     for item in &module.items {
         let ast::Item::Func(f) = item else { continue };
-        if let Some(outcome) = run_function(f, &funcs, &ctx, max_cases) {
-            out.push(outcome);
+        let mut skip = None;
+        match run_function(f, &funcs, &ctx, max_cases, &mut skip) {
+            Some(outcome) => outcomes.push(outcome),
+            None => {
+                if let Some(required_cases) = skip {
+                    skipped.push(SkippedFunction {
+                        func: f.name.name.clone(),
+                        required_cases,
+                    });
+                }
+            }
         }
     }
-    out
+    GenerativeRun { outcomes, skipped }
 }
 
 /// 純粋関数 1 つを生成テストする。対象外なら `None`。
@@ -223,6 +256,7 @@ fn run_function(
     funcs: &HashMap<&str, &ast::FuncDecl>,
     ctx: &DomainCtx,
     max_cases: usize,
+    skip: &mut Option<usize>,
 ) -> Option<PropertyOutcome> {
     // 対象条件: 純粋(uses なし)・ensures あり・全パラメータがスカラ / List / record 生成可能。
     if !f.uses.is_empty() || f.ensures.is_empty() {
@@ -241,17 +275,25 @@ fn run_function(
         domains.push(candidate_values(&p.ty, ctx, false, &mut visiting)?);
     }
 
-    // 生成ケース総数(各次元の候補数の積)を、デカルト積を実体化する前に見積もる。
-    // 候補は Int=11 / String=3 / Bool=2 値なので Int 引数 N 個で 11^N になり、放置すると
-    // 巨大 Vec の実体化で OOM/ハングに至る。上限超過・桁あふれは「全数検査できない」ため
-    // 過信せず対象外にする(159/166/193 行と同じ安全側の哲学=部分検査で generative に
-    // 上げない)。スキップした関数は verification レポートで runtime のまま現れる。
+    // 生成ケース総数(各次元の候補数の積)の上限根拠は MAX_GENERATIVE_CASES のドキュメント
+    // コメント参照。上限超過は全数検査できないため対象外にする(部分検査で generative へ
+    // 格上げしない、という安全側の哲学は他の None 分岐と同じ)。呼び出し元は
+    // `run_module_with_limit_reporting` でスキップされた関数と必要ケース数を取得できる。
     match domains
         .iter()
         .try_fold(1usize, |acc, d| acc.checked_mul(d.len()))
     {
         Some(n) if n <= max_cases => {}
-        _ => return None,
+        Some(n) => {
+            *skip = Some(n);
+            return None;
+        }
+        None => {
+            // 積がオーバーフローするほど巨大 = 上限超過の極端な場合。正確な値ではなく
+            // 「途方もなく大きい」ことだけ伝えれば十分なので usize::MAX を積む。
+            *skip = Some(usize::MAX);
+            return None;
+        }
     }
 
     let combos = cartesian(&domains);
@@ -2331,6 +2373,29 @@ mod tests {
         assert!(
             o.passed && o.cases_checked > 0,
             "small must be verified: {o:?}"
+        );
+    }
+
+    #[test]
+    fn oversized_generative_space_is_reported_as_skipped() {
+        // run_module_with_limit_reporting は run_module_with_limit と同じ判定に加えて、
+        // 上限超過でスキップされた関数とその必要ケース数を返す(M34 レビュー対応)。
+        let big = module(
+            "module t\n\nfunc big(a: Int, b: Int, c: Int, d: Int, e: Int, g: Int) -> Int\n  ensures result == a\n{\n  return a\n}\n",
+        );
+        let run = run_module_with_limit_reporting(&big, MAX_GENERATIVE_CASES);
+        assert!(
+            !run.outcomes.iter().any(|o| o.func == "big"),
+            "oversized input space must not appear in outcomes: {run:?}"
+        );
+        let skipped = run
+            .skipped
+            .iter()
+            .find(|s| s.func == "big")
+            .expect("oversized function must be reported in skipped");
+        assert!(
+            skipped.required_cases > MAX_GENERATIVE_CASES,
+            "required_cases must exceed the limit: {skipped:?}"
         );
     }
 
