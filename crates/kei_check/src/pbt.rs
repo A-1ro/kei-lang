@@ -182,8 +182,19 @@ fn inputs_text(inputs: &[(String, Value)]) -> String {
         .join(", ")
 }
 
+/// 生成ケース総数(各次元の候補数の積)のデフォルト上限。候補は Int=11 / String=3 / Bool=2 値
+/// なので Int 引数 N 個で 11^N になり、放置すると巨大 Vec の実体化で OOM/ハングに至る。
+/// 呼び出し元(MCP など)がより保守的な値を渡したい場合は `run_module_with_limit` を使う。
+pub const MAX_GENERATIVE_CASES: usize = 100_000;
+
 /// モジュール内の純粋関数を生成テストする。対象外の関数は結果に現れない。
 pub fn run_module(module: &ast::Module) -> Vec<PropertyOutcome> {
+    run_module_with_limit(module, MAX_GENERATIVE_CASES)
+}
+
+/// モジュール内の純粋関数を生成テストする(生成ケース総数の上限を呼び出し元から指定)。
+/// 対象外の関数は結果に現れない。
+pub fn run_module_with_limit(module: &ast::Module, max_cases: usize) -> Vec<PropertyOutcome> {
     let funcs: HashMap<&str, &ast::FuncDecl> = module
         .items
         .iter()
@@ -199,7 +210,7 @@ pub fn run_module(module: &ast::Module) -> Vec<PropertyOutcome> {
     let mut out = Vec::new();
     for item in &module.items {
         let ast::Item::Func(f) = item else { continue };
-        if let Some(outcome) = run_function(f, &funcs, &ctx) {
+        if let Some(outcome) = run_function(f, &funcs, &ctx, max_cases) {
             out.push(outcome);
         }
     }
@@ -211,6 +222,7 @@ fn run_function(
     f: &ast::FuncDecl,
     funcs: &HashMap<&str, &ast::FuncDecl>,
     ctx: &DomainCtx,
+    max_cases: usize,
 ) -> Option<PropertyOutcome> {
     // 対象条件: 純粋(uses なし)・ensures あり・全パラメータがスカラ / List / record 生成可能。
     if !f.uses.is_empty() || f.ensures.is_empty() {
@@ -234,12 +246,11 @@ fn run_function(
     // 巨大 Vec の実体化で OOM/ハングに至る。上限超過・桁あふれは「全数検査できない」ため
     // 過信せず対象外にする(159/166/193 行と同じ安全側の哲学=部分検査で generative に
     // 上げない)。スキップした関数は verification レポートで runtime のまま現れる。
-    const MAX_GENERATIVE_CASES: usize = 100_000;
     match domains
         .iter()
         .try_fold(1usize, |acc, d| acc.checked_mul(d.len()))
     {
-        Some(n) if n <= MAX_GENERATIVE_CASES => {}
+        Some(n) if n <= max_cases => {}
         _ => return None,
     }
 

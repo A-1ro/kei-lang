@@ -1,0 +1,13 @@
+{
+  "id": 17,
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "text": "{\n  \"contracts\": [\n    {\n      \"expr\": \"caseSize >= 1\",\n      \"func\": \"splitIntoCases\",\n      \"kind\": \"requires\",\n      \"span\": {\n        \"end\": {\n          \"col\": 25,\n          \"line\": 9\n        },\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"col\": 12,\n          \"line\": 9\n        }\n      },\n      \"verification\": \"runtime\"\n    },\n    {\n      \"expr\": \"result.full * caseSize + result.remainder == total\",\n      \"func\": \"splitIntoCases\",\n      \"kind\": \"ensures\",\n      \"span\": {\n        \"end\": {\n          \"col\": 61,\n          \"line\": 10\n        },\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"col\": 11,\n          \"line\": 10\n        }\n      },\n      \"verification\": \"runtime\"\n    },\n    {\n      \"expr\": \"result.remainder >= 0\",\n      \"func\": \"splitIntoCases\",\n      \"kind\": \"ensures\",\n      \"span\": {\n        \"end\": {\n          \"col\": 32,\n          \"line\": 11\n        },\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"col\": 11,\n          \"line\": 11\n        }\n      },\n      \"verification\": \"runtime\"\n    },\n    {\n      \"expr\": \"result.remainder < caseSize\",\n      \"func\": \"splitIntoCases\",\n      \"kind\": \"ensures\",\n      \"span\": {\n        \"end\": {\n          \"col\": 38,\n          \"line\": 12\n        },\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"col\": 11,\n          \"line\": 12\n        }\n      },\n      \"verification\": \"runtime\"\n    }\n  ],\n  \"diagnostics\": [\n    {\n      \"code\": \"KEI-E4005\",\n      \"fixes\": [\n        {\n          \"edits\": [],\n          \"title\": \"Fix the implementation to satisfy the contract, or correct the contract\"\n        }\n      ],\n      \"message\": \"ensures 'result.remainder >= 0' of 'splitIntoCases' is violated by a generated input (total = -1, caseSize = 2)\",\n      \"severity\": \"error\",\n      \"span\": {\n        \"end\": {\n          \"col\": 32,\n          \"line\": 11\n        },\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"col\": 11,\n          \"line\": 11\n        }\n      }\n    }\n  ],\n  \"generative\": {\n    \"max_cases\": 10000,\n    \"requested\": true\n  },\n  \"opaque_imports\": []\n}",
+        "type": "text"
+      }
+    ],
+    "isError": false
+  }
+}

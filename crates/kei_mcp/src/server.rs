@@ -61,11 +61,12 @@ fn tools_call(id: Option<Value>, params: &Value) -> Value {
         .cloned()
         .unwrap_or_else(|| json!({}));
     let str_arg = |key: &str| args.get(key).and_then(Value::as_str);
+    let bool_arg = |key: &str| args.get(key).and_then(Value::as_bool).unwrap_or(false);
 
     let outcome = match name {
         "kei_spec" => tools::run_spec(str_arg("topic").unwrap_or("")),
         "kei_check" => match str_arg("source") {
-            Some(src) => tools::run_check(src),
+            Some(src) => tools::run_check(src, bool_arg("generative")),
             None => tools::missing_arg("source"),
         },
         "kei_fmt" => match str_arg("source") {
@@ -114,11 +115,12 @@ fn tools_list_result() -> Value {
             },
             {
                 "name": "kei_check",
-                "description": "Statically check Kei source (syntax + types + effects + contracts). Returns a Diagnostic[] JSON array, each with span, code, and at least one fix candidate.",
+                "description": "Statically check Kei source (syntax + types + effects + contracts). Returns JSON { diagnostics, contracts, opaque_imports, generative }. diagnostics is a Diagnostic[] array, each with span, code, and at least one fix candidate. contracts[].verification reports how strongly each requires/ensures was verified (static/generative/bounded/runtime/trusted/unchecked). opaque_imports lists the dotted module paths of every import in the given source: this tool only sees the source text (not the filesystem), so ALL declared imports are always opaque here — their types are Ty::Unknown and are NOT type-checked; a clean check result does not mean imported types were verified. For import-aware checking, use the CLI `kei check <dir>` instead. Set generative: true to additionally run contract-based property-based testing (the same mechanism as CLI `kei check --generative`) and search for counterexamples (reported as KEI-E4005); this tool caps case generation at a conservative limit smaller than the CLI default to bound tool-call latency — the limit actually used is echoed back in the response's generative.max_cases.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "source": { "type": "string", "description": "Kei source text to check." }
+                        "source": { "type": "string", "description": "Kei source text to check." },
+                        "generative": { "type": "boolean", "description": "Run contract-based property-based testing for counterexamples (like CLI --generative). Default false. Bounded to a conservative case limit; see response `generative.max_cases`." }
                     },
                     "required": ["source"],
                     "additionalProperties": false
