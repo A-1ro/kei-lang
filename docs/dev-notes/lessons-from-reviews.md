@@ -195,3 +195,19 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #110: chore: bump version to 0.4.4 — 2026-07-04 merged
 
 (no actionable patterns — version bump PR, CI (clippy/fmt/test) all green, admin squash-merge; no inline review comments, no discussion comments, no reviews)
+
+## PR #111: feat: M34 MCP 検証経路強化 — kei_check generative + opaque import 可視化 (#89, #90) — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (git fetch + cargo check of feat/m34-mcp-verification branch, EXIT=0); latest merged PR #111 has no inline review comments, no discussion comments, no reviews)
+
+## PR #111: feat: M34 MCP 検証経路強化 — kei_check generative + opaque import 可視化 (#89, #90) — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (gh api contents lookup of PR #111 head tools.rs); PR #111 has 0 inline review comments, 0 discussion comments, 0 reviews; already recorded in prior sections)
+
+## PR #111: feat: M34 MCP 検証経路強化 — kei_check generative + opaque import 可視化 (#89, #90) — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (`cargo test --workspace`, 35 suites all ok, exit=0); latest merged PR is still #111, which has 0 inline review comments, 0 discussion comments, 0 reviews; already recorded in prior sections)
+
+## PR #111: feat: M34 MCP 検証経路強化 — kei_check generative + opaque import 可視化 (#89, #90) — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a status-check command (PR #111 merge state + PR #112 build check), not `gh pr merge`; latest merged PR is still #111, which has 0 inline review comments, 0 discussion comments, 0 reviews; already recorded in prior sections)

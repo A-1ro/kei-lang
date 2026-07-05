@@ -407,3 +407,20 @@ KEI-E2001「lambdas are only allowed as arguments to List combinators」を
 ## PR #110: chore: bump version to 0.4.4 — 2026-07-04 merged
 
 (no design-decision candidates for this PR)
+
+## PR #111: feat: M34 MCP 検証経路強化 — kei_check generative + opaque import 可視化 (#89, #90) — 2026-07-05 merged
+
+### Candidate: `CheckOptions::Default` は手書き実装 — `derive(Default)` に戻すと `generative_max_cases = 0` になり PBT が全関数を黙ってスキップする
+**Why this matters for HANDOFF.md**: `#[derive(Default)]` に「リファクタ」で戻すと usize フィールドの既定が 0 になり、生成ケース総数 > 0 の全関数が上限超過扱いで対象外になる(エラーは出ず、契約が `[runtime]` に留まるだけ)ため、気づきにくい退行になる。
+**Draft entry** (lift verbatim if approved):
+> `kei_check::CheckOptions` は M34 以降 `generative_max_cases: usize` を持ち、`Default` は **手書き実装**(既定 = `pbt::MAX_GENERATIVE_CASES` = 100,000)。`#[derive(Default)]` に戻してはならない — derive だと 0 になり、generative PBT が全関数を「上限超過」として黙ってスキップする(診断は出ない)。新フィールドを足すときも非ゼロ既定が要るなら手書き Default 側に追加する。CLI 側は `..CheckOptions::default()` で追従する構造なので、CLI にフラグを増やさない限り上限は自動で既定値を拾う。
+
+### Candidate: MCP の generative 上限 10,000 は MCP 固有の応答時間ポリシー — 検査ロジックは kei_check::pbt への委譲であり再実装禁止
+**Why this matters for HANDOFF.md**: 「MCP と CLI で反例探索の結果が違う」ように見える事象(MCP では対象外だが CLI では反例が出る等)は、`MCP_GENERATIVE_MAX_CASES = 10,000` < CLI 既定 100,000 という意図的な差が原因。これを知らないとバグ扱いして上限を安易に揃えたり、MCP 側に別実装を生やしやすい。
+**Draft entry** (lift verbatim if approved):
+> MCP `kei_check` の generative は CLI `--generative` と **同一機構**(`kei_check::pbt`。`CheckOptions.generative_max_cases` 経由で上限だけ差し替える)。MCP 側上限は `tools::MCP_GENERATIVE_MAX_CASES = 10,000`(CLI 既定 100,000 より保守的)で、これはインタラクティブなツール呼び出しの応答時間を抑える **MCP 固有ポリシー**。実際の上限は応答の `generative.max_cases` にエコーバックされる契約なので、値を変えるときは golden(`tests/mcp/`)とツール description の両方が追従する。検証ロジックを MCP 側に再実装しないこと — 上限以外の挙動差が生まれたらそれはバグ。
+
+### Candidate: MCP `kei_check` では宣言 import は「常に全て」opaque — `opaque_imports` 非空 = 検査は不完全、が API 契約
+**Why this matters for HANDOFF.md**: MCP はソース文字列のみを受け取り M20 の import 解決経路(FS 参照)に乗らないため、import 由来の型は `Ty::Unknown` で照合されない。この制約を知らないと「MCP で clean だったのに CLI で型エラー」を不整合バグと誤診したり、MCP に FS アクセスを安易に足して sandbox 前提を壊しやすい。
+**Draft entry** (lift verbatim if approved):
+> MCP `kei_check` はソース文字列のみを入力とし、ファイルシステムを参照しない(M20 の import 解決には乗らない)。よって宣言された import は **常に全て opaque**(型は `Ty::Unknown`、照合されない)。M34 以降、応答の `opaque_imports` にドット区切りモジュールパス(sort + dedup 済み)を列挙し、「非空なら clean でも import 由来の型は未検証」をツール description に明記するのが API 契約。import 跨ぎの保証が要る検証は CLI `kei check <dir>` に誘導する。MCP に import 解決用の FS アクセスを足す変更は、この「source-only」前提の設計判断を覆すので先に issue で議論すること。
