@@ -371,7 +371,7 @@ struct Emitter<'a> {
     /// List コンビネータ呼び出し位置(Call span 開始)。検査器由来の権威的な型情報。
     list_ops: &'a HashSet<(u32, u32)>,
     /// Map メソッド呼び出し位置(Call span 開始、M33)。List とは独立した集合(理由は
-    /// kei_check::map_op_spans_with_resolver のコメント参照)。
+    /// kei_check::op_spans_with_resolver のコメント参照)。
     map_ops: &'a HashSet<(u32, u32)>,
     out: Out,
     /// ensures 内 `old(...)` の割当。span をキーに kei$old$N の割当を引く。fold など引数の
@@ -1096,16 +1096,13 @@ impl Emitter<'_> {
                 return;
             }
         }
-        // `Map.empty()` → `new Map()`(M33)。型検査済みの構文木のみ emit に来る不変条件
-        // があるため、ここでは検査を再実装せず構文パターンだけで判定する(既存の
-        // Ok/Err/Some/None 判定 [RuntimeUses::expr] と同じ「型情報なしの構文一致」方式)。
-        if let ast::Expr::Field { base, name, .. } = callee {
-            if let ast::Expr::Name { name: root, .. } = base.as_ref() {
-                if root == "Map" && name.name == "empty" && args.is_empty() {
-                    self.out.frag("new Map()");
-                    return;
-                }
-            }
+        // `Map.empty()` → `new Map()`(M33)。検査器が「組み込み Map の静的コンストラクタ
+        // 呼び出し」と確定した位置(map_ops)だけを根拠にする。ユーザー定義の `Map`
+        // 名前空間(import alias 等)由来の呼び出しは map_ops に載らないため書き換えない
+        // (レビュー対応: 構文一致はサイレント誤コンパイル経路になるため撤去)。
+        if is_runtime_method(callee, args, self.map_ops, "empty", 0) {
+            self.out.frag("new Map()");
+            return;
         }
         // Map<K, V>.get(k) → keiMapGet(m, k)(M33。get だけランタイムヘルパー方式。
         // List.get と同じ理由: 添字/キー式の二重評価回避)。
@@ -1119,11 +1116,8 @@ impl Emitter<'_> {
                 return;
             }
         }
-        if let ast::Expr::Field { base, name, .. } = callee {
-            let is_map_op = self
-                .map_ops
-                .contains(&(name.span.start.line, name.span.start.col));
-            if is_map_op && name.name == "set" && args.len() == 2 {
+        if is_runtime_method(callee, args, self.map_ops, "set", 2) {
+            if let ast::Expr::Field { base, .. } = callee {
                 // 非破壊な set: 新しい Map を元の Map + 1 エントリから生成する。
                 self.out.frag("new Map([...");
                 self.emit_expr(base, Prec::Postfix);
@@ -1134,9 +1128,9 @@ impl Emitter<'_> {
                 self.out.frag("]])");
                 return;
             }
-            // has/size は変換不要: TS の Map にも同名 API があるため既存の汎用フォールバック
-            // (このメソッド末尾の Call、emit_expr の Field)にそのまま乗る。
         }
+        // has/size は変換不要: TS の Map にも同名 API があるため既存の汎用フォールバック
+        // (このメソッド末尾の Call、emit_expr の Field)にそのまま乗る。
         // List コンビネータのメソッド呼び出し(M9 / spec v0.3-collections §9)。
         // **この呼び出し位置を検査器が List 操作と確定している**ときだけ配列メソッドへ写す
         // (構文ヒューリスティックでレシーバ型を推測しない。外部呼び出しの連鎖
@@ -1372,7 +1366,7 @@ fn ts_string(s: &str) -> String {
 fn is_runtime_method(
     callee: &ast::Expr,
     args: &[ast::Expr],
-    list_ops: &HashSet<(u32, u32)>,
+    op_spans: &HashSet<(u32, u32)>,
     name: &str,
     arity: usize,
 ) -> bool {
@@ -1381,7 +1375,7 @@ fn is_runtime_method(
         ast::Expr::Field { name: field_name, .. }
             if field_name.name == name
                 && args.len() == arity
-                && list_ops.contains(&(field_name.span.start.line, field_name.span.start.col))
+                && op_spans.contains(&(field_name.span.start.line, field_name.span.start.col))
     )
 }
 

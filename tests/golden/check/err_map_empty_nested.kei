@@ -1,0 +1,5 @@
+module err.map_empty_nested
+
+func mk(xs: List<String>) -> Map<String, Int> {
+  return xs.fold(Map.empty(), (acc, x) => acc)
+}

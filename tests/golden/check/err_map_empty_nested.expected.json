@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2012",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Annotate it, e.g. 'let m: Map<String, Int> = Map.empty()'"
+      }
+    ],
+    "message": "'Map.empty()' requires a type annotation to determine its key/value types",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 29,
+        "line": 4
+      },
+      "file": "tests/golden/check/err_map_empty_nested.kei",
+      "start": {
+        "col": 18,
+        "line": 4
+      }
+    }
+  }
+]
