@@ -276,9 +276,11 @@ pub enum Expr {
         rhs: Box<Expr>,
         span: Span,
     },
-    /// `Path { field: expr, shorthand }`
+    /// `Path { ...spread, field: expr, shorthand }`
     RecordLit {
         path: Vec<Ident>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        spread: Option<Box<Expr>>,
         fields: Vec<RecordLitField>,
         span: Span,
     },

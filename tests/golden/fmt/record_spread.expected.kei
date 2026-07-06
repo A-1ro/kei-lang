@@ -1,0 +1,8 @@
+func moveToOrigin(p: Point) -> Point {
+  let q = Point { ...p, x: 0 }
+  return q
+}
+
+func identity(p: Point) -> Point {
+  return Point { ...p }
+}

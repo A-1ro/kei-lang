@@ -266,7 +266,10 @@ impl<'a> RuntimeUses<'a> {
                 self.expr(lhs);
                 self.expr(rhs);
             }
-            ast::Expr::RecordLit { fields, .. } => {
+            ast::Expr::RecordLit { spread, fields, .. } => {
+                if let Some(s) = spread {
+                    self.expr(s);
+                }
                 for f in fields {
                     if let Some(v) = &f.value {
                         self.expr(v);
@@ -897,13 +900,25 @@ impl Emitter<'_> {
                 }
             }
             ast::Expr::Binary { op, lhs, rhs, .. } => self.emit_binary(*op, lhs, rhs, parent),
-            ast::Expr::RecordLit { path, fields, .. } => {
+            ast::Expr::RecordLit {
+                path,
+                fields,
+                spread,
+                ..
+            } => {
                 let parts: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
                 self.out.frag(&format!("{}({{ ", parts.join(".")));
-                for (i, f) in fields.iter().enumerate() {
-                    if i > 0 {
+                let mut first = true;
+                if let Some(s) = spread {
+                    self.out.frag("...");
+                    self.emit_expr(s, Prec::Implication);
+                    first = false;
+                }
+                for f in fields.iter() {
+                    if !first {
                         self.out.frag(", ");
                     }
+                    first = false;
                     match &f.value {
                         None => self.out.frag(&f.name.name),
                         Some(v) => {
@@ -1236,7 +1251,10 @@ fn collect_old_exprs(ensures: &[ast::Expr]) -> Vec<&ast::Expr> {
                 walk(lhs, out);
                 walk(rhs, out);
             }
-            ast::Expr::RecordLit { fields, .. } => {
+            ast::Expr::RecordLit { spread, fields, .. } => {
+                if let Some(s) = spread {
+                    walk(s, out);
+                }
                 for f in fields {
                     if let Some(v) = &f.value {
                         walk(v, out);

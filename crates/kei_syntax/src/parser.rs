@@ -1379,6 +1379,7 @@ impl Parser {
         let open = self.bump(); // '{'
         let start = path.first().expect("path is non-empty").span;
         let mut fields = Vec::new();
+        let mut spread: Option<Box<Expr>> = None;
         let end;
         loop {
             self.skip_newlines();
@@ -1390,6 +1391,38 @@ impl Parser {
                 self.unclosed_delimiter("{", open.span, "}");
                 end = self.cur().span;
                 break;
+            }
+            if self.at(T::DotDotDot) {
+                let dots = self.bump(); // '...'
+                let expr = self.parse_expr(false)?;
+                let sp = dots.span.to(expr.span());
+                if fields.is_empty() && spread.is_none() {
+                    spread = Some(Box::new(expr));
+                } else {
+                    self.error(
+                        codes::UNEXPECTED_TOKEN,
+                        "record spread '...' is allowed at most once, and only as the first item in the literal".to_string(),
+                        sp,
+                        FixHint::direction(
+                            "Keep a single '...' spread and place it before all named fields",
+                        ),
+                    );
+                }
+                self.skip_newlines();
+                if !self.eat(T::Comma) && !self.at(T::RBrace) && !self.at(T::Eof) {
+                    let tok = self.cur().clone();
+                    self.error(
+                        codes::UNEXPECTED_TOKEN,
+                        format!(
+                            "expected ',' or '}}' in record literal, found {}",
+                            tok.found_label()
+                        ),
+                        tok.span,
+                        FixHint::replace("Insert ','", Span::point(tok.span.start), ","),
+                    );
+                    self.recover_in_braces();
+                }
+                continue;
             }
             let name = match self.expect_ident("a field name") {
                 Some(name) => name,
@@ -1425,6 +1458,7 @@ impl Parser {
         }
         Some(Expr::RecordLit {
             path,
+            spread,
             fields,
             span: start.to(end),
         })

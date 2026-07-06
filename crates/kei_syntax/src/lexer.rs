@@ -242,6 +242,11 @@ impl Lexer {
             ']' => TokenKind::RBracket,
             ',' => TokenKind::Comma,
             ':' => TokenKind::Colon,
+            '.' if self.peek() == Some('.') && self.peek2() == Some('.') => {
+                self.bump();
+                self.bump();
+                TokenKind::DotDotDot
+            }
             '.' => TokenKind::Dot,
             '=' => TokenKind::Eq,
             '<' => TokenKind::Lt,

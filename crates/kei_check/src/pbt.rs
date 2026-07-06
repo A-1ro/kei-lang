@@ -971,14 +971,28 @@ fn eval_expr(
             }
             Ok(Value::List(xs))
         }
-        ast::Expr::RecordLit { path, fields, .. } => {
+        ast::Expr::RecordLit {
+            path,
+            fields,
+            spread,
+            ..
+        } => {
             // 単一名の record(`R { ... }`)のみ評価する。enum バリアントの record 形は段階1
             // と同じく対象外(network/database のような外部値が混入することを避ける段階保守)。
             if path.len() != 1 {
                 return Err(EvalError::Unsupported);
             }
             let name = path[0].name.clone();
-            let mut out: Vec<(String, Value)> = Vec::with_capacity(fields.len());
+            let mut out: Vec<(String, Value)> = match spread {
+                Some(s) => {
+                    let v = eval_expr(s, env, funcs, in_ensures, depth)?;
+                    match unwrap_tagged(&v) {
+                        Value::Record { fields, .. } => fields.clone(),
+                        _ => return Err(EvalError::Unsupported),
+                    }
+                }
+                None => Vec::with_capacity(fields.len()),
+            };
             for f in fields {
                 let v = match &f.value {
                     Some(expr) => eval_expr(expr, env, funcs, in_ensures, depth)?,
@@ -987,7 +1001,11 @@ fn eval_expr(
                         .cloned()
                         .ok_or(EvalError::Unsupported)?,
                 };
-                out.push((f.name.name.clone(), v));
+                if let Some(existing) = out.iter_mut().find(|(n, _)| *n == f.name.name) {
+                    existing.1 = v;
+                } else {
+                    out.push((f.name.name.clone(), v));
+                }
             }
             Ok(Value::Record { name, fields: out })
         }

@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2002",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Use one of the fields of 'Point'"
+      }
+    ],
+    "message": "no field 'z' on 'Point'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 25,
+        "line": 10
+      },
+      "file": "tests/golden/check/err_record_spread_unknown_field.kei",
+      "start": {
+        "col": 24,
+        "line": 10
+      }
+    }
+  }
+]

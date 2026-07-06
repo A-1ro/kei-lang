@@ -1564,9 +1564,12 @@ impl FnChecker<'_> {
             ast::Expr::Call { callee, args, span } => self.infer_call(callee, args, *span),
             ast::Expr::Unary { op, expr, .. } => self.infer_unary(*op, expr),
             ast::Expr::Binary { op, lhs, rhs, span } => self.infer_binary(*op, lhs, rhs, *span),
-            ast::Expr::RecordLit { path, fields, span } => {
-                self.infer_record_lit(path, fields, *span)
-            }
+            ast::Expr::RecordLit {
+                path,
+                fields,
+                spread,
+                span,
+            } => self.infer_record_lit(path, fields, spread.as_deref(), *span),
             ast::Expr::Match {
                 scrutinee,
                 arms,
@@ -3031,6 +3034,7 @@ impl FnChecker<'_> {
         &mut self,
         path: &[ast::Ident],
         fields: &[ast::RecordLitField],
+        spread: Option<&ast::Expr>,
         span: SynSpan,
     ) -> Ty {
         let root = &path[0].name;
@@ -3039,7 +3043,8 @@ impl FnChecker<'_> {
                 Some(NameKind::Record) => {
                     let def = self.env.records.get(root).cloned().unwrap_or_default();
                     let owner = root.clone();
-                    self.check_record_fields(&def, fields, &owner, span);
+                    let owner_ty = Ty::Record(owner.clone());
+                    self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span);
                     Ty::Record(owner)
                 }
                 Some(NameKind::Alias) => {
@@ -3048,16 +3053,17 @@ impl FnChecker<'_> {
                         Ty::Record(r) => {
                             let def = self.env.records.get(r).cloned().unwrap_or_default();
                             let owner = r.clone();
-                            self.check_record_fields(&def, fields, &owner, span);
+                            let owner_ty = resolved.clone();
+                            self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span);
                             resolved
                         }
                         Ty::Unknown => {
-                            self.infer_lit_fields(fields);
+                            self.infer_lit_fields(spread, fields);
                             Ty::Unknown
                         }
                         _ => {
                             let root = root.clone();
-                            self.infer_lit_fields(fields);
+                            self.infer_lit_fields(spread, fields);
                             self.push(
                                 codes::RECORD_LITERAL,
                                 format!("'{root}' is not a record type"),
@@ -3070,7 +3076,7 @@ impl FnChecker<'_> {
                 }
                 Some(NameKind::Enum) => {
                     let root = root.clone();
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::UNKNOWN_VARIANT,
                         format!("enum '{root}' needs a variant: '{root}.Variant {{ ... }}'"),
@@ -3080,12 +3086,12 @@ impl FnChecker<'_> {
                     Ty::Enum(root)
                 }
                 Some(NameKind::Import) => {
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     Ty::Unknown
                 }
                 Some(NameKind::Func) => {
                     let root = root.clone();
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::RECORD_LITERAL,
                         format!("'{root}' is not a record type"),
@@ -3096,7 +3102,7 @@ impl FnChecker<'_> {
                 }
                 None => {
                     let root = root.clone();
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     let candidates: Vec<&str> = self
                         .env
                         .kinds
@@ -3126,12 +3132,13 @@ impl FnChecker<'_> {
             match self.find_variant(&enum_name, &vname.name) {
                 Some(VariantDef::Record(def)) => {
                     let owner = format!("{enum_name}.{}", vname.name);
-                    self.check_record_fields(&def, fields, &owner, span);
+                    let owner_ty = Ty::Enum(enum_name.clone());
+                    self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span);
                     Ty::Enum(enum_name)
                 }
                 Some(VariantDef::Tuple(_)) => {
                     let v = &vname.name;
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::UNKNOWN_VARIANT,
                         format!(
@@ -3144,7 +3151,7 @@ impl FnChecker<'_> {
                 }
                 Some(VariantDef::Unit) => {
                     let v = &vname.name;
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::UNKNOWN_VARIANT,
                         format!(
@@ -3156,18 +3163,18 @@ impl FnChecker<'_> {
                     Ty::Enum(enum_name)
                 }
                 None => {
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.unknown_variant(&enum_name, vname);
                     Ty::Unknown
                 }
             }
         } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::Import) {
-            self.infer_lit_fields(fields);
+            self.infer_lit_fields(spread, fields);
             Ty::Unknown
         } else {
             let full: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
             let full = full.join(".");
-            self.infer_lit_fields(fields);
+            self.infer_lit_fields(spread, fields);
             if self.env.kinds.contains_key(root.as_str()) {
                 self.push(
                     codes::RECORD_LITERAL,
@@ -3188,7 +3195,10 @@ impl FnChecker<'_> {
     }
 
     /// 期待型が分からないリテラルでも、フィールド値の式は検査しておく。
-    fn infer_lit_fields(&mut self, fields: &[ast::RecordLitField]) {
+    fn infer_lit_fields(&mut self, spread: Option<&ast::Expr>, fields: &[ast::RecordLitField]) {
+        if let Some(s) = spread {
+            self.infer(s);
+        }
         for f in fields {
             match &f.value {
                 Some(e) => {
@@ -3205,9 +3215,15 @@ impl FnChecker<'_> {
         &mut self,
         def: &[(String, Ty)],
         fields: &[ast::RecordLitField],
+        spread: Option<&ast::Expr>,
         owner: &str,
+        owner_ty: &Ty,
         span: SynSpan,
     ) {
+        if let Some(s) = spread {
+            let spread_ty = self.infer(s);
+            self.check_assign(owner_ty, &spread_ty, s.span());
+        }
         let mut seen: HashSet<String> = HashSet::new();
         for f in fields {
             if !seen.insert(f.name.name.clone()) {
@@ -3248,7 +3264,7 @@ impl FnChecker<'_> {
             .map(|(n, _)| n.as_str())
             .filter(|n| !seen.contains(*n))
             .collect();
-        if !missing.is_empty() {
+        if spread.is_none() && !missing.is_empty() {
             let list: Vec<String> = missing.iter().map(|n| format!("'{n}'")).collect();
             self.push(
                 codes::RECORD_LITERAL,
@@ -4026,7 +4042,10 @@ fn forbid_old_inside_lambda_body(
                 walk(lhs, diags, env, forbidden_names);
                 walk(rhs, diags, env, forbidden_names);
             }
-            ast::Expr::RecordLit { fields, .. } => {
+            ast::Expr::RecordLit { spread, fields, .. } => {
+                if let Some(s) = spread {
+                    walk(s, diags, env, forbidden_names);
+                }
                 for f in fields {
                     if let Some(v) = &f.value {
                         walk(v, diags, env, forbidden_names);
@@ -4145,16 +4164,22 @@ pub fn contract_expr_text(e: &ast::Expr) -> String {
                 child(rhs, rhs_min)
             )
         }
-        ast::Expr::RecordLit { path, fields, .. } => {
+        ast::Expr::RecordLit {
+            path,
+            fields,
+            spread,
+            ..
+        } => {
             let head: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
-            let fs: Vec<String> = fields
-                .iter()
-                .map(|f| match &f.value {
-                    None => f.name.name.clone(),
-                    Some(v) => format!("{}: {}", f.name.name, contract_expr_text(v)),
-                })
-                .collect();
-            format!("{} {{ {} }}", head.join("."), fs.join(", "))
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(s) = spread {
+                parts.push(format!("...{}", contract_expr_text(s)));
+            }
+            parts.extend(fields.iter().map(|f| match &f.value {
+                None => f.name.name.clone(),
+                Some(v) => format!("{}: {}", f.name.name, contract_expr_text(v)),
+            }));
+            format!("{} {{ {} }}", head.join("."), parts.join(", "))
         }
         ast::Expr::Match {
             scrutinee, arms, ..

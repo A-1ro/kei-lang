@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E0101",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Keep a single '...' spread and place it before all named fields"
+      }
+    ],
+    "message": "record spread '...' is allowed at most once, and only as the first item in the literal",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 28,
+        "line": 2
+      },
+      "file": "tests/golden/syntax/err_record_spread_twice.kei",
+      "start": {
+        "col": 24,
+        "line": 2
+      }
+    }
+  }
+]

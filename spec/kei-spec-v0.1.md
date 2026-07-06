@@ -81,6 +81,7 @@ import infra.database as Database
 - モジュールパスはファイルパスと1:1対応。
 - **import 境界の型解決(v0.4 / M20)**: `kei check <file>` は `module a.b.c` 宣言と入力ファイルのパスから project root を逆算し(親を `path` の段数だけ遡る)、`import a.b { X }` を `<root>/a/b.kei` まで解決する。対象モジュールが見つかれば、import した record / enum / type alias は通常のローカル型と同じ検査経路に乗り、フィールド名タイプミスは `KEI-E2002`、フィールド型誤用は `KEI-E2001`、enum match の非網羅は `KEI-E2007` で検出される。解決できない import(ファイル不在 / パース失敗 / 循環)は従来通り **opaque**(`Ty::Unknown`)として扱い、検査をブロックしない。namespace 別名 import(`import x.y as N`)は将来拡張のため M20 でも opaque のまま据え置く。
 - **List リテラルと tagged 明示構築(v0.4 / M22)**: `[a, b, c]` で `List<T>` を直接構築できる(`T` は要素から推論。空 `[]` は文脈の型注釈から決まる)。`type Id = Base tagged "Id"` で導入した tagged 型は **同名コンストラクタ呼び出し** `Id(value)` で明示構築でき、`value` の型は `Base` と互換であること(不一致は `KEI-E2001`)。素の `Base → tagged` 代入は引き続き `KEI-E2005` でブロックする(構築点を常に明示する規律を保つ)。`enum`・`record` のコンストラクタはそれぞれ専用構文(`E.V(...)` / `R { ... }`)を持ち、tagged だけが「関数呼び出しの形での値構築」を持つ例外。
+- **record 差分更新構文 spread(v0.5 / M32 / #97)**: `RecordName { ...expr, field: v }` の形で、既存の record 値の一部フィールドだけを変えた新しい値を構築できる。`...` による spread は 1 つのリテラルにつき最大1個、かつフィールドより前(先頭位置)にしか書けない(2個以上、または先頭以外への出現は構文エラー `KEI-E0101`)。spread 式の型は、そのリテラルが構築しようとしている型(plain record ならそのレコード型、enum の named-field variant ならその enum 型)と一致していなければならない(不一致は `KEI-E2001`)。明示フィールドは spread 由来の値を上書きし、spread がある場合はフィールド網羅チェック(missing field)を行わない。契約式(`requires` / `ensures`)内でも spread を使用できる(spread 式自体も契約式の純粋性制約に従う)。TS 出力は object spread(`{ ...expr, field: value }`)に写す。
 
 ### 2.4 数値型と金額表現(v0.4 / #61)
 

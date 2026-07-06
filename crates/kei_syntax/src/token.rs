@@ -41,6 +41,7 @@ pub enum TokenKind {
     Comma,
     Colon,
     Dot,
+    DotDotDot,
     Arrow,
     FatArrow,
     // 演算子
@@ -134,6 +135,7 @@ impl TokenKind {
             TokenKind::Comma => ",",
             TokenKind::Colon => ":",
             TokenKind::Dot => ".",
+            TokenKind::DotDotDot => "...",
             TokenKind::Arrow => "->",
             TokenKind::FatArrow => "=>",
             TokenKind::Eq => "=",

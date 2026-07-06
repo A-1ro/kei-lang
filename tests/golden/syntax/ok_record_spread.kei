@@ -1,0 +1,7 @@
+func moveToOrigin(p: Point) -> Point {
+  return Point { ...p, x: 0 }
+}
+
+func onlySpread(p: Point) -> Point {
+  return Point { ...p }
+}

@@ -1,0 +1,16 @@
+module err.record_spread_type_mismatch
+
+record Point {
+  x: Int
+  y: Int
+}
+
+record Size {
+  width: Int
+  height: Int
+}
+
+// spread の式は構築先(Point)と同じ型でなければならない。Size を渡すと KEI-E2001。
+func bad(s: Size) -> Point {
+  return Point { ...s, x: 0 }
+}

@@ -169,6 +169,10 @@ func shift(p: Point, dx: Int) -> Point {
   return Point { x, y }                // 変数名がフィールド名と一致するなら省略形
 }
 
+func moveToOrigin(p: Point) -> Point {
+  return Point { ...p, x: 0 }          // spread: p の全フィールドを引き継ぎ x だけ上書き
+}
+
 func makeDot() -> Shape {
   return Shape.Dot                     // unit: E.V
 }
