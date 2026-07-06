@@ -1408,20 +1408,7 @@ impl Parser {
                         ),
                     );
                 }
-                self.skip_newlines();
-                if !self.eat(T::Comma) && !self.at(T::RBrace) && !self.at(T::Eof) {
-                    let tok = self.cur().clone();
-                    self.error(
-                        codes::UNEXPECTED_TOKEN,
-                        format!(
-                            "expected ',' or '}}' in record literal, found {}",
-                            tok.found_label()
-                        ),
-                        tok.span,
-                        FixHint::replace("Insert ','", Span::point(tok.span.start), ","),
-                    );
-                    self.recover_in_braces();
-                }
+                self.expect_record_lit_separator();
                 continue;
             }
             let name = match self.expect_ident("a field name") {
@@ -1441,20 +1428,7 @@ impl Parser {
                 None
             };
             fields.push(RecordLitField { name, value, span });
-            self.skip_newlines();
-            if !self.eat(T::Comma) && !self.at(T::RBrace) && !self.at(T::Eof) {
-                let tok = self.cur().clone();
-                self.error(
-                    codes::UNEXPECTED_TOKEN,
-                    format!(
-                        "expected ',' or '}}' in record literal, found {}",
-                        tok.found_label()
-                    ),
-                    tok.span,
-                    FixHint::replace("Insert ','", Span::point(tok.span.start), ","),
-                );
-                self.recover_in_braces();
-            }
+            self.expect_record_lit_separator();
         }
         Some(Expr::RecordLit {
             path,
@@ -1462,6 +1436,25 @@ impl Parser {
             fields,
             span: start.to(end),
         })
+    }
+
+    /// record リテラル内の 1 エントリ(spread / フィールド)直後の区切りを読む。
+    /// `,` か `}`(または EOF)以外なら KEI-E0101 を報告してブレース内回復する。
+    fn expect_record_lit_separator(&mut self) {
+        self.skip_newlines();
+        if !self.eat(T::Comma) && !self.at(T::RBrace) && !self.at(T::Eof) {
+            let tok = self.cur().clone();
+            self.error(
+                codes::UNEXPECTED_TOKEN,
+                format!(
+                    "expected ',' or '}}' in record literal, found {}",
+                    tok.found_label()
+                ),
+                tok.span,
+                FixHint::replace("Insert ','", Span::point(tok.span.start), ","),
+            );
+            self.recover_in_braces();
+        }
     }
 
     // ---- match 式 ----

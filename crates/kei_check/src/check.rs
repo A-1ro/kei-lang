@@ -3132,6 +3132,24 @@ impl FnChecker<'_> {
             match self.find_variant(&enum_name, &vname.name) {
                 Some(VariantDef::Record(def)) => {
                     let owner = format!("{enum_name}.{}", vname.name);
+                    // M32 / #97: spread は plain record リテラル限定。enum variant の値は
+                    // TS 側で `{ kind, fields }` の 2 層構造に写るため object spread が
+                    // フィールド位置に wrapper キーを注入して壊れる上、型システムが
+                    // variant を保持しないため variant 一致も静的検証できない。
+                    if let Some(s) = spread {
+                        // spread 式自体の infer と型照合は後続の check_record_fields が行う
+                        // (Ty::Enum との照合は通るが、ここで既に KEI-E2004 を報告済み)。
+                        self.push(
+                            codes::RECORD_LITERAL,
+                            format!(
+                                "spread '...' is not supported in enum variant literals; list all fields of '{owner}' explicitly"
+                            ),
+                            s.span(),
+                            vec![direction(
+                                "Replace the spread with explicit 'field: value' entries (spread is only available for plain record literals)",
+                            )],
+                        );
+                    }
                     let owner_ty = Ty::Enum(enum_name.clone());
                     self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span);
                     Ty::Enum(enum_name)
