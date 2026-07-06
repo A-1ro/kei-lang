@@ -474,3 +474,14 @@ PostToolUse hook が非 merge コマンド(scratchpad での lambda capture repr
 ## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
 
 (no design-decision candidates for this PR)
+
+---
+
+2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad での enum variant への
+record spread repro — `Shape.Square { ...d, s: 1 }` を `kei check --json` で検査し、
+「spread は plain record literal 専用」の診断 + fix を確認するコマンド)で発火。
+最新 merged PR は #116 で、本ファイルに記録済み(候補なしセクション登録済み)のため新規候補なし。
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(review worktree での
+`git checkout --detach`)で発火。最新 merged PR は #116(version bump、機械的変更)で
+上記に記録済みのため、新規候補なし。 -->

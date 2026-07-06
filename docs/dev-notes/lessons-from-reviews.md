@@ -256,3 +256,17 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
 
 (no actionable patterns — hook ran on a non-merge command (scratchpad enum-spread transpile repro `enum_spread.kei`, transpiled successfully); latest merged PR is still #116, a version-bump PR already recorded above with no review activity)
+
+(2026-07-06 再実行: hook が非マージコマンド(`feat/m32-record-spread` の `cargo check` 実確認、EXIT=0)で発火。最新マージ PR は依然 #116 で、レビュー活動なしを再確認 — 新規パターンなし)
+
+## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
+
+(no actionable patterns)
+
+## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (M32 record-spread repro: `repro_enum_spread.kei` の enum variant への spread が期待通り診断+fix 提案を返すことを確認); latest merged PR is still #116 (version-bump, 0 inline comments, 0 discussion, no reviews), already recorded above)
+
+## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (M32 worktree での `..p` 2 ドット spread near-miss の `kei check` 実確認、KEI-E0101 を確認); latest merged PR is still #116 (version-bump PR, 0 inline comments, 0 discussion comments, no reviews — 再確認済み), already recorded above)
