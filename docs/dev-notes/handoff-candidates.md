@@ -470,3 +470,7 @@ PostToolUse hook が非 merge コマンド(scratchpad での lambda capture repr
 **Why this matters for HANDOFF.md**: `tests/golden/` は仕様の固定化装置であり、Milestone が意図的に契約を変えるときだけ、承認のうえ削除・転用できる — この手続きの前例として記録価値がある。あわせて PR 本文の「follow-up に回す」記載が最終 diff と食い違う(`err_list_contains_record` の stale fix 文面は結局本 PR 内で修正済み)ことも、PR 本文だけを信じない教訓になる。
 **Draft entry** (lift verbatim if approved):
 > M31 で golden `err_type_lambda_capture`(関数パラメータのキャプチャを KEI-E2001 で拒否する契約を固定していた)を人間承認のうえ削除し、同 fixture を正常系 `ok_lambda_capture` に転用した。golden の削除・転用は「言語契約の意図的変更」のときだけ、承認を経て行う。また `List.contains` の fix 文面「(lambdas cannot capture outer variables)」は M31 で stale になるため同 PR 内で「Compare a field directly: 'xs.any(e => e.field == value)'」に更新済み(golden `err_list_contains_record` も追従)— 診断・fix 文面がスコープ規則に言及している箇所は、スコープ規則を変える Milestone で grep して巻き取ること。
+
+## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
+
+(no design-decision candidates for this PR)
