@@ -259,3 +259,34 @@ fn module_type_defs_extracts_records_enums_aliases() {
         other => panic!("unexpected Status def: {other:?}"),
     }
 }
+
+/// import した record の Map フィールドがキー制約違反のとき KEI-E2011 が出ること
+/// (PR #118 レビュー対応: import 経由の型は `imports.rs::ty_of` が制約検査をせず
+/// 素通りさせていたため、ローカル定義と異なり検出漏れがあった)。
+#[test]
+fn imported_record_with_invalid_map_key_is_detected() {
+    let src = "module t.consumer\n\
+               import t.product { Product }\n\
+               func bad(p: Product) -> Int {\n\
+                   return p.id\n\
+               }\n";
+    let module = parse(src);
+
+    let resolver = FakeResolver::new().insert(
+        &["t", "product"],
+        vec![(
+            "Product",
+            ResolvedTypeDef::Record(vec![(
+                "flags".to_string(),
+                Ty::Map(Box::new(Ty::Bool), Box::new(Ty::Int)),
+            )]),
+        )],
+    );
+    let diags =
+        check_module_with_resolver("consumer.kei", &module, CheckOptions::default(), &resolver);
+    let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
+    assert!(
+        codes.contains(&"KEI-E2011"),
+        "expected KEI-E2011 for Map<Bool, Int> field on imported record; got {codes:?}"
+    );
+}

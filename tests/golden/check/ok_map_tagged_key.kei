@@ -1,0 +1,11 @@
+module ok.map_tagged_key
+
+type ProductId = String tagged "ProductId"
+
+func emptyByProduct() -> Map<ProductId, Int> {
+  return Map.empty()
+}
+
+func has(stock: Map<ProductId, Int>, id: ProductId) -> Bool {
+  return stock.has(id)
+}

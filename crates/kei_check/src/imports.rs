@@ -258,6 +258,14 @@ fn ty_of(
         "List" if t.args.len() == 1 => Ty::List(Box::new(ty_of(
             &t.args[0], records, enums, aliases, alias_tys, visiting,
         ))),
+        "Map" if t.args.len() == 2 => Ty::Map(
+            Box::new(ty_of(
+                &t.args[0], records, enums, aliases, alias_tys, visiting,
+            )),
+            Box::new(ty_of(
+                &t.args[1], records, enums, aliases, alias_tys, visiting,
+            )),
+        ),
         "Result" if t.args.len() == 2 => Ty::Result(
             Box::new(ty_of(
                 &t.args[0], records, enums, aliases, alias_tys, visiting,

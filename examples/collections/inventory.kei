@@ -41,3 +41,29 @@ func sampleStockValue() -> Int {
 func sampleReorderPlans() -> List<ReorderPlan> {
   return planAllReorders(sampleProducts())
 }
+
+// ---- Map<K, V> 段階1(M33 / spec v0.3-collections §7) ----
+func emptyStockIndex() -> Map<String, Int> {
+  return Map.empty()
+}
+
+func indexProducts(products: List<Product>) -> Map<String, Int> {
+  let index: Map<String, Int> = Map.empty()
+  return products.fold(index, (acc, p) => acc.set(p.id, p.quantity))
+}
+
+func quantityOf(stock: Map<String, Int>, id: String) -> Option<Int> {
+  return stock.get(id)
+}
+
+func hasProduct(stock: Map<String, Int>, id: String) -> Bool {
+  return stock.has(id)
+}
+
+func stockIndexSize(stock: Map<String, Int>) -> Int {
+  return stock.size
+}
+
+func sampleStockIndex() -> Map<String, Int> {
+  return indexProducts(sampleProducts())
+}

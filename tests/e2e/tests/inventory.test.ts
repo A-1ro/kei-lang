@@ -5,9 +5,14 @@ import { describe, expect, it } from "vitest";
 import { KeiContractViolation } from "@kei/runtime";
 
 import {
+  emptyStockIndex,
   firstProduct,
+  hasProduct,
+  indexProducts,
   planAllReorders,
   type Product,
+  quantityOf,
+  stockIndexSize,
   totalStockValue,
 } from "../generated/collections/inventory";
 
@@ -59,5 +64,24 @@ describe("collections/inventory", () => {
     expect(violation.func).toBe("totalStockValue");
     // M25 / #59: 使い捨て述語をその場のラムダで書くことで合意書原則が直読みできる。
     expect(violation.condition).toBe("products.all(p => p.quantity >= 0)");
+  });
+
+  it("Map<K, V> 段階1: emptyStockIndex は空の ReadonlyMap を返す(M33)", () => {
+    const empty = emptyStockIndex();
+    expect(empty.size).toBe(0);
+  });
+
+  it("Map<K, V> 段階1: indexProducts は fold + set で id -> quantity の索引を作る", () => {
+    const index = indexProducts(stock);
+    expect(stockIndexSize(index)).toBe(3);
+    expect(hasProduct(index, "a")).toBe(true);
+    expect(hasProduct(index, "z")).toBe(false);
+
+    const qty = quantityOf(index, "b");
+    expect(qty.isSome).toBe(true);
+    if (qty.isSome) {
+      expect(qty.value).toBe(10);
+    }
+    expect(quantityOf(index, "z").isNone).toBe(true);
   });
 });

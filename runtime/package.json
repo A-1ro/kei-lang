@@ -1,6 +1,6 @@
 {
   "name": "@kei/runtime",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Runtime support for Kei-generated TypeScript: Result/Option and contract assertions",
   "license": "MIT",
   "type": "module",

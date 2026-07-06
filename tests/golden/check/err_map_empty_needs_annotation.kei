@@ -1,0 +1,6 @@
+module err.map_empty_needs_annotation
+
+func build() -> Bool {
+  let m = Map.empty()
+  return m.has("a")
+}

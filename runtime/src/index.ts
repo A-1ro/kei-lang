@@ -71,6 +71,17 @@ export function keiStringToInt(s: string): Option<number> {
     : None();
 }
 
+// ---- Map<K, V> のランタイムヘルパー(spec v0.3-collections §7 / M33) ----
+//
+// Map<K, V> は ReadonlyMap<K, V> にトランスパイルされ、has / size は TS の同名 API に
+// 直接写る。get だけは Option への橋渡しが要るのでここで支える(set は非破壊な
+// `new Map([...m, [k, v]])` へ emit 側で展開する)。
+
+/** Map<K,V>.get(key): TS の Map.get と Option の橋渡し(spec v0.3-collections §7)。 */
+export function keiMapGet<K, V>(m: ReadonlyMap<K, V>, key: K): Option<V> {
+  return m.has(key) ? Some(m.get(key) as V) : None();
+}
+
 // ---- 契約アサーション(spec §4: requires / ensures は実行時アサーション) ----
 
 export interface ContractViolationInfo {

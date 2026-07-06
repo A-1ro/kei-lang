@@ -1,0 +1,13 @@
+module ok.map_empty_match_arms
+
+enum Choice {
+  A
+  B
+}
+
+func mk(c: Choice) -> Map<String, Int> {
+  return match c {
+    Choice.A => Map.empty()
+    Choice.B => Map.empty()
+  }
+}

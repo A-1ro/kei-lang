@@ -1,0 +1,5 @@
+module err.map_unknown_method
+
+func bad(stock: Map<String, Int>) -> Bool {
+  return stock.delete("a")
+}

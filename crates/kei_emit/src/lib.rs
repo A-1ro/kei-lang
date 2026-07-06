@@ -36,7 +36,7 @@ pub fn emit_module(file: &str, source: &str) -> Result<EmitOutput, Vec<Diagnosti
 }
 
 /// [`emit_module`] に import 解決リゾルバを与えた版(M20 / #55)。`check_module` と
-/// `list_op_spans` の両方を同じリゾルバで通すので、import 先 record の `List`
+/// `op_spans_with_resolver` の両方を同じリゾルバで通すので、import 先 record の `List`
 /// フィールドに対するメソッド呼び出しが検査・emit で一致して扱われる。
 pub fn emit_module_with_resolver(
     file: &str,
@@ -54,8 +54,14 @@ pub fn emit_module_with_resolver(
     if !diags.is_empty() {
         return Err(diags);
     }
-    // List コンビネータ呼び出しの位置を検査器から受け取り、emit はこれだけを根拠に
-    // 配列メソッドへ写す(構文ヒューリスティックではなく権威的な型情報。M9)。
-    let list_ops = kei_check::list_op_spans_with_resolver(&parsed.module, resolver);
-    Ok(emit::emit_checked(file, source, &parsed.module, &list_ops))
+    // List / Map コンビネータ呼び出しの位置を検査器から受け取り、emit はこれだけを根拠に
+    // 配列メソッド・ランタイム呼び出しへ写す(構文ヒューリスティックではなく権威的な型情報。M9)。
+    let op_spans = kei_check::op_spans_with_resolver(&parsed.module, resolver);
+    Ok(emit::emit_checked(
+        file,
+        source,
+        &parsed.module,
+        &op_spans.list_ops,
+        &op_spans.map_ops,
+    ))
 }

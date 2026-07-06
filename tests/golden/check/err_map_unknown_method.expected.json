@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2002",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Use one of: get, set, has, size"
+      }
+    ],
+    "message": "no method 'delete' on 'Map'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 22,
+        "line": 4
+      },
+      "file": "tests/golden/check/err_map_unknown_method.kei",
+      "start": {
+        "col": 16,
+        "line": 4
+      }
+    }
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2011",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Use 'Int' or 'String' (or a tagged type over them) as the Map key type"
+      }
+    ],
+    "message": "Map key type must be 'Int', 'String', or a tagged type over them; found 'Bool'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 29,
+        "line": 3
+      },
+      "file": "tests/golden/check/err_map_invalid_key.kei",
+      "start": {
+        "col": 25,
+        "line": 3
+      }
+    }
+  }
+]
