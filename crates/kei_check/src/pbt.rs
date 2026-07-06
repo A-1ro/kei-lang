@@ -983,11 +983,19 @@ fn eval_expr(
                 return Err(EvalError::Unsupported);
             }
             let name = path[0].name.clone();
+            // spread ありなら base の各フィールドを明示フィールドで上書きし得るため
+            // 線形マージ(iter_mut().find)が要る。spread なしはリテラルの各フィールドが
+            // 高々1回しか現れない(重複は check_record_fields が既に弾く)ので単純 push
+            // で十分 — マージのぶんの探索コストをかけない。
             let mut out: Vec<(String, Value)> = match spread {
                 Some(s) => {
                     let v = eval_expr(s, env, funcs, in_ensures, depth)?;
                     match unwrap_tagged(&v) {
-                        Value::Record { fields, .. } => fields.clone(),
+                        Value::Record { fields: base, .. } => {
+                            let mut base = base.clone();
+                            base.reserve(fields.len());
+                            base
+                        }
                         _ => return Err(EvalError::Unsupported),
                     }
                 }
@@ -1001,11 +1009,13 @@ fn eval_expr(
                         .cloned()
                         .ok_or(EvalError::Unsupported)?,
                 };
-                if let Some(existing) = out.iter_mut().find(|(n, _)| *n == f.name.name) {
-                    existing.1 = v;
-                } else {
-                    out.push((f.name.name.clone(), v));
+                if spread.is_some() {
+                    if let Some(existing) = out.iter_mut().find(|(n, _)| *n == f.name.name) {
+                        existing.1 = v;
+                        continue;
+                    }
                 }
+                out.push((f.name.name.clone(), v));
             }
             Ok(Value::Record { name, fields: out })
         }

@@ -1,0 +1,13 @@
+module err.record_spread_tagged
+
+record Point {
+  x: Int
+  y: Int
+}
+
+type PointTag = Point tagged "PointTag"
+
+// tagged 型は基底 record とそのまま混ざらない。spread も例外ではなく KEI-E2005。
+func demo(pt: PointTag) -> Point {
+  return Point { ...pt, x: 0 }
+}

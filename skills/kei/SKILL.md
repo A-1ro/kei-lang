@@ -184,7 +184,7 @@ func makeLine(n: Int) -> Shape {
 
 フィールド省略形(`{ x }`)は record でも enum の名前付きバリアントでも使える。変数名がフィールド名と一致するとき、`Shape.Line { length: length }` は `Shape.Line { length }` と書ける。
 
-spread(`Point { ...p, x: 0 }`)は **plain record リテラル限定**(v0.5 / M32)。最大1個・先頭位置のみで、明示フィールドが spread の値を上書きする。enum の名前付きバリアント(`Shape.Line { ...s }`)では使えない(`KEI-E2004` — 全フィールドを明示すること)。契約式(`requires` / `ensures`)内でも使える。
+spread(`Point { ...p, x: 0 }`)は **plain record リテラル限定**(v0.5 / M32)。最大1個・先頭位置のみで、明示フィールドが spread の値を上書きする。enum の名前付きバリアント(`Shape.Line { ...s }`)では使えない(`KEI-E2004` — 全フィールドを明示すること)。契約式(`requires` / `ensures`)内でも使える。spread は必ず `...`(3ドット)。Rust 風の `..p`(2ドット)は構文エラー(`KEI-E0101`)。spread 式の型は tagged 型ともそのままでは混ざらない(`KEI-E2005` — tagged 値は `Tag(value)` で明示構築する)。
 
 ### 式と文
 

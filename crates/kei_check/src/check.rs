@@ -3044,7 +3044,7 @@ impl FnChecker<'_> {
                     let def = self.env.records.get(root).cloned().unwrap_or_default();
                     let owner = root.clone();
                     let owner_ty = Ty::Record(owner.clone());
-                    self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span);
+                    self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span, false);
                     Ty::Record(owner)
                 }
                 Some(NameKind::Alias) => {
@@ -3054,7 +3054,9 @@ impl FnChecker<'_> {
                             let def = self.env.records.get(r).cloned().unwrap_or_default();
                             let owner = r.clone();
                             let owner_ty = resolved.clone();
-                            self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span);
+                            self.check_record_fields(
+                                &def, fields, spread, &owner, &owner_ty, span, false,
+                            );
                             resolved
                         }
                         Ty::Unknown => {
@@ -3137,8 +3139,10 @@ impl FnChecker<'_> {
                     // フィールド位置に wrapper キーを注入して壊れる上、型システムが
                     // variant を保持しないため variant 一致も静的検証できない。
                     if let Some(s) = spread {
-                        // spread 式自体の infer と型照合は後続の check_record_fields が行う
-                        // (Ty::Enum との照合は通るが、ここで既に KEI-E2004 を報告済み)。
+                        // spread 式自体の infer は後続の check_record_fields が行うが、
+                        // 型照合(check_assign)は行わない: KEI-E2004 を既に報告済みのため、
+                        // owner_ty=Ty::Enum との不一致で誤誘導的な KEI-E2001 を重ねて出さない
+                        // (spread_already_diagnosed=true で抑止)。
                         self.push(
                             codes::RECORD_LITERAL,
                             format!(
@@ -3151,7 +3155,15 @@ impl FnChecker<'_> {
                         );
                     }
                     let owner_ty = Ty::Enum(enum_name.clone());
-                    self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span);
+                    self.check_record_fields(
+                        &def,
+                        fields,
+                        spread,
+                        &owner,
+                        &owner_ty,
+                        span,
+                        spread.is_some(),
+                    );
                     Ty::Enum(enum_name)
                 }
                 Some(VariantDef::Tuple(_)) => {
@@ -3229,6 +3241,11 @@ impl FnChecker<'_> {
         }
     }
 
+    /// `spread_already_diagnosed`: 呼び出し元で spread 自体を既にエラー報告済み
+    /// (e.g. KEI-E2004: enum variant への spread)の場合に true。その場合は spread 式の
+    /// infer(名前解決・副作用検査)は行うが、owner_ty との check_assign はスキップし、
+    /// 誤誘導的な KEI-E2001 の二重報告を防ぐ。
+    #[allow(clippy::too_many_arguments)]
     fn check_record_fields(
         &mut self,
         def: &[(String, Ty)],
@@ -3237,10 +3254,18 @@ impl FnChecker<'_> {
         owner: &str,
         owner_ty: &Ty,
         span: SynSpan,
+        spread_already_diagnosed: bool,
     ) {
         if let Some(s) = spread {
             let spread_ty = self.infer(s);
-            self.check_assign(owner_ty, &spread_ty, s.span());
+            // spread 式の型が解決できない(Ty::Unknown; opaque import 等)場合、
+            // Ty::compatible は Unknown を万能に扱うため check_assign は常に素通りする
+            // (spec §2.3: 「型が解決できない場合、フィールド充足の検査は行われない」)。
+            // これは他の Unknown 経路(フィールドアクセス等)と同じ gradual typing の
+            // 一般規則であり、意図した挙動。
+            if !spread_already_diagnosed {
+                self.check_assign(owner_ty, &spread_ty, s.span());
+            }
         }
         let mut seen: HashSet<String> = HashSet::new();
         for f in fields {
@@ -3282,6 +3307,10 @@ impl FnChecker<'_> {
             .map(|(n, _)| n.as_str())
             .filter(|n| !seen.contains(*n))
             .collect();
+        // missing-field 検査は spread の有無だけで判定する(spread の型照合が成功したか
+        // どうかは問わない)。spread_ty が Unknown で型照合自体が省略された場合や、
+        // check_assign が不一致を報告した場合でも、spread がある以上「他フィールドは
+        // spread 由来で埋まっている」という前提で missing-field は出さない。
         if spread.is_none() && !missing.is_empty() {
             let list: Vec<String> = missing.iter().map(|n| format!("'{n}'")).collect();
             self.push(

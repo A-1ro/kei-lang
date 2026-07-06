@@ -1392,6 +1392,38 @@ impl Parser {
                 end = self.cur().span;
                 break;
             }
+            // Rust 風の `..base`(2 ドット)は record spread の near-miss。Kei の spread は
+            // 常に `...`(3 ドット)なので、汎用の「フィールド名が来るはず」エラーに落とす前に
+            // 専用診断で `...` への置換を案内する。
+            if self.at(T::Dot) && self.peek_kind(1) == Some(T::Dot) {
+                let dot1 = self.cur().clone();
+                self.bump();
+                let dot2 = self.cur().clone();
+                self.bump();
+                let dots_span = dot1.span.to(dot2.span);
+                self.error(
+                    codes::UNEXPECTED_TOKEN,
+                    "record spread uses '...' (three dots), found '..'".to_string(),
+                    dots_span,
+                    FixHint::replace("Replace '..' with '...'", dots_span, "..."),
+                );
+                let expr = self.parse_expr(false)?;
+                let sp = dots_span.to(expr.span());
+                if fields.is_empty() && spread.is_none() {
+                    spread = Some(Box::new(expr));
+                } else {
+                    self.error(
+                        codes::UNEXPECTED_TOKEN,
+                        "record spread '...' is allowed at most once, and only as the first item in the literal".to_string(),
+                        sp,
+                        FixHint::direction(
+                            "Keep a single '...' spread and place it before all named fields",
+                        ),
+                    );
+                }
+                self.expect_record_lit_separator();
+                continue;
+            }
             if self.at(T::DotDotDot) {
                 let dots = self.bump(); // '...'
                 let expr = self.parse_expr(false)?;
