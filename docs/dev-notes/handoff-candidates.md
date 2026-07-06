@@ -485,3 +485,163 @@ record spread repro — `Shape.Square { ...d, s: 1 }` を `kei check --json` で
 <!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(review worktree での
 `git checkout --detach`)で発火。最新 merged PR は #116(version bump、機械的変更)で
 上記に記録済みのため、新規候補なし。 -->
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+### Candidate: spread は「最大1個・先頭のみ」の構文制約
+**Why this matters for HANDOFF.md**: JS/TS の spread(複数・任意位置)と意図的に異なる制約で、緩めると型検査と TS 出力の前提が壊れる。
+**Draft entry** (lift verbatim if approved):
+> record spread(`R { ...t, f: v }`)は**最大1個・先頭のみ**(違反は `KEI-E0101`)。この制約により (1) 明示フィールドが常に spread を上書きするという単純な意味論が保て、(2) TS 出力も `({ ...t, f: v })` と位置をそのまま写せる。JS 風に複数/任意位置を許すと上書き順の意味論と E2002(unknown field)の検査が複雑化するため、緩和する場合は両方を再設計すること。
+
+### Candidate: AST 拡張時は serde `skip_serializing_if` で golden JSON を不変に保つ
+**Why this matters for HANDOFF.md**: AST にフィールドを足すと syntax golden の expected JSON が全件変わるが、この手法で回避できる。将来の AST 拡張すべてに効くパターン。
+**Draft entry** (lift verbatim if approved):
+> `Expr::RecordLit` の `spread: Option<Box<Expr>>` は `#[serde(skip_serializing_if = "Option::is_none")]` を付けて追加した。こうすると spread を使わない既存の syntax golden expected JSON が一切変わらない。AST に optional フィールドを足すときは同じパターンを使い、既存 golden の一括更新を避けること。
+
+### Candidate: spread があるときは missing-fields 診断を抑止(冗長 spread に warning は出さない)
+**Why this matters for HANDOFF.md**: 診断の抑止条件はコードだけ見ると「バグでは」と誤解されやすく、意図的な判断であることを記録すべき。
+**Draft entry** (lift verbatim if approved):
+> record リテラルに spread がある場合、missing-fields 診断(不足フィールド)は抑止する — 不足分は spread 元から供給されるため。逆に「全フィールドを明示していて spread が冗長」なケースにも warning は出さない(意図的な判断: リファクタ途中の中間状態を騒がしくしないため)。存在しないフィールド名は spread の有無に関わらず既存 `KEI-E2002` を出す。
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad での
+expected_ty leak テストケースの cargo run 検証)で発火。最新 merged PR は #117
+(M32 record spread)で上記に記録済みのため、新規候補なし。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(kei-invariant-auditor
+セッションでの origin/feat/m33-map-stage1 golden expected JSON の git show 検証)で
+発火。最新 merged PR は #117(M32 record spread)で上記に記録済みのため、新規候補なし。
+M33 Map stage1(KEI-E2011/E2012 の新設)は未マージのため、merge 後の hook 実行時に
+候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+Map.empty() ネスト位置ケース検証 — Option<Map<String,Int>> 引数への Some(Map.empty()) と
+Map.empty().set(...) メソッドチェーンの `kei check`、両方 exit=0)で発火。
+最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、新規候補なし。
+M33 Map stage1 は未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+Option<Map<String,Int>> 引数 vs Some(Map<Int,Int>) の KEI-E2001 検出確認と、
+未注釈 Map.empty().set(...) チェーンの KEI-E2012 検出確認 — 両ケースとも期待どおり
+診断が出ることを `kei check` で検証)で発火。最新 merged PR は #117(M32 record spread)
+で上記に記録済み(候補 3 件)のため、新規候補なし。M33 Map stage1 は未マージ —
+merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+enum Map シャドー検証 — ユーザー定義 `enum Map` が組み込み Map より優先され exit=0、
+および match arm 内 `Map.empty()` の KEI-E2012(型注釈要求)確認、exit=1)で発火。
+最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、新規候補なし。
+M33 Map stage1 は未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+E2012 抑止確認 — `let n: Int = Map.empty().size` が exit=0 で通ることの検証と、
+spec §7.3(Map.empty() と期待型推論)の E2012 文言確認 sed/grep)で発火。
+最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、新規候補なし。
+M33 Map stage1(KEI-E2011/E2012)は未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+ユーザー定義 `enum Map` vs emit rewrite 検証 — `enum Map { empty full }` が組み込み
+Map(2 型引数)としてチェックされ KEI-E2006 が出る、つまり組み込み Map がユーザー定義
+enum を型解決でシャドーするケースの確認。check 失敗のため transpile 出力なし)で発火。
+最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、新規候補なし。
+M33 Map stage1 は未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(worktree main の
+crates/kei_check/src/check.rs に対する `expected_ty` の grep — ヒットなし)で発火。
+最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、新規候補なし。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+両 arm Map.empty() の match 検証 — `match c { true => Map.empty() false => Map.empty() }`
+の `kei check --json`。診断出力に `false` → `false_` の rename suggestion span が含まれる)
+で発火。最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、
+新規候補なし。M33 Map stage1 は未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+enum Map シャドー + match テスト — `enum Map { empty() full(Int) }` を classify する
+テストケースの `kei check --json`。`let m = Map.empty();` の `;` が KEI-E0001
+(unexpected character)で exit=1 — Kei にセミコロンはないためテストケース自体の
+構文ミス)で発火。最新 merged PR は #117(M32 record spread)で上記に記録済み
+(候補 3 件)のため、新規候補なし。M33 Map stage1 は未マージ — merge 後の hook
+実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+nested_leak.kei 検証 — fold 初期値位置の Map.empty()(acc 型注釈あり)と
+Map.empty().size レシーバ位置(let 注釈あり)が m33wt(PR ブランチ)worktree の
+`kei check --json` で diagnostics 空・exit=0 になることの確認)で発火。
+最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、
+新規候補なし。M33 Map stage1(KEI-E2011/E2012)は未マージ — merge 後の hook 実行時に
+候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad leak.kei の
+`kei check --json` — `fn main() -> Int { ... }` 形式のテストケースが KEI-E0101(Kei の
+関数宣言は `fn` でなく `func`)+ `;` の KEI-E0001 ×2 で exit=1。Rust 風構文の混入による
+テストケース自体の構文ミスで、コンパイラ側の問題ではない)で発火。
+最新 merged PR は #117(M32 record spread)で上記に記録済み(候補 3 件)のため、
+新規候補なし。wt-m33 worktree の HEAD は f02acb2「feat: M33 Map<K, V> 段階1 (#95)」—
+M33 Map stage1 の merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+two_empty.kei 検証 — Option<Int> scrutinee の match で両 arm が Map.empty() を返す
+関数(戻り型注釈 Map<String, Int> あり)の `kei check --json`。2 番目の arm
+(None => Map.empty()、line 6 col 13)に KEI-E2012「型注釈が必要」が 1 件出る —
+戻り型注釈からの期待型伝播が match の最初の arm には効くが 2 番目以降の arm には
+届かない可能性を示唆する観察)で発火。最新 merged PR は #117(M32 record spread)で
+上記に記録済み(候補 3 件)のため、新規候補なし。M33 Map stage1(KEI-E2011/E2012)は
+未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33 での
+shadow_map.kei 検証 — ユーザー定義 `enum Map { empty() full(Int) }` を型注釈なしで
+構築・match するケースが m33wt worktree の `kei check --json` で diagnostics 空・
+exit=0 になることの確認。ユーザー定義 enum Map がこの経路では組み込み Map に
+シャドーされず正常に扱われる観察)で発火。最新 merged PR は #117(M32 record spread)
+で上記に記録済み(候補 3 件)のため、新規候補なし。M33 Map stage1(KEI-E2011/E2012)は
+未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad での
+cross-module テストプロジェクト作成 — lib.types に `Map<Bool, Int>` フィールドを持つ
+record Cache を定義し、app.main から import して `.get(true)` する構成。M33 の
+Map キー型制約(Bool が有効キーか)のクロスモジュール検証用ファイル生成のみで、
+kei check は未実行)で発火。最新 merged PR は #117(M32 record spread)で
+上記に記録済み(候補 3 件)のため、新規候補なし。M33 Map stage1(KEI-E2011/E2012)は
+未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad m33wt
+worktree での `cargo build -p kei_cli --quiet` — PR ブランチの kei CLI ビルド確認、
+build-exit:0 で成功)で発火。最新 merged PR は #117(M32 record spread)で
+上記に記録済み(候補 3 件)のため、新規候補なし。M33 Map stage1(KEI-E2011/E2012)は
+未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-06: PostToolUse hook が非 merge コマンド(scratchpad proj での
+`kei build` 実行 — lib/types.kei の `Map<Bool, Int>` フィールドに対して KEI-E2011
+「Map キー型は Int/String/tagged type のみ」が 1 件出て "no output written"・dist
+未生成を確認。ただし build-exit:0 と報告されており、パイプ経由(`| head -8`)のため
+exit code は head のものを拾っている可能性あり — kei build がエラー時に非 0 を
+返すかどうかは直接検証が必要という観察)で発火。最新 merged PR は #117(M32 record
+spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M33 Map stage1
+(KEI-E2011/E2012)は未マージ — merge 後の hook 実行時に候補抽出する。 -->
+
+## PR #118: feat: M33 Map<K, V> 段階1 (#95) — 2026-07-06 merged
+
+### Candidate: `expected_ty` の take/restore 規律(偽 E2012 防止)
+**Why this matters for HANDOFF.md**: 期待型伝播はコードを読むだけでは「なぜ take() してから限定的に復元するのか」が分からず、次に期待型を使う機能(リテラル推論等)で同じ漏れバグを再発させやすい。
+**Draft entry** (lift verbatim if approved):
+> `FnChecker.expected_ty` は spec §7.3 の直接 3 位置(let 初期化式・呼び出し引数式・return 式)でのみ子式に伝わるべき値。`infer()` の冒頭で必ず `take()` し、式自身が `Match` か `Map.empty()` 呼び出し形のときだけ復元する。これを守らないと fold の引数や二項演算のオペランドに期待型が漏れて偽 KEI-E2012 が出る(PR #118 レビューで実際に発生)。期待型を使う機能を増やすときは復元ホワイトリストに追加する形で拡張すること。
+
+### Candidate: `op_spans` は 1 パスで list/map をまとめて収集する
+**Why this matters for HANDOFF.md**: 旧 API(`list_op_spans_with_resolver`)の形に戻して型別の公開関数を足すと、`Env::build` + 全関数 check が型ごとに再実行される退行になる。
+**Draft entry** (lift verbatim if approved):
+> emit が使う組み込みメソッド呼び出し位置は `op_spans[_with_resolver]` が `OpSpans { list_ops, map_ops }` として **1 回の FnChecker 実行**でまとめて返す。以前は List/Map 別々の公開関数が検査パスを 2 回走らせていた(#118 レビューで統合)。新しい組み込み型のスパン収集を足すときは `OpSpans` にフィールドを足し、公開関数は増やさない。
+
+### Candidate: import 経由の型は `ty_of` が制約検査を素通しする
+**Why this matters for HANDOFF.md**: 型制約(Map キー制約など)をローカル定義側の `resolve_ty` にだけ実装すると、import 経由の型で検出漏れになる — 実際 #118 で漏れ、レビューで `check_imported_map_keys` を追加した。
+**Draft entry** (lift verbatim if approved):
+> `imports.rs::ty_of` は設計上、型制約検査を持たない(構造変換のみ)。型に制約を付ける機能(例: Map キーは Int/String/tagged 基底限定 = KEI-E2011)を追加したら、`Env::build` の import 取り込み側にも明示的な再帰検査(例: `check_imported_map_keys`、診断 span は import 利用箇所)を必ず対で実装すること。
+
+### Candidate: 組み込み `Map` 名前空間はユーザー定義が優先
+**Why this matters for HANDOFF.md**: `Map.empty()` を無条件で組み込みに束ねると既存コードの `record Map` / import alias `Map` を壊す。ガードの置き場所(infer_call 側)も非自明。
+**Draft entry** (lift verbatim if approved):
+> `Map.empty()` の静的コンストラクタ解決は「`Map` がスコープにも `env.kinds` にも無い」ことを条件に infer_call で行う — ユーザー定義の `Map`(record / import alias)が常に勝つ。ガードは呼び出し元 infer_call に集約してあるので、`call_map_static` 側に到達した時点で組み込み確定として扱ってよい(二重ガード不要)。
+
+### Candidate: generative は Map 引数関数を対象外(runtime 検証のみ)
+**Why this matters for HANDOFF.md**: 「なぜ Map で generative が動かないのか」は spec を読まないと分からず、バグ報告と誤修正を招きやすい。
+**Draft entry** (lift verbatim if approved):
+> generative(M15)は Map 引数を持つ関数を候補ドメイン生成の対象外とする(spec 明記済み、契約は runtime 検証のみ)。Map リテラル(段階2)導入時に再検討する前提の意図的制限であり、生成対応を「修正」として安易に足さないこと。

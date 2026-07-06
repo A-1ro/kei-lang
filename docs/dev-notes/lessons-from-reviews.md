@@ -270,3 +270,96 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
 
 (no actionable patterns — hook ran on a non-merge command (M32 worktree での `..p` 2 ドット spread near-miss の `kei check` 実確認、KEI-E0101 を確認); latest merged PR is still #116 (version-bump PR, 0 inline comments, 0 discussion comments, no reviews — 再確認済み), already recorded above)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+- **Pattern**: enum variant spread silent corruption
+  **Source**: A-1ro (kei-code-review), crates/kei_check/src/check.rs:3149
+  **Lesson**: TS 側 enum 値は `{ kind, fields }` の 2 層構造なので、enum variant リテラルへの機能拡張(spread 等)は emit 後の実行値まで検証すること — tsc の excess-property check は spread リテラルを通すため型チェックでは silent data corruption を検出できない。合意設計(spread の型 = コンストラクタの record 型)から逸脱せず、variant リテラルでの spread は KEI-E2004 で拒否し golden で固定する。
+- **Pattern**: parser recovery logic copy-paste drift
+  **Source**: A-1ro (kei-code-review), crates/kei_syntax/src/parser.rs:1475
+  **Lesson**: parser の区切り/リカバリ処理(skip_newlines → eat → error + recover)を新分岐に足すときは逐語コピペせず、`expect_record_lit_separator` のようなヘルパーに共通化して 2 経路のドリフトを防ぐ。
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no new actionable patterns — hook ran on a non-merge command (`git show` で M33 map stage1 の error golden JSON 確認); latest merged PR is #117 で、2 件の CONFIRMED 指摘(enum variant spread silent corruption / parser recovery copy-paste drift)は直上のセクションに記録済み)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での expected_ty leak テストケース `t1.kei`/`t2.kei` の `kei check --json` 実行); latest merged PR is still #117, whose 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above — no new review activity found)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での nested-position `Map.empty()` 型推論ケース `t4.kei`/`t5.kei` の `kei check` 実行、両方 exit=0); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `t6.kei`/`t7.kei` の `kei check` 実行: Option<Map> 型不一致が leak せず KEI-E2001、未注釈 `Map.empty().set(...)` が KEI-E2012 を正しく報告); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での enum `Map` shadow ケース `enum_map.kei`(exit=0)と match-arm 内 `Map.empty()` の KEI-E2012 ケース `match_e2012.kei`(exit=1)の `kei check --json` 実行); latest merged PR is still #117, whose 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above — no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `t8.kei`: `let n: Int = Map.empty().size` の `kei check` 実行(exit=0)と spec §7.3 の E2012 文言確認); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `t9.kei`: ユーザー定義 enum `Map` vs emit rewrite テスト、KEI-E2006 「type 'Map' takes 2 type argument(s)」で check 失敗し transpile 未生成); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (worktree main の check.rs での `expected_ty` grep、hit 0 件); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `two_empty.kei`: 2-arm match の両腕 `Map.empty()` ケースの `kei check --json` 実行、診断 + `false_` rename suggestion を出力); latest merged PR is still #117, whose 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above — no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `nested_leak.kei`: fold 内 `Map.empty()` と receiver-position `Map.empty().size` の `kei check --json` 実行、diagnostics 0 件・exit=0); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `shadow_map.kei`: ユーザー定義 enum `Map` の match テスト、`let m = Map.empty();` の `;` が KEI-E0001 "unexpected character ';'" で check 失敗 exit=1); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `leak.kei` チェック: `fn` / `;` を使った Rust 風構文が KEI-E0101 "expected a declaration ... found identifier 'fn'" と KEI-E0001 "unexpected character ';'" で check 失敗 exit=1、Kei は `func` + セミコロンなし); latest merged PR is still #117 — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity since)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `two_empty.kei`: Option scrutinee の 2-arm match で両腕 `Map.empty()` の `kei check --json` 実行、KEI-E2012 「'Map.empty()' requires a type annotation」を line 6 で報告); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `shadow_map.kei`: ユーザー定義 enum `Map` の match テスト、`;` を除いた版で `kei check --json` が diagnostics 0 件・exit=0); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での cross-module テストプロジェクト作成: `proj/lib/types.kei` の `record Cache { entries: Map<Bool, Int> }` と `proj/app/main.kei` の `import lib.types { Cache }` + `c.entries.get(true)`、ファイル作成のみで check 未実行); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `cargo build -p kei_cli --quiet`、build-exit:0); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での cross-module チェック実行: `proj/lib/types.kei` は `Map<Bool, Int>` が KEI-E2011 "Map key type must be 'Int', 'String', or a tagged type over them; found 'Bool'" で exit=1、一方 importer 側 `proj/app/main.kei` は exit=0 — 定義モジュールのエラーが import 経由で伝播していない点は dogfood 側の観察事項); latest merged PR is still #117 — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity since)
+
+## PR #117: feat: M32 record spread — 差分更新構文 (#97) — 2026-07-06 merged
+
+(no actionable patterns — hook ran on a non-merge command (M33 scratchpad での `kei build $SP/proj` 全体ビルド: `lib/types.kei` の `Map<Bool, Int>` が KEI-E2011 で報告され "1 error(s) in 1 file(s); no output written"・dist 未生成、ただし build-exit:0 と表示された点は `head` パイプにより exit code が head 側のものになった観察上の注意); latest merged PR is still #117 with 2 inline comments / 0 discussion comments / 1 review — its 2 lessons (enum variant spread silent corruption / parser recovery copy-paste drift) are already recorded above, no new review activity since)
+
+## PR #118: feat: M33 Map<K, V> 段階1 (#95) — 2026-07-06 merged
+
+- **Pattern**: expected_ty save/restore 規約の非対称
+  **Source**: A-1ro inline (crates/kei_check/src/check.rs:2556)
+  **Lesson**: 新しい infer 経路(map_method 等)で引数を infer するときは、`infer_call` と同じ `expected_ty` の set/save-restore を必ず適用する — 引数の宣言型が既知なら `expected_ty` を立て(false E2012 防止)、経路冒頭で外側の stale な `expected_ty` をクリアする(誤診断 E2001 防止)。struct フィールドの規約コメント通り「対象式の infer 直後に None へ戻す」を全経路で守ること。
+- **Pattern**: checker/emit の権威情報乖離
+  **Source**: A-1ro inline (crates/kei_emit/src/emit.rs)
+  **Lesson**: 検査器が名前衝突ガード(lookup_scope / env.kinds 優先)付きで解決する構文を emit 側で純粋な構文一致で書き換えてはいけない — 検査器の判定結果を span 集合(map_op_spans 方式)で emit に渡すか、衝突する名前を E で予約して両者の前提を揃える(M9 で List の構文ヒューリスティックを排した方針を踏襲)。
+- **Pattern**: spec と実装の乖離は実装側を直す
+  **Source**: general discussion (A-1ro 承認記録)
+  **Lesson**: spec 本文(§7.3 期待型の 3 位置限定など)とチェッカー実装が乖離したら、レビューで承認された spec を正としマージ前に実装側を spec に揃える修正コミットを積む。
