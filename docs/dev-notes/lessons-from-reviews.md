@@ -252,3 +252,7 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
 
 (no actionable patterns — version-bump PR; 0 inline review comments, 0 discussion comments, no reviews)
+
+## PR #116: chore: bump version to 0.4.5 — 2026-07-05 merged
+
+(no actionable patterns — hook ran on a non-merge command (scratchpad enum-spread transpile repro `enum_spread.kei`, transpiled successfully); latest merged PR is still #116, a version-bump PR already recorded above with no review activity)
