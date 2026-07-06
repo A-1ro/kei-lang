@@ -1564,9 +1564,12 @@ impl FnChecker<'_> {
             ast::Expr::Call { callee, args, span } => self.infer_call(callee, args, *span),
             ast::Expr::Unary { op, expr, .. } => self.infer_unary(*op, expr),
             ast::Expr::Binary { op, lhs, rhs, span } => self.infer_binary(*op, lhs, rhs, *span),
-            ast::Expr::RecordLit { path, fields, span } => {
-                self.infer_record_lit(path, fields, *span)
-            }
+            ast::Expr::RecordLit {
+                path,
+                fields,
+                spread,
+                span,
+            } => self.infer_record_lit(path, fields, spread.as_deref(), *span),
             ast::Expr::Match {
                 scrutinee,
                 arms,
@@ -3031,6 +3034,7 @@ impl FnChecker<'_> {
         &mut self,
         path: &[ast::Ident],
         fields: &[ast::RecordLitField],
+        spread: Option<&ast::Expr>,
         span: SynSpan,
     ) -> Ty {
         let root = &path[0].name;
@@ -3039,7 +3043,8 @@ impl FnChecker<'_> {
                 Some(NameKind::Record) => {
                     let def = self.env.records.get(root).cloned().unwrap_or_default();
                     let owner = root.clone();
-                    self.check_record_fields(&def, fields, &owner, span);
+                    let owner_ty = Ty::Record(owner.clone());
+                    self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span, false);
                     Ty::Record(owner)
                 }
                 Some(NameKind::Alias) => {
@@ -3048,16 +3053,19 @@ impl FnChecker<'_> {
                         Ty::Record(r) => {
                             let def = self.env.records.get(r).cloned().unwrap_or_default();
                             let owner = r.clone();
-                            self.check_record_fields(&def, fields, &owner, span);
+                            let owner_ty = resolved.clone();
+                            self.check_record_fields(
+                                &def, fields, spread, &owner, &owner_ty, span, false,
+                            );
                             resolved
                         }
                         Ty::Unknown => {
-                            self.infer_lit_fields(fields);
+                            self.infer_lit_fields(spread, fields);
                             Ty::Unknown
                         }
                         _ => {
                             let root = root.clone();
-                            self.infer_lit_fields(fields);
+                            self.infer_lit_fields(spread, fields);
                             self.push(
                                 codes::RECORD_LITERAL,
                                 format!("'{root}' is not a record type"),
@@ -3070,7 +3078,7 @@ impl FnChecker<'_> {
                 }
                 Some(NameKind::Enum) => {
                     let root = root.clone();
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::UNKNOWN_VARIANT,
                         format!("enum '{root}' needs a variant: '{root}.Variant {{ ... }}'"),
@@ -3080,12 +3088,12 @@ impl FnChecker<'_> {
                     Ty::Enum(root)
                 }
                 Some(NameKind::Import) => {
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     Ty::Unknown
                 }
                 Some(NameKind::Func) => {
                     let root = root.clone();
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::RECORD_LITERAL,
                         format!("'{root}' is not a record type"),
@@ -3096,7 +3104,7 @@ impl FnChecker<'_> {
                 }
                 None => {
                     let root = root.clone();
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     let candidates: Vec<&str> = self
                         .env
                         .kinds
@@ -3126,12 +3134,41 @@ impl FnChecker<'_> {
             match self.find_variant(&enum_name, &vname.name) {
                 Some(VariantDef::Record(def)) => {
                     let owner = format!("{enum_name}.{}", vname.name);
-                    self.check_record_fields(&def, fields, &owner, span);
+                    // M32 / #97: spread は plain record リテラル限定。enum variant の値は
+                    // TS 側で `{ kind, fields }` の 2 層構造に写るため object spread が
+                    // フィールド位置に wrapper キーを注入して壊れる上、型システムが
+                    // variant を保持しないため variant 一致も静的検証できない。
+                    if let Some(s) = spread {
+                        // spread 式自体の infer は後続の check_record_fields が行うが、
+                        // 型照合(check_assign)は行わない: KEI-E2004 を既に報告済みのため、
+                        // owner_ty=Ty::Enum との不一致で誤誘導的な KEI-E2001 を重ねて出さない
+                        // (spread_already_diagnosed=true で抑止)。
+                        self.push(
+                            codes::RECORD_LITERAL,
+                            format!(
+                                "spread '...' is not supported in enum variant literals; list all fields of '{owner}' explicitly"
+                            ),
+                            s.span(),
+                            vec![direction(
+                                "Replace the spread with explicit 'field: value' entries (spread is only available for plain record literals)",
+                            )],
+                        );
+                    }
+                    let owner_ty = Ty::Enum(enum_name.clone());
+                    self.check_record_fields(
+                        &def,
+                        fields,
+                        spread,
+                        &owner,
+                        &owner_ty,
+                        span,
+                        spread.is_some(),
+                    );
                     Ty::Enum(enum_name)
                 }
                 Some(VariantDef::Tuple(_)) => {
                     let v = &vname.name;
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::UNKNOWN_VARIANT,
                         format!(
@@ -3144,7 +3181,7 @@ impl FnChecker<'_> {
                 }
                 Some(VariantDef::Unit) => {
                     let v = &vname.name;
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::UNKNOWN_VARIANT,
                         format!(
@@ -3156,18 +3193,18 @@ impl FnChecker<'_> {
                     Ty::Enum(enum_name)
                 }
                 None => {
-                    self.infer_lit_fields(fields);
+                    self.infer_lit_fields(spread, fields);
                     self.unknown_variant(&enum_name, vname);
                     Ty::Unknown
                 }
             }
         } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::Import) {
-            self.infer_lit_fields(fields);
+            self.infer_lit_fields(spread, fields);
             Ty::Unknown
         } else {
             let full: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
             let full = full.join(".");
-            self.infer_lit_fields(fields);
+            self.infer_lit_fields(spread, fields);
             if self.env.kinds.contains_key(root.as_str()) {
                 self.push(
                     codes::RECORD_LITERAL,
@@ -3188,7 +3225,10 @@ impl FnChecker<'_> {
     }
 
     /// 期待型が分からないリテラルでも、フィールド値の式は検査しておく。
-    fn infer_lit_fields(&mut self, fields: &[ast::RecordLitField]) {
+    fn infer_lit_fields(&mut self, spread: Option<&ast::Expr>, fields: &[ast::RecordLitField]) {
+        if let Some(s) = spread {
+            self.infer(s);
+        }
         for f in fields {
             match &f.value {
                 Some(e) => {
@@ -3201,13 +3241,32 @@ impl FnChecker<'_> {
         }
     }
 
+    /// `spread_already_diagnosed`: 呼び出し元で spread 自体を既にエラー報告済み
+    /// (e.g. KEI-E2004: enum variant への spread)の場合に true。その場合は spread 式の
+    /// infer(名前解決・副作用検査)は行うが、owner_ty との check_assign はスキップし、
+    /// 誤誘導的な KEI-E2001 の二重報告を防ぐ。
+    #[allow(clippy::too_many_arguments)]
     fn check_record_fields(
         &mut self,
         def: &[(String, Ty)],
         fields: &[ast::RecordLitField],
+        spread: Option<&ast::Expr>,
         owner: &str,
+        owner_ty: &Ty,
         span: SynSpan,
+        spread_already_diagnosed: bool,
     ) {
+        if let Some(s) = spread {
+            let spread_ty = self.infer(s);
+            // spread 式の型が解決できない(Ty::Unknown; opaque import 等)場合、
+            // Ty::compatible は Unknown を万能に扱うため check_assign は常に素通りする
+            // (spec §2.3: 「型が解決できない場合、フィールド充足の検査は行われない」)。
+            // これは他の Unknown 経路(フィールドアクセス等)と同じ gradual typing の
+            // 一般規則であり、意図した挙動。
+            if !spread_already_diagnosed {
+                self.check_assign(owner_ty, &spread_ty, s.span());
+            }
+        }
         let mut seen: HashSet<String> = HashSet::new();
         for f in fields {
             if !seen.insert(f.name.name.clone()) {
@@ -3248,7 +3307,11 @@ impl FnChecker<'_> {
             .map(|(n, _)| n.as_str())
             .filter(|n| !seen.contains(*n))
             .collect();
-        if !missing.is_empty() {
+        // missing-field 検査は spread の有無だけで判定する(spread の型照合が成功したか
+        // どうかは問わない)。spread_ty が Unknown で型照合自体が省略された場合や、
+        // check_assign が不一致を報告した場合でも、spread がある以上「他フィールドは
+        // spread 由来で埋まっている」という前提で missing-field は出さない。
+        if spread.is_none() && !missing.is_empty() {
             let list: Vec<String> = missing.iter().map(|n| format!("'{n}'")).collect();
             self.push(
                 codes::RECORD_LITERAL,
@@ -4026,7 +4089,10 @@ fn forbid_old_inside_lambda_body(
                 walk(lhs, diags, env, forbidden_names);
                 walk(rhs, diags, env, forbidden_names);
             }
-            ast::Expr::RecordLit { fields, .. } => {
+            ast::Expr::RecordLit { spread, fields, .. } => {
+                if let Some(s) = spread {
+                    walk(s, diags, env, forbidden_names);
+                }
                 for f in fields {
                     if let Some(v) = &f.value {
                         walk(v, diags, env, forbidden_names);
@@ -4145,16 +4211,22 @@ pub fn contract_expr_text(e: &ast::Expr) -> String {
                 child(rhs, rhs_min)
             )
         }
-        ast::Expr::RecordLit { path, fields, .. } => {
+        ast::Expr::RecordLit {
+            path,
+            fields,
+            spread,
+            ..
+        } => {
             let head: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
-            let fs: Vec<String> = fields
-                .iter()
-                .map(|f| match &f.value {
-                    None => f.name.name.clone(),
-                    Some(v) => format!("{}: {}", f.name.name, contract_expr_text(v)),
-                })
-                .collect();
-            format!("{} {{ {} }}", head.join("."), fs.join(", "))
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(s) = spread {
+                parts.push(format!("...{}", contract_expr_text(s)));
+            }
+            parts.extend(fields.iter().map(|f| match &f.value {
+                None => f.name.name.clone(),
+                Some(v) => format!("{}: {}", f.name.name, contract_expr_text(v)),
+            }));
+            format!("{} {{ {} }}", head.join("."), parts.join(", "))
         }
         ast::Expr::Match {
             scrutinee, arms, ..

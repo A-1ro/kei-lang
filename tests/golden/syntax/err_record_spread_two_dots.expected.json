@@ -1,0 +1,39 @@
+[
+  {
+    "code": "KEI-E0101",
+    "fixes": [
+      {
+        "edits": [
+          {
+            "new_text": "...",
+            "span": {
+              "end": {
+                "col": 20,
+                "line": 2
+              },
+              "file": "tests/golden/syntax/err_record_spread_two_dots.kei",
+              "start": {
+                "col": 18,
+                "line": 2
+              }
+            }
+          }
+        ],
+        "title": "Replace '..' with '...'"
+      }
+    ],
+    "message": "record spread uses '...' (three dots), found '..'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 20,
+        "line": 2
+      },
+      "file": "tests/golden/syntax/err_record_spread_two_dots.kei",
+      "start": {
+        "col": 18,
+        "line": 2
+      }
+    }
+  }
+]

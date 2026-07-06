@@ -178,13 +178,19 @@ fn expr() -> impl Strategy<Value = Expr> {
                 rhs: Box::new(rhs),
                 span: sp()
             }),
-            (path1(), prop::collection::vec(lit_field, 0..=3)).prop_map(|(path, fields)| {
-                Expr::RecordLit {
-                    path,
-                    fields,
-                    span: sp(),
-                }
-            }),
+            (
+                path1(),
+                prop::option::of(inner.clone()),
+                prop::collection::vec(lit_field, 0..=3)
+            )
+                .prop_map(|(path, spread, fields)| {
+                    Expr::RecordLit {
+                        path,
+                        spread: spread.map(Box::new),
+                        fields,
+                        span: sp(),
+                    }
+                }),
         ]
     })
 }

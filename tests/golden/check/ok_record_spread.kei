@@ -1,0 +1,14 @@
+module ok.record_spread
+
+record Point {
+  x: Int
+  y: Int
+}
+
+func moveToOrigin(p: Point) -> Point {
+  return Point { ...p, x: 0 }
+}
+
+func identity(p: Point) -> Point {
+  return Point { ...p }
+}

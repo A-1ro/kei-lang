@@ -1,0 +1,11 @@
+module err.record_spread_unknown_field
+
+record Point {
+  x: Int
+  y: Int
+}
+
+// spread があっても、存在しないフィールド名の指定は引き続き KEI-E2002。
+func bad(p: Point) -> Point {
+  return Point { ...p, z: 0 }
+}

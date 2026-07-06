@@ -33,6 +33,21 @@ fn record_emits_type_and_factory() {
 }
 
 #[test]
+fn record_spread_emits_object_spread() {
+    let out = emit(concat!(
+        "record Point {\n",
+        "  x: Int\n",
+        "  y: Int\n",
+        "}\n",
+        "\n",
+        "func moveToOrigin(p: Point) -> Point {\n",
+        "  return Point { ...p, x: 0 }\n",
+        "}\n",
+    ));
+    assert!(out.ts.contains("return Point({ ...p, x: 0 });"));
+}
+
+#[test]
 fn enum_emits_tagged_union_and_constructors() {
     let out = emit(concat!(
         "type OrderId = String tagged \"OrderId\"\n",

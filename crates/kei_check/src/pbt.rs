@@ -971,14 +971,36 @@ fn eval_expr(
             }
             Ok(Value::List(xs))
         }
-        ast::Expr::RecordLit { path, fields, .. } => {
+        ast::Expr::RecordLit {
+            path,
+            fields,
+            spread,
+            ..
+        } => {
             // 単一名の record(`R { ... }`)のみ評価する。enum バリアントの record 形は段階1
             // と同じく対象外(network/database のような外部値が混入することを避ける段階保守)。
             if path.len() != 1 {
                 return Err(EvalError::Unsupported);
             }
             let name = path[0].name.clone();
-            let mut out: Vec<(String, Value)> = Vec::with_capacity(fields.len());
+            // spread ありなら base の各フィールドを明示フィールドで上書きし得るため
+            // 線形マージ(iter_mut().find)が要る。spread なしはリテラルの各フィールドが
+            // 高々1回しか現れない(重複は check_record_fields が既に弾く)ので単純 push
+            // で十分 — マージのぶんの探索コストをかけない。
+            let mut out: Vec<(String, Value)> = match spread {
+                Some(s) => {
+                    let v = eval_expr(s, env, funcs, in_ensures, depth)?;
+                    match unwrap_tagged(&v) {
+                        Value::Record { fields: base, .. } => {
+                            let mut base = base.clone();
+                            base.reserve(fields.len());
+                            base
+                        }
+                        _ => return Err(EvalError::Unsupported),
+                    }
+                }
+                None => Vec::with_capacity(fields.len()),
+            };
             for f in fields {
                 let v = match &f.value {
                     Some(expr) => eval_expr(expr, env, funcs, in_ensures, depth)?,
@@ -987,6 +1009,12 @@ fn eval_expr(
                         .cloned()
                         .ok_or(EvalError::Unsupported)?,
                 };
+                if spread.is_some() {
+                    if let Some(existing) = out.iter_mut().find(|(n, _)| *n == f.name.name) {
+                        existing.1 = v;
+                        continue;
+                    }
+                }
                 out.push((f.name.name.clone(), v));
             }
             Ok(Value::Record { name, fields: out })

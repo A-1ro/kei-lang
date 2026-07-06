@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2004",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Replace the spread with explicit 'field: value' entries (spread is only available for plain record literals)"
+      }
+    ],
+    "message": "spread '...' is not supported in enum variant literals; list all fields of 'Shape.Square' explicitly",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 29,
+        "line": 10
+      },
+      "file": "tests/golden/check/err_record_spread_enum_variant.kei",
+      "start": {
+        "col": 28,
+        "line": 10
+      }
+    }
+  }
+]

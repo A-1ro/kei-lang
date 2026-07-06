@@ -1,0 +1,11 @@
+module err.record_spread_enum_variant
+
+enum Shape {
+  Circle { r: Int }
+  Square { s: Int }
+}
+
+// spread は plain record リテラル限定。enum variant リテラルでは KEI-E2004。
+func toSquare(c: Shape) -> Shape {
+  return Shape.Square { ...c, s: 1 }
+}

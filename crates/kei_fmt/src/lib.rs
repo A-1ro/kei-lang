@@ -678,21 +678,25 @@ fn expr_text(expr: &Expr, min_prec: u8, no_struct: bool, level: usize) -> String
                 expr_text(rhs, rhs_min, no_struct, level)
             )
         }
-        Expr::RecordLit { path, fields, .. } => {
+        Expr::RecordLit {
+            path,
+            fields,
+            spread,
+            ..
+        } => {
             let head = path_text(path);
-            if fields.is_empty() {
+            if fields.is_empty() && spread.is_none() {
                 return format!("{head} {{}}");
             }
-            let fields: Vec<String> = fields
-                .iter()
-                .map(|f| match &f.value {
-                    Some(value) => {
-                        format!("{}: {}", f.name.name, expr_text(value, 0, false, level))
-                    }
-                    None => f.name.name.clone(),
-                })
-                .collect();
-            format!("{} {{ {} }}", head, fields.join(", "))
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(s) = spread {
+                parts.push(format!("...{}", expr_text(s, 0, false, level)));
+            }
+            parts.extend(fields.iter().map(|f| match &f.value {
+                Some(value) => format!("{}: {}", f.name.name, expr_text(value, 0, false, level)),
+                None => f.name.name.clone(),
+            }));
+            format!("{} {{ {} }}", head, parts.join(", "))
         }
         Expr::Match {
             scrutinee, arms, ..
