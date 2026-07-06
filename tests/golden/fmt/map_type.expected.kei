@@ -1,0 +1,4 @@
+func mk() -> Map<String, Int> {
+  let m: Map<String, Int> = Map.empty()
+  return m
+}

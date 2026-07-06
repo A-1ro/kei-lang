@@ -33,6 +33,8 @@ mod codes {
     pub const MATCH_UNREACHABLE_ARM: &str = "KEI-E2008";
     pub const MATCH_PATTERN: &str = "KEI-E2009";
     pub const UNSUPPORTED_EQUALITY: &str = "KEI-E2010";
+    pub const INVALID_MAP_KEY: &str = "KEI-E2011";
+    pub const MAP_EMPTY_NEEDS_ANNOTATION: &str = "KEI-E2012";
     pub const EFFECT_UNDECLARED: &str = "KEI-E3001";
     pub const UNKNOWN_EFFECT: &str = "KEI-E3002";
     pub const DUPLICATE_EXTERN: &str = "KEI-E3003";
@@ -53,6 +55,10 @@ mod codes {
 const LIST_BUILTIN_METHODS: &[&str] = &[
     "length", "isEmpty", "get", "map", "filter", "fold", "all", "any", "contains",
 ];
+
+/// `Map<K, V>` の builtin メンバー名一覧(候補提示・エラーメッセージで使う唯一の定義元)。
+/// LIST_BUILTIN_METHODS と同じ理由で手動同期が必要(下記の同期テストで検査する)。
+const MAP_BUILTIN_MEMBERS: &[&str] = &["get", "set", "has", "size"];
 
 /// String の未知メンバー診断の did-you-mean 候補(field_on / string_method で共有)。
 const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt"];
@@ -125,6 +131,8 @@ pub fn check_module_with_resolver(
                 scopes: Vec::new(),
                 opts,
                 list_ops: None,
+                map_ops: None,
+                expected_ty: None,
                 lambda_floor: None,
             }
             .check();
@@ -181,6 +189,47 @@ pub fn list_op_spans_with_resolver(
                 scopes: Vec::new(),
                 opts: CheckOptions::default(),
                 list_ops: Some(&mut spans),
+                map_ops: None,
+                expected_ty: None,
+                lambda_floor: None,
+            }
+            .check();
+        }
+    }
+    spans
+}
+
+/// [`map_op_spans_with_resolver`] の resolver なし版(後方互換。List と同様)。
+pub fn map_op_spans(module: &ast::Module) -> std::collections::HashSet<(u32, u32)> {
+    map_op_spans_with_resolver(module, &NoopResolver)
+}
+
+/// `Map<K, V>` の builtin メソッド呼び出し(get/set/has)の位置(Call span の開始
+/// `(line, col)`)を集める(M33)。`list_op_spans_with_resolver` と同じパターンだが、
+/// **List とは独立した span 集合**にする必要がある: emit の `is_runtime_method` は
+/// 「メソッド名 + arity + span 集合所属」だけで判定するため、`List.get(i)` と
+/// `Map.get(k)` が同じ集合に入ると衝突し `Map.get` が `keiListGet` に誤変換される。
+pub fn map_op_spans_with_resolver(
+    module: &ast::Module,
+    resolver: &dyn ModuleResolver,
+) -> std::collections::HashSet<(u32, u32)> {
+    let file = "";
+    let mut diags = Vec::new();
+    let (env, fn_sigs) = Env::build(file, module, &mut diags, resolver);
+    let mut spans = HashSet::new();
+    for (item, sig) in module.items.iter().zip(&fn_sigs) {
+        if let (ast::Item::Func(f), Some(sig)) = (item, sig) {
+            FnChecker {
+                env: &env,
+                diags: &mut diags,
+                func: f,
+                sig,
+                mode: Mode::Body,
+                scopes: Vec::new(),
+                opts: CheckOptions::default(),
+                list_ops: None,
+                map_ops: Some(&mut spans),
+                expected_ty: None,
                 lambda_floor: None,
             }
             .check();
@@ -1060,6 +1109,32 @@ impl Env {
                 }
                 Ty::List(Box::new(self.resolve_ty(&t.args[0], diags)))
             }
+            // 第四の組み込みジェネリクス(M33 / spec v0.3-collections §7)。型引数 2。
+            // キー型は Int/String(+ tagged 基底)限定(KEI-E2011)。
+            "Map" => {
+                if !self.check_type_args(t, 2, diags) {
+                    return Ty::Unknown;
+                }
+                let k = self.resolve_ty(&t.args[0], diags);
+                let v = self.resolve_ty(&t.args[1], diags);
+                match k.peel_tagged() {
+                    Ty::Int | Ty::Str | Ty::Unknown => {}
+                    _ => {
+                        self.push(
+                            diags,
+                            codes::INVALID_MAP_KEY,
+                            format!(
+                                "Map key type must be 'Int', 'String', or a tagged type over them; found '{k}'"
+                            ),
+                            t.args[0].span,
+                            vec![direction(
+                                "Use 'Int' or 'String' (or a tagged type over them) as the Map key type",
+                            )],
+                        );
+                    }
+                }
+                Ty::Map(Box::new(k), Box::new(v))
+            }
             _ => match self.kinds.get(root) {
                 Some(NameKind::Record) => {
                     self.check_type_args(t, 0, diags);
@@ -1090,7 +1165,7 @@ impl Env {
                     Ty::Unknown
                 }
                 None => {
-                    let builtins = ["Int", "String", "Bool", "Result", "Option", "List"];
+                    let builtins = ["Int", "String", "Bool", "Result", "Option", "List", "Map"];
                     let candidates = self
                         .kinds
                         .iter()
@@ -1238,6 +1313,13 @@ struct FnChecker<'a> {
     /// 収集する任意のシンク(M9 / emit の権威的な型情報。M30 で String/Int に拡張)。
     /// 通常検査では `None`。
     list_ops: Option<&'a mut HashSet<(u32, u32)>>,
+    /// `Map<K, V>` の builtin メソッド呼び出し位置(M33)。List とは独立した集合にする理由は
+    /// `map_op_spans_with_resolver` のコメント参照。通常検査では `None`。
+    map_ops: Option<&'a mut HashSet<(u32, u32)>>,
+    /// `Map.empty()` の型注釈欠落診断のための期待型伝播(M33)。`check_let` の型注釈・
+    /// 関数呼び出しの引数位置・`return` の戻り値位置で一時的にセットし、対象の式を
+    /// infer した直後に必ず `None` へ戻す(save/restore。ネストで汚染しないため)。
+    expected_ty: Option<Ty>,
     /// コンビネータ引数ラムダの中にいるときに `Some(floor)` を持つ(M25 / #59、
     /// M31 で役割変更)。`floor` は `scopes` のうちラムダ自身のパラメータスコープの
     /// インデックス。M31 以降、`lookup_scope` は `scopes` 全体を innermost-first で
@@ -1353,7 +1435,17 @@ impl FnChecker<'_> {
     }
 
     fn check_let(&mut self, l: &ast::LetStmt) {
+        // 型注釈があれば先に解決し、値の推論中だけ期待型として立てる(M33: `Map.empty()`
+        // が `let m: Map<K, V> = Map.empty()` の注釈から K/V を決定できるようにするため)。
+        // save/restore: 呼び出し前は必ず None のはず(ネストした let 等を汚染しない)。
+        let ann_ty =
+            l.ty.as_ref()
+                .map(|ann| self.env.resolve_ty(ann, self.diags));
+        if let Some(t) = &ann_ty {
+            self.expected_ty = Some(t.clone());
+        }
         let value_ty = self.infer(&l.value);
+        self.expected_ty = None;
         let mut bound = value_ty;
         if let Some(fail) = &l.else_fail {
             bound = match bound {
@@ -1387,8 +1479,7 @@ impl FnChecker<'_> {
                 }
             }
         }
-        if let Some(ann) = &l.ty {
-            let ann_ty = self.env.resolve_ty(ann, self.diags);
+        if let Some(ann_ty) = ann_ty {
             self.check_assign(&ann_ty, &bound, l.value.span());
             // 注釈を信頼して伝播する(カスケードエラー防止)。
             bound = ann_ty;
@@ -1452,7 +1543,9 @@ impl FnChecker<'_> {
                 }
             }
             (Some(value), expected) => {
+                self.expected_ty = Some(expected.clone());
                 let t = self.infer(value);
+                self.expected_ty = None;
                 self.check_assign(expected, &t, value.span());
             }
         }
@@ -1757,6 +1850,21 @@ impl FnChecker<'_> {
                         );
                         return Ty::Unknown;
                     }
+                    None if root == "Map" => {
+                        // 裸の `Map.xxx`(呼び出しなし)アクセス(M33)。稀なケース
+                        // (`let x = Map.empty;` 等)だが、無関係な「undefined name 'Map'」
+                        // に落とさず Map の静的メンバーとして扱う。
+                        self.push(
+                            codes::UNDEFINED_NAME,
+                            format!(
+                                "Map has no static member '{}'; use 'Map.empty()'",
+                                name.name
+                            ),
+                            name.span,
+                            vec![direction("Call 'Map.empty()' to construct a Map")],
+                        );
+                        return Ty::Unknown;
+                    }
                     None => {} // 未定義は一般経路(infer_name)で E1001 を報告する
                 }
             }
@@ -1822,6 +1930,38 @@ impl FnChecker<'_> {
                     self.push(
                         codes::UNKNOWN_FIELD,
                         format!("no member '{}' on 'List'", name.name),
+                        name.span,
+                        vec![fix],
+                    );
+                    Ty::Unknown
+                }
+            },
+            // Map<K, V> のプロパティ(引数なし)は `size` のみ。get/set/has はメソッドとして
+            // infer_call で処理するため、ここに来るのは呼び出しなしのアクセス(M33)。
+            Ty::Map(_, _) => match name.name.as_str() {
+                "size" => Ty::Int,
+                "get" | "set" | "has" => {
+                    let m = name.name.clone();
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("'{m}' is a Map method; call it as 'm.{m}(...)'"),
+                        name.span,
+                        vec![direction(format!("Call the method: 'm.{m}(...)'"))],
+                    );
+                    Ty::Unknown
+                }
+                _ => {
+                    let members = MAP_BUILTIN_MEMBERS;
+                    let fix = match suggestion(&name.name, members.iter().copied()) {
+                        Some(s) => {
+                            self.env
+                                .replace_fix(format!("Did you mean '{s}'?"), name.span, &s)
+                        }
+                        None => direction(format!("Use one of: {}", members.join(", "))),
+                    };
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("no member '{}' on 'Map'", name.name),
                         name.span,
                         vec![fix],
                     );
@@ -1999,6 +2139,15 @@ impl FnChecker<'_> {
                     {
                         return self.call_variant(&root.clone(), vname, args, span);
                     }
+                    // `Map.empty()`(静的コンストラクタ、M33)。`kinds` に無いことを条件に
+                    // 含めるのは、ユーザーが `record Map {...}` / import alias `Map` を
+                    // 定義した場合にそちらを優先させるため(既存名との衝突回避)。
+                    if root == "Map"
+                        && self.lookup_scope(root).into_option().is_none()
+                        && !self.env.kinds.contains_key(root.as_str())
+                    {
+                        return self.call_map_static(vname, args, span);
+                    }
                 }
                 // 外部境界(import した名前空間配下)の呼び出しで extern 署名が
                 // あれば照合する。無ければ従来どおり opaque(M11 段階移行)。strict-extern
@@ -2031,6 +2180,9 @@ impl FnChecker<'_> {
                     let base_ty = self.infer(base);
                     if let Ty::List(elem) = base_ty.clone() {
                         return self.list_method(&elem, vname, args, span);
+                    }
+                    if let Ty::Map(k, v) = base_ty.clone() {
+                        return self.map_method(&k, &v, vname, args, span);
                     }
                     // String / Int の組み込みメソッド呼び出し(M30 / #107)。tagged 経由でも
                     // 基底型で判定する(peel_tagged)。
@@ -2270,6 +2422,132 @@ impl FnChecker<'_> {
                 self.push(
                     codes::UNKNOWN_FIELD,
                     format!("no method '{other}' on 'List'"),
+                    method.span,
+                    vec![fix],
+                );
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Unknown
+            }
+        }
+    }
+
+    /// `Map<K, V>` の静的コンストラクタ呼び出し(`Map.empty()`、M33)。
+    fn call_map_static(&mut self, name: &ast::Ident, args: &[ast::Expr], span: SynSpan) -> Ty {
+        const MAP_STATIC_METHODS: &[&str] = &["empty"];
+        if name.name != "empty" {
+            for a in args {
+                self.infer(a);
+            }
+            let fix = match suggestion(&name.name, MAP_STATIC_METHODS.iter().copied()) {
+                Some(s) => direction(format!("Did you mean 'Map.{s}()'?")),
+                None => direction("Map has no such static method; use 'Map.empty()'".to_string()),
+            };
+            self.push(
+                codes::UNDEFINED_NAME,
+                format!("Map has no static method '{}'", name.name),
+                name.span,
+                vec![fix],
+            );
+            return Ty::Unknown;
+        }
+        self.expect_arity("empty", 0, args, span);
+        match self.expected_ty.take() {
+            Some(Ty::Map(k, v)) => Ty::Map(k, v),
+            // 型不一致(期待型が Map でない)は呼び出し元の check_assign に委ねる。
+            Some(_) => Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
+            None => {
+                self.push(
+                    codes::MAP_EMPTY_NEEDS_ANNOTATION,
+                    "'Map.empty()' requires a type annotation to determine its key/value types"
+                        .to_string(),
+                    span,
+                    vec![direction(
+                        "Annotate it, e.g. 'let m: Map<String, Int> = Map.empty()'",
+                    )],
+                );
+                Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))
+            }
+        }
+    }
+
+    /// `Map<K, V>` のメソッド呼び出し(get/set/has、M33 / spec v0.3-collections §7)。
+    fn map_method(
+        &mut self,
+        k: &Ty,
+        v: &Ty,
+        method: &ast::Ident,
+        args: &[ast::Expr],
+        span: SynSpan,
+    ) -> Ty {
+        // emit の権威的な型情報(list_method と同じ慣習。List とは独立した集合にする理由は
+        // map_op_spans_with_resolver のコメント参照)。
+        if let Some(ops) = self.map_ops.as_deref_mut() {
+            ops.insert((method.span.start.line, method.span.start.col));
+        }
+        match method.name.as_str() {
+            "get" => {
+                self.expect_arity("get", 1, args, span);
+                if let Some(a) = args.first() {
+                    let at = self.infer(a);
+                    self.check_assign(k, &at, a.span());
+                }
+                for a in args.iter().skip(1) {
+                    self.infer(a);
+                }
+                Ty::Option(Box::new(v.clone()))
+            }
+            "set" => {
+                self.expect_arity("set", 2, args, span);
+                if let Some(a) = args.first() {
+                    let at = self.infer(a);
+                    self.check_assign(k, &at, a.span());
+                }
+                if let Some(a) = args.get(1) {
+                    let at = self.infer(a);
+                    self.check_assign(v, &at, a.span());
+                }
+                for a in args.iter().skip(2) {
+                    self.infer(a);
+                }
+                Ty::Map(Box::new(k.clone()), Box::new(v.clone()))
+            }
+            "has" => {
+                self.expect_arity("has", 1, args, span);
+                if let Some(a) = args.first() {
+                    let at = self.infer(a);
+                    self.check_assign(k, &at, a.span());
+                }
+                for a in args.iter().skip(1) {
+                    self.infer(a);
+                }
+                Ty::Bool
+            }
+            "size" => {
+                self.push(
+                    codes::TYPE_MISMATCH,
+                    "'size' is a Map property; write 'm.size' without arguments".to_string(),
+                    span,
+                    vec![direction("Remove the call: 'm.size'")],
+                );
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Int
+            }
+            other => {
+                let members = MAP_BUILTIN_MEMBERS;
+                let fix = match suggestion(other, members.iter().copied()) {
+                    Some(s) => {
+                        self.env
+                            .replace_fix(format!("Did you mean '{s}'?"), method.span, &s)
+                    }
+                    None => direction(format!("Use one of: {}", members.join(", "))),
+                };
+                self.push(
+                    codes::UNKNOWN_FIELD,
+                    format!("no method '{other}' on 'Map'"),
                     method.span,
                     vec![fix],
                 );
@@ -2835,7 +3113,9 @@ impl FnChecker<'_> {
             );
         }
         for (arg, (_, pty)) in args.iter().zip(&callee.params) {
+            self.expected_ty = Some(pty.clone());
             let at = self.infer(arg);
+            self.expected_ty = None;
             self.check_assign(&pty.clone(), &at, arg.span());
         }
         for arg in args.iter().skip(callee.params.len()) {
@@ -2862,7 +3142,9 @@ impl FnChecker<'_> {
             );
         }
         for (arg, (_, pty)) in args.iter().zip(&sig.params) {
+            self.expected_ty = Some(pty.clone());
             let at = self.infer(arg);
+            self.expected_ty = None;
             self.check_assign(&pty.clone(), &at, arg.span());
         }
         for arg in args.iter().skip(sig.params.len()) {
@@ -2980,7 +3262,9 @@ impl FnChecker<'_> {
                     );
                 }
                 for (arg, ty) in args.iter().zip(&tys) {
+                    self.expected_ty = Some(ty.clone());
                     let at = self.infer(arg);
+                    self.expected_ty = None;
                     self.check_assign(&ty.clone(), &at, arg.span());
                 }
                 for arg in args.iter().skip(tys.len()) {
@@ -4510,6 +4794,41 @@ mod tests {
                 unknown_field.is_empty(),
                 "method '{method}' from LIST_BUILTIN_METHODS was rejected as an \
                  unknown List member; dispatch match arms are out of sync: {unknown_field:?}"
+            );
+        }
+    }
+
+    /// MAP_BUILTIN_MEMBERS と実際の dispatch match アーム(field_on / map_method)の
+    /// 手動同期を検査する(M33)。同期が崩れると、正当な呼び出しがここで
+    /// UNKNOWN_FIELD になって失敗する。
+    #[test]
+    fn map_builtin_members_match_dispatch_are_in_sync() {
+        for &member in MAP_BUILTIN_MEMBERS {
+            let call = match member {
+                "size" => "m.size".to_string(),
+                "get" => "m.get(\"a\")".to_string(),
+                "set" => "m.set(\"a\", 1)".to_string(),
+                "has" => "m.has(\"a\")".to_string(),
+                other => panic!("unhandled MAP_BUILTIN_MEMBERS entry in test: {other}"),
+            };
+            let src = format!(
+                "module t\n\nfunc f(m: Map<String, Int>) -> Int\n{{\n  {call}\n  return 0\n}}\n"
+            );
+            let parsed = kei_syntax::parse_module(&src);
+            assert!(
+                parsed.errors.is_empty(),
+                "test source for '{member}' must parse: {:?}",
+                parsed.errors
+            );
+            let diags = check_module("t.kei", &parsed.module);
+            let unknown_field = diags
+                .iter()
+                .filter(|d| d.code == codes::UNKNOWN_FIELD)
+                .collect::<Vec<_>>();
+            assert!(
+                unknown_field.is_empty(),
+                "member '{member}' from MAP_BUILTIN_MEMBERS was rejected as an \
+                 unknown Map member; dispatch match arms are out of sync: {unknown_field:?}"
             );
         }
     }

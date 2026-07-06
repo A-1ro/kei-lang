@@ -1,0 +1,5 @@
+module err.map_invalid_key
+
+func badKeyMap() -> Map<Bool, Int> {
+  return Map.empty()
+}

@@ -57,5 +57,12 @@ pub fn emit_module_with_resolver(
     // List コンビネータ呼び出しの位置を検査器から受け取り、emit はこれだけを根拠に
     // 配列メソッドへ写す(構文ヒューリスティックではなく権威的な型情報。M9)。
     let list_ops = kei_check::list_op_spans_with_resolver(&parsed.module, resolver);
-    Ok(emit::emit_checked(file, source, &parsed.module, &list_ops))
+    let map_ops = kei_check::map_op_spans_with_resolver(&parsed.module, resolver);
+    Ok(emit::emit_checked(
+        file,
+        source,
+        &parsed.module,
+        &list_ops,
+        &map_ops,
+    ))
 }

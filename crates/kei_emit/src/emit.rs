@@ -24,6 +24,7 @@ pub fn emit_checked(
     source: &str,
     module: &ast::Module,
     list_ops: &HashSet<(u32, u32)>,
+    map_ops: &HashSet<(u32, u32)>,
 ) -> EmitOutput {
     let ts_path = ts_path_for(file, module);
     let ts_file = ts_path.rsplit('/').next().expect("non-empty path");
@@ -31,6 +32,7 @@ pub fn emit_checked(
         src_file: file,
         module,
         list_ops,
+        map_ops,
         out: Out::default(),
         old_index: HashMap::new(),
         in_ensures: false,
@@ -116,13 +118,20 @@ struct RuntimeUses<'a> {
     names: BTreeSet<&'static str>,
     /// List コンビネータ呼び出し位置(検査器由来)。`get` の keiListGet import 判定に使う。
     list_ops: &'a HashSet<(u32, u32)>,
+    /// Map メソッド呼び出し位置(検査器由来、M33)。`get` の keiMapGet import 判定に使う。
+    map_ops: &'a HashSet<(u32, u32)>,
 }
 
 impl<'a> RuntimeUses<'a> {
-    fn collect(module: &ast::Module, list_ops: &'a HashSet<(u32, u32)>) -> Self {
+    fn collect(
+        module: &ast::Module,
+        list_ops: &'a HashSet<(u32, u32)>,
+        map_ops: &'a HashSet<(u32, u32)>,
+    ) -> Self {
         let mut u = RuntimeUses {
             names: BTreeSet::new(),
             list_ops,
+            map_ops,
         };
         for item in &module.items {
             match item {
@@ -255,6 +264,11 @@ impl<'a> RuntimeUses<'a> {
                     if is_runtime_method(callee.as_ref(), args, self.list_ops, "toInt", 0) {
                         self.names.insert("keiStringToInt");
                     }
+                    // Map<K, V>.get(k) は keiMapGet ランタイムヘルパーへ写る(M33)。
+                    // `Map.empty()` は `new Map()` に構文的に直写るため import 不要。
+                    if is_runtime_method(callee.as_ref(), args, self.map_ops, "get", 1) {
+                        self.names.insert("keiMapGet");
+                    }
                     self.expr(callee);
                 }
                 for a in args {
@@ -356,6 +370,9 @@ struct Emitter<'a> {
     module: &'a ast::Module,
     /// List コンビネータ呼び出し位置(Call span 開始)。検査器由来の権威的な型情報。
     list_ops: &'a HashSet<(u32, u32)>,
+    /// Map メソッド呼び出し位置(Call span 開始、M33)。List とは独立した集合(理由は
+    /// kei_check::map_op_spans_with_resolver のコメント参照)。
+    map_ops: &'a HashSet<(u32, u32)>,
     out: Out,
     /// ensures 内 `old(...)` の割当。span をキーに kei$old$N の割当を引く。fold など引数の
     /// emit 順が AST 順と一致しないコンビネータがあるため、位置カウンタではなく式の同一性
@@ -373,7 +390,7 @@ impl Emitter<'_> {
         self.out
             .line("// Do not edit; regenerate with `kei build`.");
 
-        let runtime = RuntimeUses::collect(self.module, self.list_ops);
+        let runtime = RuntimeUses::collect(self.module, self.list_ops, self.map_ops);
         let mut wrote_imports = false;
         if !runtime.names.is_empty() {
             let names: Vec<&str> = runtime.names.iter().copied().collect();
@@ -470,6 +487,12 @@ impl Emitter<'_> {
             "Option" => format!("Option<{}>", self.ts_type(&t.args[0])),
             // List<T> → 不変配列 readonly T[](spec v0.3-collections §9)。
             "List" => format!("readonly {}[]", self.ts_type_paren_for_array(&t.args[0])),
+            // Map<K, V> → ReadonlyMap<K, V>(spec v0.3-collections §7.6 / M33)。
+            "Map" => format!(
+                "ReadonlyMap<{}, {}>",
+                self.ts_type(&t.args[0]),
+                self.ts_type(&t.args[1])
+            ),
             _ if t.args.is_empty() => name.to_string(),
             _ => {
                 let args: Vec<String> = t.args.iter().map(|a| self.ts_type(a)).collect();
@@ -1072,6 +1095,47 @@ impl Emitter<'_> {
                 self.out.frag(&format!("kei$old${i}"));
                 return;
             }
+        }
+        // `Map.empty()` → `new Map()`(M33)。型検査済みの構文木のみ emit に来る不変条件
+        // があるため、ここでは検査を再実装せず構文パターンだけで判定する(既存の
+        // Ok/Err/Some/None 判定 [RuntimeUses::expr] と同じ「型情報なしの構文一致」方式)。
+        if let ast::Expr::Field { base, name, .. } = callee {
+            if let ast::Expr::Name { name: root, .. } = base.as_ref() {
+                if root == "Map" && name.name == "empty" && args.is_empty() {
+                    self.out.frag("new Map()");
+                    return;
+                }
+            }
+        }
+        // Map<K, V>.get(k) → keiMapGet(m, k)(M33。get だけランタイムヘルパー方式。
+        // List.get と同じ理由: 添字/キー式の二重評価回避)。
+        if is_runtime_method(callee, args, self.map_ops, "get", 1) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiMapGet(");
+                self.emit_expr(base, Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[0], Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
+        if let ast::Expr::Field { base, name, .. } = callee {
+            let is_map_op = self
+                .map_ops
+                .contains(&(name.span.start.line, name.span.start.col));
+            if is_map_op && name.name == "set" && args.len() == 2 {
+                // 非破壊な set: 新しい Map を元の Map + 1 エントリから生成する。
+                self.out.frag("new Map([...");
+                self.emit_expr(base, Prec::Postfix);
+                self.out.frag(", [");
+                self.emit_expr(&args[0], Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[1], Prec::Implication);
+                self.out.frag("]])");
+                return;
+            }
+            // has/size は変換不要: TS の Map にも同名 API があるため既存の汎用フォールバック
+            // (このメソッド末尾の Call、emit_expr の Field)にそのまま乗る。
         }
         // List コンビネータのメソッド呼び出し(M9 / spec v0.3-collections §9)。
         // **この呼び出し位置を検査器が List 操作と確定している**ときだけ配列メソッドへ写す

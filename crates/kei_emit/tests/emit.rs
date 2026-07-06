@@ -866,3 +866,94 @@ fn fold_old_args_map_by_identity_not_emit_order() {
         out.ts
     );
 }
+
+/// M33: `Map<K, V>` の型出力・`Map.empty()`・get/set/has/size の TS 出力を固定する。
+#[test]
+fn map_type_and_members_emit_expected_ts() {
+    let out = emit(concat!(
+        "func emptyStock() -> Map<String, Int> {\n",
+        "  return Map.empty()\n",
+        "}\n",
+        "\n",
+        "func withDefault(stock: Map<String, Int>, id: String) -> Map<String, Int> {\n",
+        "  return stock.set(id, 0)\n",
+        "}\n",
+        "\n",
+        "func quantityOf(stock: Map<String, Int>, id: String) -> Option<Int> {\n",
+        "  return stock.get(id)\n",
+        "}\n",
+        "\n",
+        "func hasProduct(stock: Map<String, Int>, id: String) -> Bool {\n",
+        "  return stock.has(id)\n",
+        "}\n",
+        "\n",
+        "func stockSize(stock: Map<String, Int>) -> Int {\n",
+        "  return stock.size\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("stock: ReadonlyMap<string, number>"),
+        "Map<K, V> -> ReadonlyMap<K, V>: {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("): ReadonlyMap<string, number> {"),
+        "Map<K, V> return type -> ReadonlyMap<K, V>: {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("return new Map();"),
+        "Map.empty() -> new Map(): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("new Map([...stock, [id, 0]])"),
+        "set(k, v) -> new Map([...m, [k, v]]): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiMapGet(stock, id)"),
+        "get(k) -> keiMapGet(m, k): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("stock.has(id)"),
+        "has(k) passes through to Map.has: {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("stock.size"),
+        "size passes through to Map.size: {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiMapGet") && out.ts.contains("from \"@kei/runtime\";"),
+        "keiMapGet must be imported from @kei/runtime: {}",
+        out.ts
+    );
+}
+
+/// M33: `Map.get` と `List.get` は独立した span 集合で判定されるため、
+/// 同名メソッド `get` が受信型に応じて正しいランタイムヘルパーへ振り分けられる。
+#[test]
+fn map_get_and_list_get_do_not_cross_contaminate() {
+    let out = emit(concat!(
+        "func firstOf(xs: List<Int>) -> Option<Int> {\n",
+        "  return xs.get(0)\n",
+        "}\n",
+        "\n",
+        "func lookup(m: Map<String, Int>, id: String) -> Option<Int> {\n",
+        "  return m.get(id)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("keiListGet(xs, 0)"),
+        "List.get must still use keiListGet: {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiMapGet(m, id)"),
+        "Map.get must use keiMapGet: {}",
+        out.ts
+    );
+}

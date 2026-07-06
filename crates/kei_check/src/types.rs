@@ -26,6 +26,9 @@ pub enum Ty {
     /// `List<T>`(不変・opaque な列)。`Result` / `Option` と並ぶ第三の組み込み
     /// ジェネリクス(spec/kei-spec-v0.3-collections.md / M9)。
     List(Box<Ty>),
+    /// `Map<K, V>`(不変・opaque な辞書)。キーは `Int` / `String`(+ tagged 基底)限定
+    /// (spec/kei-spec-v0.3-collections.md §7 / M33)。
+    Map(Box<Ty>, Box<Ty>),
     Unknown,
 }
 
@@ -41,6 +44,7 @@ impl Ty {
             (Result(o1, e1), Result(o2, e2)) => o1.compatible(o2) && e1.compatible(e2),
             (Option(a), Option(b)) => a.compatible(b),
             (List(a), List(b)) => a.compatible(b),
+            (Map(k1, v1), Map(k2, v2)) => k1.compatible(k2) && v1.compatible(v2),
             _ => false,
         }
     }
@@ -77,6 +81,7 @@ impl Ty {
             | Ty::Option(_)
             | Ty::Result(..)
             | Ty::List(_)
+            | Ty::Map(_, _)
             | Ty::Unit => false,
         }
     }
@@ -101,6 +106,7 @@ impl fmt::Display for Ty {
             Ty::Result(t, e) => write!(f, "Result<{t}, {e}>"),
             Ty::Option(t) => write!(f, "Option<{t}>"),
             Ty::List(t) => write!(f, "List<{t}>"),
+            Ty::Map(k, v) => write!(f, "Map<{k}, {v}>"),
             Ty::Unknown => write!(f, "_"),
         }
     }

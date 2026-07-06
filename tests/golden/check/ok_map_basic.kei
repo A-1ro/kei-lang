@@ -1,0 +1,20 @@
+module ok.map_basic
+
+func emptyStock() -> Map<String, Int> {
+  return Map.empty()
+}
+
+func withDefault(stock: Map<String, Int>, id: String) -> Map<String, Int>
+  requires stock.has(id) == false
+  ensures result.size == stock.size + 1
+{
+  return stock.set(id, 0)
+}
+
+func quantityOf(stock: Map<String, Int>, id: String) -> Option<Int> {
+  return stock.get(id)
+}
+
+func stockSize(stock: Map<String, Int>) -> Int {
+  return stock.size
+}

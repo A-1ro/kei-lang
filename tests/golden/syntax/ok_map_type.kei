@@ -1,0 +1,3 @@
+func mk() -> Map<String, Int> {
+  return Map.empty()
+}

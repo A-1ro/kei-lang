@@ -48,7 +48,7 @@
 |---|---|---|---|
 | **1** | `List<T>` を不変・opaque な列として導入(**量化子なし**)。純粋コンビネータの最小集合。 | v0.3 | (本文書 §3〜§5) |
 | **2** | 集合に対する量化契約(`forall` / `exists`) | v0.3 以降 | #23 の検証レベル報告が動いていること |
-| **3** | `Map<K, V>`(必要性を段階2後に再評価) | 未定 | 量化と等価性の設計 |
+| **3** | `Map<K, V>`(キー型を String/Int(+tagged)に限定して量化を回避、段階1のみ実装) | v0.5(M33) | (本文書 §7) |
 
 **一度に全部入れない。** 段階1は量化子を持ち込まず、`all` / `any` で要素述語を表す(§5)。量化子(束縛変数 `forall x in xs`)は段階2まで導入しない。
 
@@ -184,9 +184,101 @@ func planAllReorders(products: List<Product>, targetLevel: Int) -> List<ReorderP
 - 量化子は静的検証(SMT)の難所。**#23「達成された検証レベルを診断で報告する」仕組みが先に動いていることを前提**にする。最初は `runtime` 検証レベル(実行時に全要素チェック)で出し、`static` への引き上げは検証器の成長に委ねる。
 - **合意書原則(第一条)への配慮**: 量化契約は人間が承認時に読む量を増やす。語彙は最小に絞り、**ネストを避ける**指針を spec に置く。
 
-## 7. 段階3(将来): `Map<K, V>`
+## 7. `Map<K, V>`(段階1実装済み / v0.5 M33)
 
-段階2の後に必要性を再評価する。在庫の「商品ID → 在庫数」表現で欲しくなるが、**量化と等価性(キーの同値性)の設計が重い**ため、段階2の量化が固まるまで着手しない。
+`List<T>` に続く第四の組み込みジェネリクス。`Result` / `Option` / `List` と同様に kei_syntax
+(既存の N 個型引数汎用パースで無改修対応)/ kei_check(型・等価性・契約)/ kei_emit(`ReadonlyMap`
++ ランタイムヘルパー)に入った。段階2(量化)の完了を待たずに導入した理由: キーの同値性は
+**キー型を String / Int(+ tagged 基底)に限定する**ことで量化と切り離せたため(§7.1)。
+
+### 7.1 キー型の制約
+
+`K` は `String` / `Int`、またはそれらを基底(`peel_tagged()`)に持つ tagged 型のみ。
+それ以外(`Record` / `enum` / `List` / `Option` / `Result` / `Bool` など)をキーにするのは
+型検査エラー(KEI-E2011)。値型 `V` に制約は無い。
+
+```kei
+type ProductId = String tagged "ProductId"
+
+let m: Map<ProductId, Int> = Map.empty()   // OK: tagged String 基底
+let bad: Map<Bool, Int> = Map.empty()      // error: KEI-E2011
+```
+
+理由: `Map` のキー同値性は TS の `Map`(SameValueZero)にそのまま委譲する。`String` / `Int`
+(+ tagged 基底)はスカラーの値同値性と一致するため安全に委譲できるが、`Record` 等の合成型を
+キーにすると「参照同一性」と「構造同値性」の混同(§5.1 の `==` 制約と同じ問題)がキー照合にも
+及ぶため、段階1では持ち込まない。
+
+### 7.2 API(段階1のみ)
+
+`List<T>` と同じく、プロパティ風(引数なし)とメソッド風(引数あり)を混在させる。
+
+| メンバ | 形 | シグネチャ(概念) | 説明 |
+|---|---|---|---|
+| `size` | プロパティ | `Map<K, V>.size -> Int` | 要素数 |
+| `get` | メソッド | `Map<K, V>.get(key: K) -> Option<V>` | キーに対応する値(無ければ `None`) |
+| `set` | メソッド | `Map<K, V>.set(key: K, value: V) -> Map<K, V>` | キーを追加/更新した**新しい** Map(非破壊) |
+| `has` | メソッド | `Map<K, V>.has(key: K) -> Bool` | キーが存在するか |
+
+これ以上は段階1に入れない(`delete` / `keys` / `values` / `entries` 等は必要性が出てから別途)。
+
+### 7.3 構築: `Map.empty()` と期待型推論
+
+リテラル構文(`{ "a": 1 }` 等)は導入しない(`List` のリテラルと同じく段階2送り)。構築は
+`Map.empty()` の 1 形のみ。型引数を持たないため、周辺の**期待型**から `K` / `V` を決定する:
+
+- `let` の型注釈: `let m: Map<String, Int> = Map.empty()`
+- 関数呼び出しの引数位置: 仮引数の宣言型が `Map<K, V>` のとき、その実引数位置の `Map.empty()`
+- 関数の戻り値位置: `return Map.empty()`(囲む関数の戻り型が `Map<K, V>` のとき)
+
+いずれの期待型も無いとき(例: `let m = Map.empty()`)は型を決定できず診断する(KEI-E2012)。
+
+```kei
+func emptyStock() -> Map<String, Int> {
+  return Map.empty()          // OK: 戻り値位置の期待型から Map<String, Int>
+}
+
+let m = Map.empty()           // error: KEI-E2012(型注釈が必要)
+```
+
+### 7.4 契約式からの利用
+
+`get` / `has` / `size` は無副作用の読み取りなので、`requires` / `ensures` から呼べる(`List` の
+`length` / `isEmpty` / `all` / `any` / `contains` と同じ扱い)。`set` は新しい `Map` を返す
+(非破壊)ため契約式内でも使えるが、キー同値性が絡む契約は等値比較の制約(§5.1)を継承する
+(`Map<K, V>` 自体への `==` は合成型として KEI-E2010 で不許可)。
+
+```kei
+func withDefault(stock: Map<String, Int>, id: String) -> Map<String, Int>
+  requires stock.has(id) == false
+  ensures result.size == stock.size + 1
+{
+  return stock.set(id, 0)
+}
+```
+
+### 7.5 generative(契約ベース PBT)の対象外
+
+`Map<K, V>` を引数に持つ関数は `kei check --generative`(M15 / #26)の対象外(候補ドメイン生成
+は `List` と同様「型非対応 → generative へ格上げしない」既存の寛容側にそのまま倒れる。static
+検査・runtime 契約検証は通常どおり効く)。
+
+### 7.6 トランスパイル
+
+| Kei | TypeScript |
+|---|---|
+| `Map<K, V>` | `ReadonlyMap<K, V>` |
+| `Map.empty()` | `new Map()` |
+| `m.get(k)` | `keiMapGet(m, k)`(`@kei/runtime` ヘルパー。`Option<V>` へブリッジ) |
+| `m.set(k, v)` | `new Map([...m, [k, v]])`(非破壊生成) |
+| `m.has(k)` | `m.has(k)`(TS `Map` にも同名 API があるためそのまま) |
+| `m.size` | `m.size`(同上) |
+
+### 7.7 段階2以降の見送り事項
+
+- リテラル構文(`{ "a": 1, "b": 2 }` 相当)は段階2以降。
+- `delete` 相当の削除操作(不変 API なら新しい `Map` を返す形)は必要性が出てから。
+- キー型を任意の等値比較可能型へ拡張するかは、段階2の量化・等価性設計と合わせて再評価する。
 
 ## 8. 検証思想との整合
 
