@@ -1,0 +1,7 @@
+module cli.strict_extern_package
+
+extern package "greeter" as greeter
+
+func shout(name: String) -> String {
+  return greeter.shout(name)
+}

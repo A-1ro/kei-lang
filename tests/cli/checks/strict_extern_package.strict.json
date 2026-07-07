@@ -1,0 +1,27 @@
+{
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "KEI-E3004",
+      "message": "external call 'greeter.shout' has no 'extern' declaration; its return type and effects are unverified",
+      "span": {
+        "file": "tests/cli/checks/strict_extern_package.kei",
+        "start": {
+          "line": 6,
+          "col": 10
+        },
+        "end": {
+          "line": 6,
+          "col": 29
+        }
+      },
+      "fixes": [
+        {
+          "title": "Declare 'extern greeter.shout(...) -> ... uses ...' to bring this external call under verification",
+          "edits": []
+        }
+      ]
+    }
+  ],
+  "contracts": []
+}

@@ -25,7 +25,7 @@ Kei ソースから npm パッケージ(最終目標では `hono`)の関数を *
 | M | テーマ | 優先度 | 状態 | 主な改修クレート |
 |---|---|---|---|---|
 | **M35** | `extern package` 宣言(bare specifier 束縛) | high | ✅ | kei_syntax / kei_check / kei_emit / kei_fmt |
-| **M36** | ビルド統合と検証整合(e2e・strict-extern・取説) | high | ⬜ 未着手 | kei_cli / kei_mcp / tests/e2e / spec / skill |
+| **M36** | ビルド統合と検証整合(e2e・strict-extern・取説) | high | ✅ | kei_cli / kei_mcp / tests/e2e / spec / skill |
 
 ## M35: `extern package` 宣言
 

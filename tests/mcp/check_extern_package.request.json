@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "method": "tools/call",
+  "params": {
+    "name": "kei_check",
+    "arguments": {
+      "source": "module tickets.service\n\nimport tickets.types { Ticket }\n\nextern package \"greeter\" as greeter\n\nextern greeter.greet(name: String) -> String\n\nfunc describe(t: Ticket, name: String) -> String {\n  return greeter.greet(name)\n}\n"
+    }
+  }
+}
