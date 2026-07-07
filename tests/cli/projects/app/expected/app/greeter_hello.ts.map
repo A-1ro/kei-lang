@@ -1,0 +1,12 @@
+{
+  "file": "greeter_hello.ts",
+  "mappings": ";;;AAEA;;AAIA;EACE",
+  "names": [],
+  "sources": [
+    "greeter_hello.kei"
+  ],
+  "sourcesContent": [
+    "module app.greeter_hello\n\nextern package \"greeter\" as greeter\n\nextern greeter.greet(name: String) -> String\n\nfunc hello(name: String) -> String {\n  return greeter.greet(name)\n}\n"
+  ],
+  "version": 3
+}

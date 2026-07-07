@@ -1,4 +1,4 @@
-module greeter_app.greet
+module app.greeter_hello
 
 extern package "greeter" as greeter
 

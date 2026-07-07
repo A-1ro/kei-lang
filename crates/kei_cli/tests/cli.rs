@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -153,17 +154,13 @@ fn check_golden() {
 // golden: kei check --strict-extern(M16 / #44)
 // ---------------------------------------------------------------------------
 
-/// strict-extern は **オプトイン**。同じ #22 再現コードが、既定の `kei check` では
-/// 通り(extern 未宣言の外部呼び出しは opaque)、`--strict-extern` でのみ警告される
-/// (extern 宣言の追加を促す)ことを対で固定する。
-#[test]
-fn strict_extern_golden() {
+fn strict_extern_case(name: &str) {
     let dir = cli_dir().join("checks");
-    let rel = "tests/cli/checks/strict_extern.kei";
+    let rel = format!("tests/cli/checks/{name}.kei");
     let mut failures = Vec::new();
 
     // 既定: 未宣言の外部呼び出しは通る(警告なし・exit 0)。
-    let default = run_kei(&["check", rel]);
+    let default = run_kei(&["check", &rel]);
     if !default.stdout.is_empty() || default.code != 0 {
         failures.push(format!(
             "default check should be clean: code={} stdout={:?}",
@@ -172,9 +169,9 @@ fn strict_extern_golden() {
     }
 
     // strict: KEI-E3004 警告(stage a は warning なので exit は 0)。散文 / --json を固定。
-    let strict = run_kei(&["check", "--strict-extern", rel]);
+    let strict = run_kei(&["check", "--strict-extern", &rel]);
     expect_golden(
-        &dir.join("strict_extern.strict.txt"),
+        &dir.join(format!("{name}.strict.txt")),
         &strict.stdout,
         &mut failures,
     );
@@ -185,13 +182,12 @@ fn strict_extern_golden() {
         ));
     }
 
-    let strict_json = run_kei(&["check", "--strict-extern", "--json", rel]);
+    let strict_json = run_kei(&["check", "--strict-extern", "--json", &rel]);
     expect_golden(
-        &dir.join("strict_extern.strict.json"),
+        &dir.join(format!("{name}.strict.json")),
         &strict_json.stdout,
         &mut failures,
     );
-    // #22 再現: warning に KEI-E3004 と extern 宣言の fix が載る。
     let parsed: serde_json::Value =
         serde_json::from_str(&strict_json.stdout).expect("--json emits valid JSON");
     let diags = parsed["diagnostics"]
@@ -210,71 +206,25 @@ fn strict_extern_golden() {
 
     assert!(
         failures.is_empty(),
-        "{} strict-extern case(s) failed:\n{}",
+        "{} strict-extern case(s) failed ({name}):\n{}",
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// strict-extern は **オプトイン**。同じ #22 再現コードが、既定の `kei check` では
+/// 通り(extern 未宣言の外部呼び出しは opaque)、`--strict-extern` でのみ警告される
+/// (extern 宣言の追加を促す)ことを対で固定する。
+#[test]
+fn strict_extern_golden() {
+    strict_extern_case("strict_extern");
 }
 
 /// M36: `extern package` 束縛経由の未宣言呼び出しも、通常 import の strict-extern と
 /// 同じく既定では通り(opaque)、`--strict-extern` で KEI-E3004 warning になることを固定する。
 #[test]
 fn strict_extern_package_golden() {
-    let dir = cli_dir().join("checks");
-    let rel = "tests/cli/checks/strict_extern_package.kei";
-    let mut failures = Vec::new();
-
-    // 既定: 未宣言の外部呼び出しは通る(警告なし・exit 0)。
-    let default = run_kei(&["check", rel]);
-    if !default.stdout.is_empty() || default.code != 0 {
-        failures.push(format!(
-            "default check should be clean: code={} stdout={:?}",
-            default.code, default.stdout
-        ));
-    }
-
-    // strict: KEI-E3004 警告(stage a は warning なので exit は 0)。散文 / --json を固定。
-    let strict = run_kei(&["check", "--strict-extern", rel]);
-    expect_golden(
-        &dir.join("strict_extern_package.strict.txt"),
-        &strict.stdout,
-        &mut failures,
-    );
-    if strict.code != 0 {
-        failures.push(format!(
-            "strict check warning must not change exit code (stage a): code={}",
-            strict.code
-        ));
-    }
-
-    let strict_json = run_kei(&["check", "--strict-extern", "--json", rel]);
-    expect_golden(
-        &dir.join("strict_extern_package.strict.json"),
-        &strict_json.stdout,
-        &mut failures,
-    );
-    let parsed: serde_json::Value =
-        serde_json::from_str(&strict_json.stdout).expect("--json emits valid JSON");
-    let diags = parsed["diagnostics"]
-        .as_array()
-        .expect("diagnostics is an array");
-    if !diags.iter().any(|d| {
-        d["code"] == "KEI-E3004"
-            && d["severity"] == "warning"
-            && !d["fixes"].as_array().map(|f| f.is_empty()).unwrap_or(true)
-    }) {
-        failures.push(format!(
-            "strict --json must carry a KEI-E3004 warning with a fix: {strict_json:?}",
-            strict_json = strict_json.stdout
-        ));
-    }
-
-    assert!(
-        failures.is_empty(),
-        "{} strict-extern-package case(s) failed:\n{}",
-        failures.len(),
-        failures.join("\n\n")
-    );
+    strict_extern_case("strict_extern_package");
 }
 
 // ---------------------------------------------------------------------------
@@ -672,7 +622,7 @@ fn build_golden_tree() {
     assert_eq!(run.code, 0, "build failed: stderr={:?}", run.stderr);
     assert_eq!(run.stdout, "", "build must not write stdout");
     assert!(
-        run.stderr.contains("wrote 2 module(s)"),
+        run.stderr.contains("wrote 3 module(s)"),
         "build summary missing: stderr={:?}",
         run.stderr
     );
@@ -818,21 +768,53 @@ fn ensure_runtime_built(root: &Path) {
     npm(&["run", "build"], &runtime);
 }
 
+/// `tests/cli/projects/app` を共有する複数の #[test] が npm install / dist 削除を
+/// 並行実行しないよう直列化するロック。cargo test は既定でスレッド並列実行するため、
+/// 同じプロジェクトディレクトリを触るテストは互いにロックを取る必要がある
+/// (M36 レビュー対応で greeter_app を app へ統合したことで顕在化)。
+fn app_project_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// npm プロジェクトを検証用に準備する: repo_root canonicalize、ensure_runtime_built、dist 削除、npm install。
+/// 呼び出し元は事前に `if !has_npm() { eprintln!(...); return; }` を書いてから呼ぶこと(has_npm チェックは
+/// このヘルパーに持ち込まない — 既存踏襲)。戻り値は (repo_root, project_dir)。
+fn setup_npm_project(rel_project: &str) -> (PathBuf, PathBuf) {
+    let root = repo_root().canonicalize().expect("repo root");
+    ensure_runtime_built(&root);
+    let project = root.join(rel_project);
+    let dist = project.join("dist");
+    if dist.exists() {
+        fs::remove_dir_all(&dist).expect("clean project dist");
+    }
+    npm(&["install", "--no-audit", "--no-fund"], &project);
+    (root, project)
+}
+
+/// `npx tsc --strict --noEmit` を実行し、失敗したら出力ごと panic する。
+fn tsc_strict_noemit(project: &Path) {
+    let tsc = Command::new("npx")
+        .args(["tsc", "--strict", "--noEmit"])
+        .current_dir(project)
+        .output()
+        .expect("spawn tsc");
+    assert!(
+        tsc.status.success(),
+        "tsc --strict --noEmit failed:\n{}\n{}",
+        String::from_utf8_lossy(&tsc.stdout),
+        String::from_utf8_lossy(&tsc.stderr),
+    );
+}
+
 #[test]
 fn kei_test_builds_then_runs_contracts() {
     if !has_npm() {
         eprintln!("skipping kei_test_builds_then_runs_contracts: npm not found");
         return;
     }
-    let root = repo_root().canonicalize().expect("repo root");
-    ensure_runtime_built(&root);
-
-    let project = root.join("tests/cli/projects/app");
-    let dist = project.join("dist");
-    if dist.exists() {
-        fs::remove_dir_all(&dist).expect("clean project dist");
-    }
-    npm(&["install", "--no-audit", "--no-fund"], &project);
+    let _guard = app_project_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_root, project) = setup_npm_project("tests/cli/projects/app");
 
     // (a) 既定: dev ビルド(契約 on)→ vitest 全件パス → exit 0。
     let pass = run_kei(&["test", "tests/cli/projects/app"]);
@@ -843,17 +825,7 @@ fn kei_test_builds_then_runs_contracts() {
     );
 
     // (b) 直前にビルドした dist が tsc --strict --noEmit でエラーゼロ(goal 条件 3)。
-    let tsc = Command::new("npx")
-        .args(["tsc", "--strict", "--noEmit"])
-        .current_dir(&project)
-        .output()
-        .expect("spawn tsc");
-    assert!(
-        tsc.status.success(),
-        "tsc --strict --noEmit failed:\n{}\n{}",
-        String::from_utf8_lossy(&tsc.stdout),
-        String::from_utf8_lossy(&tsc.stderr),
-    );
+    tsc_strict_noemit(&project);
 
     // (c) requires 違反を捕捉しないテストは失敗 → npm test 非ゼロ → kei test 非ゼロ
     //     (goal 条件 4)。env が子(npm→vitest→node)まで伝播することも確認する。
@@ -874,46 +846,32 @@ fn kei_test_builds_then_runs_contracts() {
 
 /// M36: `extern package` 束縛が `kei build` → npm 環境で実際に疎通すること。
 /// namespace import が生成され、tsc --strict --noEmit を通り、file: 依存の実パッケージを
-/// 呼んだ結果(vitest)が正しいことまで確認する。
+/// 呼んだ結果(vitest)が正しいことまで確認する。M36 レビュー対応で `greeter_app` の
+/// 独立フィクスチャは廃止し、`tests/cli/projects/app` に統合された `greeter_hello.kei`
+/// を使う(npm ツールチェーンの二重化を避けるため)。
 #[test]
-fn greeter_package_build_and_test() {
+fn app_greeter_hello_build_and_test() {
     if !has_npm() {
-        eprintln!("skipping greeter_package_build_and_test: npm not found");
+        eprintln!("skipping app_greeter_hello_build_and_test: npm not found");
         return;
     }
-    let root = repo_root().canonicalize().expect("repo root");
-    ensure_runtime_built(&root);
-
-    let project = root.join("tests/cli/projects/greeter_app");
+    let _guard = app_project_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_root, project) = setup_npm_project("tests/cli/projects/app");
     let dist = project.join("dist");
-    if dist.exists() {
-        fs::remove_dir_all(&dist).expect("clean project dist");
-    }
-    npm(&["install", "--no-audit", "--no-fund"], &project);
 
     // kei build: extern package 束縛が namespace import を出すこと。
-    let build = run_kei(&["build", "tests/cli/projects/greeter_app"]);
+    let build = run_kei(&["build", "tests/cli/projects/app"]);
     assert_eq!(build.code, 0, "build failed: stderr={:?}", build.stderr);
 
-    let generated =
-        fs::read_to_string(dist.join("greeter_app/greet.ts")).expect("generated greet.ts exists");
+    let generated = fs::read_to_string(dist.join("app/greeter_hello.ts"))
+        .expect("generated greeter_hello.ts exists");
     assert!(
         generated.contains("import * as greeter from \"greeter\";"),
         "extern package binding must emit a namespace import: {generated}"
     );
 
     // tsc --strict --noEmit: bare specifier が file: 依存で解決されること。
-    let tsc = Command::new("npx")
-        .args(["tsc", "--strict", "--noEmit"])
-        .current_dir(&project)
-        .output()
-        .expect("spawn tsc");
-    assert!(
-        tsc.status.success(),
-        "tsc --strict --noEmit failed:\n{}\n{}",
-        String::from_utf8_lossy(&tsc.stdout),
-        String::from_utf8_lossy(&tsc.stderr),
-    );
+    tsc_strict_noemit(&project);
 
     // npm test(vitest): 生成コードが実際に npm パッケージへ届くこと。
     npm(&["test"], &project);
