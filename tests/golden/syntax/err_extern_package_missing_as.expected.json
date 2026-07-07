@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E0101",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Write 'as <name>' to bind the package, e.g. extern package \"hono\" as hono"
+      }
+    ],
+    "message": "expected 'as' after package specifier, found identifier 'hono'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 27,
+        "line": 3
+      },
+      "file": "tests/golden/syntax/err_extern_package_missing_as.kei",
+      "start": {
+        "col": 23,
+        "line": 3
+      }
+    }
+  }
+]

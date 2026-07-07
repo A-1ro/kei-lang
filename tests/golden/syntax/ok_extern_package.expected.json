@@ -1,0 +1,118 @@
+{
+  "decl": {
+    "path": [
+      {
+        "name": "syntax",
+        "span": "1:8-1:14"
+      },
+      {
+        "name": "externpackage",
+        "span": "1:15-1:28"
+      }
+    ],
+    "span": "1:1-1:28"
+  },
+  "extern_packages": [
+    {
+      "alias": {
+        "name": "hono",
+        "span": "3:26-3:30"
+      },
+      "span": "3:1-3:30",
+      "specifier": "hono"
+    },
+    {
+      "alias": {
+        "name": "scoped",
+        "span": "4:32-4:38"
+      },
+      "span": "4:1-4:38",
+      "specifier": "@scope/pkg"
+    },
+    {
+      "alias": {
+        "name": "tiny",
+        "span": "5:31-5:35"
+      },
+      "span": "5:1-5:35",
+      "specifier": "hono/tiny"
+    }
+  ],
+  "imports": [],
+  "items": [
+    {
+      "kind": "Extern",
+      "params": [
+        {
+          "name": {
+            "name": "body",
+            "span": "7:18-7:22"
+          },
+          "span": "7:18-7:30",
+          "ty": {
+            "args": [],
+            "path": [
+              {
+                "name": "String",
+                "span": "7:24-7:30"
+              }
+            ],
+            "span": "7:24-7:30"
+          }
+        }
+      ],
+      "path": [
+        {
+          "name": "hono",
+          "span": "7:8-7:12"
+        },
+        {
+          "name": "text",
+          "span": "7:13-7:17"
+        }
+      ],
+      "query": false,
+      "ret": {
+        "args": [],
+        "path": [
+          {
+            "name": "String",
+            "span": "7:35-7:41"
+          }
+        ],
+        "span": "7:35-7:41"
+      },
+      "span": "7:1-7:41",
+      "uses": []
+    },
+    {
+      "kind": "Extern",
+      "params": [],
+      "path": [
+        {
+          "name": "scoped",
+          "span": "8:8-8:14"
+        },
+        {
+          "name": "run",
+          "span": "8:15-8:18"
+        }
+      ],
+      "query": false,
+      "ret": null,
+      "span": "8:1-8:31",
+      "uses": [
+        {
+          "path": [
+            {
+              "name": "Clock",
+              "span": "8:26-8:31"
+            }
+          ],
+          "span": "8:26-8:31"
+        }
+      ]
+    }
+  ],
+  "span": "1:1-9:1"
+}

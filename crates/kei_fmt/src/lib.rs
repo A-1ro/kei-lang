@@ -196,6 +196,20 @@ impl<'a> Fmt<'a> {
             self.need_separator = true;
         }
 
+        if !m.extern_packages.is_empty() {
+            self.write_separator_if_needed();
+            for (i, pkg) in m.extern_packages.iter().enumerate() {
+                if i > 0 {
+                    self.newline();
+                }
+                self.flush_leading(pkg.span.start.line, 0);
+                self.push(&extern_package_text(pkg));
+                self.flush_trailing_on(pkg.span.end.line);
+                self.last_top_line = Some(pkg.span.end.line);
+            }
+            self.need_separator = true;
+        }
+
         let mut i = 0;
         while i < m.items.len() {
             if matches!(m.items[i], Item::Extern(_)) {
@@ -472,6 +486,9 @@ fn earliest_top_line(m: &Module) -> Option<u32> {
     if let Some(i) = m.imports.first() {
         return Some(i.span.start.line);
     }
+    if let Some(p) = m.extern_packages.first() {
+        return Some(p.span.start.line);
+    }
     if let Some(it) = m.items.first() {
         return Some(it.span().start.line);
     }
@@ -499,6 +516,10 @@ fn import_text(import: &Import) -> String {
         s.push_str(&alias.name);
     }
     s
+}
+
+fn extern_package_text(pkg: &ExternPackageDecl) -> String {
+    format!("extern package \"{}\" as {}", pkg.specifier, pkg.alias.name)
 }
 
 fn extern_text(decl: &ExternDecl) -> String {

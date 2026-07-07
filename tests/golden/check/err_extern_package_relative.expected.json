@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E3006",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Use a regular 'import' for relative module paths instead of 'extern package'"
+      }
+    ],
+    "message": "'./local-thing' is not a valid npm package specifier",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 40,
+        "line": 3
+      },
+      "file": "tests/golden/check/err_extern_package_relative.kei",
+      "start": {
+        "col": 1,
+        "line": 3
+      }
+    }
+  }
+]

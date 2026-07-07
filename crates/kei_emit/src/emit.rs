@@ -409,6 +409,14 @@ impl Emitter<'_> {
                 self.emit_import(imp);
             }
         }
+        if !self.module.extern_packages.is_empty() {
+            if !wrote_imports {
+                self.out.newline();
+            }
+            for pkg in &self.module.extern_packages {
+                self.emit_extern_package(pkg);
+            }
+        }
 
         for item in &self.module.items {
             // extern は外部境界の署名(検査専用)。TS 出力は持たない。
@@ -464,6 +472,18 @@ impl Emitter<'_> {
             self.out
                 .frag(&format!("import * as {binding} from \"{spec}\";"));
         }
+        self.out.newline();
+    }
+
+    /// `extern package "hono" as hono` → `import * as hono from "hono";`(M35)。
+    /// 未使用検出はしない(既存の `emit_import` と同じく宣言ごとに常時出力)。
+    fn emit_extern_package(&mut self, pkg: &ast::ExternPackageDecl) {
+        self.out.start_line();
+        self.out.map(pkg.span);
+        self.out.frag(&format!(
+            "import * as {} from \"{}\";",
+            pkg.alias.name, pkg.specifier
+        ));
         self.out.newline();
     }
 

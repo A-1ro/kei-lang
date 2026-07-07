@@ -28,6 +28,13 @@ pub struct Comment {
 pub struct Module {
     pub decl: Option<ModuleDecl>,
     pub imports: Vec<Import>,
+    /// M35。既存の syntax golden(`tests/golden/syntax/ok_*.expected.json`)は
+    /// この機能追加前に固定された AST JSON ダンプであり、この新フィールドが
+    /// 常時 `[]` として出現すると全件差分が生じてしまう。`skip_serializing_if`
+    /// で「空なら省略」にすることで、AST 構造・意味論は変えずに既存 golden を
+    /// 無傷のまま保つ(golden は契約本文につき書き換え禁止 — ARCHITECTURE.md 不変条件1)。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extern_packages: Vec<ExternPackageDecl>,
     pub items: Vec<Item>,
     pub span: Span,
 }
@@ -46,6 +53,16 @@ pub struct Import {
     /// `{ ... }` で列挙された名前。空ならモジュール全体参照。
     pub names: Vec<Ident>,
     pub alias: Option<Ident>,
+    pub span: Span,
+}
+
+/// `extern package "hono" as hono` — npm bare specifier を extern 署名の
+/// 名前空間に束縛する(M35)。束縛名は extern 署名(`extern <name>.<fn>(...)`)の
+/// 名前空間としてのみ使用でき、値・型位置では使えない(kei_check で検査)。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExternPackageDecl {
+    pub specifier: String,
+    pub alias: Ident,
     pub span: Span,
 }
 

@@ -40,12 +40,25 @@ mod codes {
     pub const DUPLICATE_EXTERN: &str = "KEI-E3003";
     pub const UNDECLARED_EXTERN_CALL: &str = "KEI-E3004";
     pub const QUERY_WITH_EFFECTS: &str = "KEI-E3005";
+    pub const INVALID_PACKAGE_SPECIFIER: &str = "KEI-E3006";
+    pub const EXTERN_PACKAGE_SCOPE: &str = "KEI-E3007";
     pub const IMPURE_CONTRACT: &str = "KEI-E4001";
     pub const CONTRACT_CONSTRUCT: &str = "KEI-E4002";
     pub const CONST_FALSE_CONTRACT: &str = "KEI-E4003";
     pub const NON_QUERY_IN_CONTRACT: &str = "KEI-E4004";
     pub const GENERATIVE_COUNTEREXAMPLE: &str = "KEI-E4005";
     pub const CONTRACT_MISSING: &str = "KEI-E4008";
+}
+
+/// `extern package` の specifier が npm bare specifier かどうかを検査する(M35)。
+/// 相対パス(`./` `../` `/`)・URL(`http://` `https://`)・空文字列は不可。
+fn validate_package_specifier(specifier: &str) -> bool {
+    !specifier.is_empty()
+        && !specifier.starts_with("./")
+        && !specifier.starts_with("../")
+        && !specifier.starts_with('/')
+        && !specifier.starts_with("http://")
+        && !specifier.starts_with("https://")
 }
 
 /// `List<T>` の builtin メソッド名一覧(候補提示・エラーメッセージで使う唯一の定義元)。
@@ -527,6 +540,7 @@ enum NameKind {
     Alias,
     Func,
     Import,
+    ExternPackage,
 }
 
 #[derive(Debug, Clone)]
@@ -694,6 +708,55 @@ impl Env {
                 imported_names.insert(ident.name.clone());
                 first.insert(ident.name.clone(), ident.span);
             }
+        }
+
+        // M35: extern package 束縛名の登録。import と同じ重複検出パス
+        // (IMPORT_CONFLICT / DUPLICATE_DEF)に乗せる。
+        for pkg in &module.extern_packages {
+            if !validate_package_specifier(&pkg.specifier) {
+                let reason = if pkg.specifier.is_empty() {
+                    "a package specifier must not be empty".to_string()
+                } else {
+                    format!("'{}' is not a valid npm package specifier", pkg.specifier)
+                };
+                let fix = if pkg.specifier.starts_with("./")
+                    || pkg.specifier.starts_with("../")
+                    || pkg.specifier.starts_with('/')
+                {
+                    direction("Use a regular 'import' for relative module paths instead of 'extern package'")
+                } else if pkg.specifier.starts_with("http://")
+                    || pkg.specifier.starts_with("https://")
+                {
+                    direction("'extern package' binds an npm bare specifier, not a URL")
+                } else {
+                    direction("Specify an npm package name, e.g. extern package \"hono\" as hono")
+                };
+                env.push(
+                    diags,
+                    codes::INVALID_PACKAGE_SPECIFIER,
+                    reason,
+                    pkg.span,
+                    vec![fix],
+                );
+            }
+            let ident = &pkg.alias;
+            if let Some(prev) = first.get(&ident.name) {
+                env.push(
+                    diags,
+                    codes::IMPORT_CONFLICT,
+                    format!(
+                        "name '{}' is imported more than once (first introduced at line {})",
+                        ident.name, prev.start.line
+                    ),
+                    ident.span,
+                    vec![direction("Remove or alias the duplicate import")],
+                );
+                continue;
+            }
+            env.kinds
+                .insert(ident.name.clone(), NameKind::ExternPackage);
+            imported_names.insert(ident.name.clone());
+            first.insert(ident.name.clone(), ident.span);
         }
 
         // 2) item 名の登録(最初の定義が有効。以降は重複エラー)
@@ -1058,6 +1121,23 @@ impl Env {
                 }
                 return Ty::Unknown;
             }
+            if self.kinds.get(root) == Some(&NameKind::ExternPackage) {
+                for a in &t.args {
+                    self.resolve_ty(a, diags);
+                }
+                self.push(
+                    diags,
+                    codes::EXTERN_PACKAGE_SCOPE,
+                    format!(
+                        "'{root}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+                    ),
+                    t.span,
+                    vec![direction(format!(
+                        "Declare 'extern {root}.<fn>(...)' or remove this usage"
+                    ))],
+                );
+                return Ty::Unknown;
+            }
             let full: Vec<&str> = t.path.iter().map(|i| i.name.as_str()).collect();
             let full = full.join(".");
             self.push(
@@ -1138,6 +1218,23 @@ impl Env {
                     for a in &t.args {
                         self.resolve_ty(a, diags);
                     }
+                    Ty::Unknown
+                }
+                Some(NameKind::ExternPackage) => {
+                    for a in &t.args {
+                        self.resolve_ty(a, diags);
+                    }
+                    self.push(
+                        diags,
+                        codes::EXTERN_PACKAGE_SCOPE,
+                        format!(
+                            "'{root}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+                        ),
+                        t.span,
+                        vec![direction(format!(
+                            "Declare 'extern {root}.<fn>(...)' or remove this usage"
+                        ))],
+                    );
                     Ty::Unknown
                 }
                 Some(NameKind::Func) => {
@@ -1830,6 +1927,19 @@ impl FnChecker<'_> {
                 Ty::Unknown
             }
             Some(NameKind::Import) => Ty::Unknown,
+            Some(NameKind::ExternPackage) => {
+                self.push(
+                    codes::EXTERN_PACKAGE_SCOPE,
+                    format!(
+                        "'{name}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+                    ),
+                    span,
+                    vec![direction(format!(
+                        "Declare 'extern {name}.<fn>(...)' or remove this usage"
+                    ))],
+                );
+                Ty::Unknown
+            }
             None => {
                 let scope_names: Vec<String> =
                     self.scopes.iter().flat_map(|s| s.keys().cloned()).collect();
@@ -1860,6 +1970,20 @@ impl FnChecker<'_> {
                 match self.env.kinds.get(root.as_str()) {
                     Some(NameKind::Enum) => return self.variant_ref(root.clone(), name),
                     Some(NameKind::Import) => return Ty::Unknown,
+                    Some(NameKind::ExternPackage) => {
+                        let root = root.clone();
+                        self.push(
+                            codes::EXTERN_PACKAGE_SCOPE,
+                            format!(
+                                "'{root}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+                            ),
+                            name.span,
+                            vec![direction(format!(
+                                "Declare 'extern {root}.<fn>(...)' or remove this usage"
+                            ))],
+                        );
+                        return Ty::Unknown;
+                    }
                     Some(NameKind::Record) | Some(NameKind::Alias) => {
                         let root = root.clone();
                         self.push(
@@ -2184,7 +2308,10 @@ impl FnChecker<'_> {
                 // 時のみ、未宣言の外部呼び出しを警告する(M16 / #44)。
                 if let Some(path) = field_path(callee) {
                     if self.lookup_scope(&path[0]).into_option().is_none()
-                        && self.env.kinds.get(&path[0]) == Some(&NameKind::Import)
+                        && matches!(
+                            self.env.kinds.get(&path[0]),
+                            Some(&NameKind::Import) | Some(&NameKind::ExternPackage)
+                        )
                     {
                         let key = path.join(".");
                         if let Some(sig) = self.env.externs.get(&key).cloned() {
@@ -2999,6 +3126,22 @@ impl FnChecker<'_> {
                 }
                 Ty::Unknown
             }
+            Some(NameKind::ExternPackage) => {
+                for a in args {
+                    self.infer(a);
+                }
+                self.push(
+                    codes::EXTERN_PACKAGE_SCOPE,
+                    format!(
+                        "'{name}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+                    ),
+                    span,
+                    vec![direction(format!(
+                        "Declare 'extern {name}.<fn>(...)' or remove this usage"
+                    ))],
+                );
+                Ty::Unknown
+            }
             Some(NameKind::Record) => {
                 for a in args {
                     self.infer(a);
@@ -3413,6 +3556,21 @@ impl FnChecker<'_> {
                     self.infer_lit_fields(spread, fields);
                     Ty::Unknown
                 }
+                Some(NameKind::ExternPackage) => {
+                    let root = root.clone();
+                    self.infer_lit_fields(spread, fields);
+                    self.push(
+                        codes::EXTERN_PACKAGE_SCOPE,
+                        format!(
+                            "'{root}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+                        ),
+                        span,
+                        vec![direction(format!(
+                            "Declare 'extern {root}.<fn>(...)' or remove this usage"
+                        ))],
+                    );
+                    Ty::Unknown
+                }
                 Some(NameKind::Func) => {
                     let root = root.clone();
                     self.infer_lit_fields(spread, fields);
@@ -3522,6 +3680,20 @@ impl FnChecker<'_> {
             }
         } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::Import) {
             self.infer_lit_fields(spread, fields);
+            Ty::Unknown
+        } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::ExternPackage) {
+            let root = root.clone();
+            self.infer_lit_fields(spread, fields);
+            self.push(
+                codes::EXTERN_PACKAGE_SCOPE,
+                format!(
+                    "'{root}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+                ),
+                span,
+                vec![direction(format!(
+                    "Declare 'extern {root}.<fn>(...)' or remove this usage"
+                ))],
+            );
             Ty::Unknown
         } else {
             let full: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();

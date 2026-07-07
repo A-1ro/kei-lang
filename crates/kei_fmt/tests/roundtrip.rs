@@ -353,6 +353,7 @@ fn module() -> impl Strategy<Value = Module> {
         .prop_map(|(decl, imports, items)| Module {
             decl,
             imports,
+            extern_packages: Vec::new(),
             items,
             span: sp(),
         })
