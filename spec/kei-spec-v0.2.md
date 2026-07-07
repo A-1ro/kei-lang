@@ -180,13 +180,26 @@ extern hono.text(body: String) -> String
 
 #### specifier 規則
 
-`specifier` は npm bare specifier のみを許す(`hono` / `@scope/pkg` / `hono/tiny`)。
-以下は診断で拒否する(`KEI-E3006`):
+`specifier` は npm bare specifier のみを許す。**受理文法**(ホワイトリスト、M35 レビュー対応):
+
+- 通常形: `name` または `name/subpath...`
+  - `name` は `[a-z0-9]` で始まり、以降 `[a-z0-9._-]*`(大文字は不可)
+  - `subpath` の各セグメントは空でなく `[a-zA-Z0-9._-]+`、かつ `.` または `..` 単体は不可
+- scoped 形: `@scope/name`(+ `/subpath...`)。`scope` と `name` はともに上記の `name` と
+  同じ文字クラス
+- 例: `hono` / `@scope/pkg` / `hono/tiny` / `@scope/pkg/sub.path`
+
+上記以外(空文字列・相対パス・絶対パス・URL・引用符/空白/バックスラッシュ/改行を含む
+文字列・大文字・`.`/`..` 単体セグメント等の不正文字)はすべて診断で拒否する(`KEI-E3006`)。
+特に以下は代表的な拒否パターン:
 
 - 相対パス(`./...` / `../...`)・絶対パス(`/...`)始まり — 通常の `import` を使うべき
   Kei モジュールパスであり、`extern package` の対象ではない。
 - URL(`http://...` / `https://...`)始まり — `extern package` は npm bare specifier 専用。
 - 空文字列。
+- 上記受理文法の文字クラス・セグメント規則に合致しない文字列(引用符・改行・空白・
+  バックスラッシュ・大文字を含む等)— check 段でホワイトリスト照合により拒否し、
+  emit・fmt 層でのコード注入や不正な TS 生成を未然に防ぐ。
 
 #### 束縛名のスコープ制約
 

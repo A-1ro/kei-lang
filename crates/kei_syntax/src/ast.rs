@@ -33,6 +33,9 @@ pub struct Module {
     /// 常時 `[]` として出現すると全件差分が生じてしまう。`skip_serializing_if`
     /// で「空なら省略」にすることで、AST 構造・意味論は変えずに既存 golden を
     /// 無傷のまま保つ(golden は契約本文につき書き換え禁止 — ARCHITECTURE.md 不変条件1)。
+    /// AST JSON では空/None のフィールドは省略される(スキーマ規則)。golden 差分の
+    /// 回避が目的ではなく、後方互換のための確立パターン(golden 差分の話は結果で
+    /// あって理由ではない)。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub extern_packages: Vec<ExternPackageDecl>,
     pub items: Vec<Item>,
@@ -296,6 +299,9 @@ pub enum Expr {
     /// `Path { ...spread, field: expr, shorthand }`
     RecordLit {
         path: Vec<Ident>,
+        /// AST JSON では空/None のフィールドは省略される(スキーマ規則)。golden 差分の
+        /// 回避が目的ではなく、後方互換のための確立パターン(golden 差分の話は結果で
+        /// あって理由ではない)。
         #[serde(skip_serializing_if = "Option::is_none")]
         spread: Option<Box<Expr>>,
         fields: Vec<RecordLitField>,

@@ -344,16 +344,29 @@ fn import() -> impl Strategy<Value = Import> {
     })
 }
 
+/// M35 レビュー対応: `extern package "<specifier>" as <alias>` の specifier は
+/// fmt 層では検証しない(check の責務)ため、`string_literal()` の再エスケープが
+/// 任意の印字可能 ASCII(`"` `\` を含む)を正しく往復させることを roundtrip proptest
+/// でも押さえる。
+fn extern_package() -> impl Strategy<Value = ExternPackageDecl> {
+    (str_value(), ident()).prop_map(|(specifier, alias)| ExternPackageDecl {
+        specifier,
+        alias,
+        span: sp(),
+    })
+}
+
 fn module() -> impl Strategy<Value = Module> {
     (
         prop::option::of(path1().prop_map(|path| ModuleDecl { path, span: sp() })),
         prop::collection::vec(import(), 0..=3),
+        prop::collection::vec(extern_package(), 0..=2),
         prop::collection::vec(item(), 0..=4),
     )
-        .prop_map(|(decl, imports, items)| Module {
+        .prop_map(|(decl, imports, extern_packages, items)| Module {
             decl,
             imports,
-            extern_packages: Vec::new(),
+            extern_packages,
             items,
             span: sp(),
         })
