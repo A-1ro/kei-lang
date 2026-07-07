@@ -670,3 +670,25 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 **Why this matters for HANDOFF.md**: named import / default / `new` を「まだ実装していない」のではなく「実需確定まで意図的に設計しない」ことを記録し、先回り実装を防ぐため。
 **Draft entry** (lift verbatim if approved):
 > v0.6 段階1は `import * as ns from "pkg"` の namespace import **のみ**を生成する。named import・default export の直接束縛は v0.8(Hono アダプタ)で実需が確定してから段階2として設計(🤝 合意事項)。`new Hono()` のようなクラス構築は @kei/hono アダプタ側で吸収する前提であり、言語側に構文を足さない。async 署名は v0.7 の主題。
+
+## PR #122: feat: M35 extern package 宣言 — npm bare specifier 束縛 — 2026-07-07 merged
+
+### Candidate: specifier 検査はホワイトリスト文法(拒否列挙では不十分)
+**Why this matters for HANDOFF.md**: KEI-E3006 の検査方針が「不正プレフィックスの列挙」ではなく「受理文法のホワイトリスト」である理由(コード注入・不正 TS 生成の防止)は診断コードからは読めないため。
+**Draft entry** (lift verbatim if approved):
+> `extern package` の specifier 検査(KEI-E3006, `classify_package_specifier`)は npm bare specifier の**受理文法ホワイトリスト**(spec §2.4: `[a-z0-9][a-z0-9._-]*` セグメント + `@scope/name` + subpath)で行う。相対/URL/空などの拒否プレフィックス列挙だけでは、引用符・改行・空白などを含む specifier がそのまま `import * as x from "<spec>";` に verbatim 出力され、コード注入や不正 TS 生成の余地が残る(M35 レビュー指摘)。specifier 文法を広げるときは必ずホワイトリスト側を拡張すること。
+
+### Candidate: `package` はキーワード化しない(文脈依存識別子)
+**Why this matters for HANDOFF.md**: 予約語を増やさず `extern` 直後の先読みで判定するパターンは `extern query` と共通の設計方針で、次に extern 系構文を足す人が踏襲すべき前例のため。
+**Draft entry** (lift verbatim if approved):
+> `extern package` の `package` はキーワードではなく、`extern` 直後の文脈依存識別子として先読み判定する(`extern query` の `query` と同じパターン)。ユーザーコードで `package` を識別子として使えることを壊さないため、extern 系の新構文は今後もこの方式を踏襲する。
+
+### Candidate: 束縛名は extern 署名の名前空間専用(KEI-E3007 を全使用位置で発火)
+**Why this matters for HANDOFF.md**: `NameKind::ExternPackage` を値・型位置・record リテラルなど 7 箇所で個別に弾いている構造は、使用位置チェックを 1 箇所に集約できない check.rs の制約と合わせて知らないと、新しい式形を足したときに検査漏れするため。
+**Draft entry** (lift verbatim if approved):
+> `extern package` の束縛名(`NameKind::ExternPackage`)は extern 署名の名前空間**専用**。値・型位置・record リテラル・呼び出しなど各使用位置で KEI-E3007 を発火させる分岐が check.rs に 7 箇所あり、message/fix の構築だけ `extern_package_scope_diag` に集約している(`self.push` の引数形が呼び出し元ごとに違うため完全共通化は不可)。新しい式/型の解決パスを足すときは `NameKind::Import` を扱う分岐の隣に `ExternPackage` アームも足すこと。call resolution 自体は既存 extern 解決パス(型確定 / opaque / strict-extern warning)を共有しており、専用パスは無い。
+
+### Candidate: emit は未使用検出なしで verbatim・常時出力
+**Why this matters for HANDOFF.md**: 「未使用でも import を出す」「specifier を相対パス化しない」という 2 つの意図的な非対称は、後から最適化したくなる典型ポイントのため先回りで記録する価値がある。
+**Draft entry** (lift verbatim if approved):
+> `extern package` の TS 出力は宣言ごとに `import * as <name> from "<spec>";` を**常時**出力する(未使用検出なし — 既存 `emit_import` と同じ方針に揃えた)。specifier は相対パス化などの変換をせず verbatim で出す(bare specifier は bundler / runtime の解決に委ねる)。「未使用なら省く」最適化を入れる場合は emit_import と同時に方針を変えること。

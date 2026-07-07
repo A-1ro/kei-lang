@@ -371,3 +371,12 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #121: docs: v0.6 ロードマップ — extern package による npm import — 2026-07-07 merged
 
 (no actionable patterns)
+
+## PR #122: feat: M35 extern package 宣言 — npm bare specifier 束縛 — 2026-07-07 merged
+
+- **Pattern**: レキサー解決済み文字列の verbatim 再埋め込み
+  **Source**: A-1ro inline (crates/kei_emit/src/emit.rs:487)
+  **Lesson**: AST に載る文字列リテラルはレキサーがエスケープ解決済みの生文字列なので、emit / fmt で TS や Kei ソースに再埋め込みするときは必ず `ts_string` 等のエスケープ関数を通す — `format!("\"{}\"", s)` の verbatim 埋め込みは quote/改行入り入力で不正な出力を生む(fmt 側は「意味的変更禁止」不変条件に抵触するため、危険な文字は kei_check の検査(KEI-E3006 系)で先に拒否する選択肢も検討する)。
+- **Pattern**: prefix 判定だけのバリデーションの境界値漏れ
+  **Source**: A-1ro inline (crates/kei_check/src/check.rs)
+  **Lesson**: `./` `../` `/` の prefix 判定で相対パスを拒否するとき、`"."` と `".."` 単体という境界値がすり抜けることを必ず確認する — specifier / パス系バリデーションでは prefix 一致に加えて完全一致の境界ケースを列挙し、対応する診断(KEI-E3006)の golden も既存 err golden の枠内で揃える。
