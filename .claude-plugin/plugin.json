@@ -1,7 +1,7 @@
 {
   "name": "kei",
-  "description": "Kei 言語を学習なしで正しく書くためのスキル。func/契約/エフェクト/型/失敗処理の最小十分セットと、kei check による検証ループを提供する(v0.5: 論理積 && / List.contains / String stdlib(連結・length・toString・toInt) / ラムダ読み取りキャプチャ / record spread / Map<K,V> 段階1 / MCP generative 検証)。",
-  "version": "0.5.0",
+  "description": "Kei 言語を学習なしで正しく書くためのスキル。func/契約/エフェクト/型/失敗処理の最小十分セットと、kei check による検証ループを提供する(v0.6: extern package による npm bare specifier import。v0.5: 論理積 && / List.contains / String stdlib / ラムダ読み取りキャプチャ / record spread / Map<K,V> 段階1 / MCP generative 検証)。",
+  "version": "0.6.0",
   "author": {
     "name": "Eiichiro Iriguchi"
   },
