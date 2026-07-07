@@ -288,6 +288,7 @@ impl Parser {
         let start = self.cur().span;
         let mut decl = None;
         let mut imports = Vec::new();
+        let mut extern_packages = Vec::new();
         let mut items = Vec::new();
 
         self.skip_newlines();
@@ -325,7 +326,11 @@ impl Parser {
                     }
                 }
                 T::Extern => {
-                    if let Some(item) = self.parse_extern() {
+                    if self.cur_is_extern_package() {
+                        if let Some(pkg) = self.parse_extern_package() {
+                            extern_packages.push(pkg);
+                        }
+                    } else if let Some(item) = self.parse_extern() {
                         items.push(Item::Extern(item));
                     }
                 }
@@ -364,6 +369,7 @@ impl Parser {
         Module {
             decl,
             imports,
+            extern_packages,
             items,
             span: start.to(end),
         }
@@ -787,6 +793,80 @@ impl Parser {
             ensures,
             body,
             span,
+        })
+    }
+
+    /// `extern package "<spec>" as <name>` を先読みで判別する(消費なし)。
+    /// `package` はキーワード化しない(`query` と同じ文脈依存識別子パターン、793-801行目参照)。
+    fn cur_is_extern_package(&self) -> bool {
+        if self
+            .tokens
+            .get(self.pos + 1)
+            .map(|t| t.kind == T::Ident && t.text == "package")
+            != Some(true)
+        {
+            return false;
+        }
+        match self.tokens.get(self.pos + 2).map(|t| t.kind) {
+            Some(T::Str) => true,
+            // 引用符なし specifier(`extern package hono as hono`)も
+            // `parse_extern_package` に委譲し、そちらの「specifier は文字列
+            // リテラルで」という fix 付き診断に到達させる(M35 レビュー対応:
+            // 従来は通常の `extern` 署名パースに誤誘導され到達不能だった)。
+            Some(T::Ident) => self.tokens.get(self.pos + 3).map(|t| t.kind) == Some(T::As),
+            _ => false,
+        }
+    }
+
+    fn parse_extern_package(&mut self) -> Option<ExternPackageDecl> {
+        let kw = self.bump(); // 'extern'
+        self.bump(); // 'package' (contextual identifier, not a TokenKind)
+        if !self.at(T::Str) {
+            let tok = self.cur().clone();
+            self.error(
+                codes::UNEXPECTED_TOKEN,
+                format!(
+                    "expected a string literal package specifier, found {}",
+                    tok.found_label()
+                ),
+                tok.span,
+                FixHint::direction(
+                    "Write the npm package specifier as a string literal, e.g. extern package \"hono\" as hono",
+                ),
+            );
+            self.recover_to_decl();
+            return None;
+        }
+        let spec_tok = self.bump();
+        let specifier = spec_tok.text;
+        if !self.eat(T::As) {
+            let tok = self.cur().clone();
+            self.error(
+                codes::UNEXPECTED_TOKEN,
+                format!(
+                    "expected 'as' after package specifier, found {}",
+                    tok.found_label()
+                ),
+                tok.span,
+                FixHint::direction(
+                    "Write 'as <name>' to bind the package, e.g. extern package \"hono\" as hono",
+                ),
+            );
+            self.recover_to_decl();
+            return None;
+        }
+        let alias = match self.expect_ident("a package binding name") {
+            Some(a) => a,
+            None => {
+                self.recover_to_decl();
+                return None;
+            }
+        };
+        let end = alias.span;
+        Some(ExternPackageDecl {
+            specifier,
+            alias,
+            span: kw.span.to(end),
         })
     }
 

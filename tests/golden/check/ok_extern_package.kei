@@ -1,0 +1,9 @@
+module check.externpackage
+
+extern package "hono" as hono
+
+extern hono.text(body: String) -> String
+
+func greet() -> String {
+  return hono.text("hello")
+}

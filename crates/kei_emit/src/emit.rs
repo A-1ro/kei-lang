@@ -409,6 +409,14 @@ impl Emitter<'_> {
                 self.emit_import(imp);
             }
         }
+        if !self.module.extern_packages.is_empty() {
+            if !wrote_imports {
+                self.out.newline();
+            }
+            for pkg in &self.module.extern_packages {
+                self.emit_extern_package(pkg);
+            }
+        }
 
         for item in &self.module.items {
             // extern は外部境界の署名(検査専用)。TS 出力は持たない。
@@ -464,6 +472,19 @@ impl Emitter<'_> {
             self.out
                 .frag(&format!("import * as {binding} from \"{spec}\";"));
         }
+        self.out.newline();
+    }
+
+    /// `extern package "hono" as hono` → `import * as hono from "hono";`(M35)。
+    /// 未使用検出はしない(既存の `emit_import` と同じく宣言ごとに常時出力)。
+    fn emit_extern_package(&mut self, pkg: &ast::ExternPackageDecl) {
+        self.out.start_line();
+        self.out.map(pkg.span);
+        self.out.frag(&format!(
+            "import * as {} from {};",
+            pkg.alias.name,
+            ts_string(&pkg.specifier)
+        ));
         self.out.newline();
     }
 
@@ -1386,3 +1407,19 @@ fn is_runtime_method(
 // 表記の正規実装は `kei_check::contract_expr_text`(#32、ファイル冒頭で `kei_expr_text` として
 // import)。`condition` は `CheckReport.contracts[].expr` とバイト一致が要件なので、優先順位・
 // 結合方向・文字列エスケープをここで再実装せず、検査クレートの単一実装へ委譲する。
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// M35 レビュー対応: `emit_extern_package` は specifier を素の `"{}"` ではなく
+    /// `ts_string()` 経由で出力する(防御層。check 段が正当な bare specifier のみ通す
+    /// 前提でも、emit 層は文字列出力を常にエスケープ経路に通す)。
+    #[test]
+    fn ts_string_escapes_quotes_backslashes_and_control_chars() {
+        assert_eq!(ts_string("hono"), "\"hono\"");
+        assert_eq!(ts_string("a\"b"), "\"a\\\"b\"");
+        assert_eq!(ts_string("a\\b"), "\"a\\\\b\"");
+        assert_eq!(ts_string("a\nb"), "\"a\\nb\"");
+    }
+}

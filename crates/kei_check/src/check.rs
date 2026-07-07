@@ -40,12 +40,128 @@ mod codes {
     pub const DUPLICATE_EXTERN: &str = "KEI-E3003";
     pub const UNDECLARED_EXTERN_CALL: &str = "KEI-E3004";
     pub const QUERY_WITH_EFFECTS: &str = "KEI-E3005";
+    pub const INVALID_PACKAGE_SPECIFIER: &str = "KEI-E3006";
+    pub const EXTERN_PACKAGE_SCOPE: &str = "KEI-E3007";
     pub const IMPURE_CONTRACT: &str = "KEI-E4001";
     pub const CONTRACT_CONSTRUCT: &str = "KEI-E4002";
     pub const CONST_FALSE_CONTRACT: &str = "KEI-E4003";
     pub const NON_QUERY_IN_CONTRACT: &str = "KEI-E4004";
     pub const GENERATIVE_COUNTEREXAMPLE: &str = "KEI-E4005";
     pub const CONTRACT_MISSING: &str = "KEI-E4008";
+}
+
+/// `extern package` の specifier の分類(M35 レビュー対応)。spec §2.4 の受理文法に対応する。
+enum SpecifierClass {
+    Valid,
+    Empty,
+    Relative,
+    Absolute,
+    Url,
+    InvalidChar,
+}
+
+/// `extern package` の specifier を分類する。npm bare specifier のホワイトリスト
+/// 文法(spec §2.4)に合致しない文字列(引用符・改行・空白・大文字・不正セグメント等)は
+/// すべて `InvalidChar` として拒否する — 拒否プレフィックスの列挙だけでは
+/// コード注入や不正 TS 生成の余地が残るため(M35 レビュー指摘)。
+fn classify_package_specifier(specifier: &str) -> SpecifierClass {
+    if specifier.is_empty() {
+        return SpecifierClass::Empty;
+    }
+    if specifier.starts_with("./") || specifier.starts_with("../") {
+        return SpecifierClass::Relative;
+    }
+    if specifier.starts_with('/') {
+        return SpecifierClass::Absolute;
+    }
+    if specifier.starts_with("http://") || specifier.starts_with("https://") {
+        return SpecifierClass::Url;
+    }
+    if is_valid_bare_specifier(specifier) {
+        SpecifierClass::Valid
+    } else {
+        SpecifierClass::InvalidChar
+    }
+}
+
+/// `name` セグメント(scope 名・パッケージ名)の文字クラス: `[a-z0-9]` で始まり
+/// 以降 `[a-z0-9._-]*`(大文字は不可)。
+fn is_name_segment(seg: &str) -> bool {
+    let mut chars = seg.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_' || c == '-')
+}
+
+/// subpath セグメントの文字クラス: 空でなく `[a-zA-Z0-9._-]+`、かつ `.` / `..` 単体は不可。
+fn is_subpath_segment(seg: &str) -> bool {
+    !seg.is_empty()
+        && seg != "."
+        && seg != ".."
+        && seg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+/// 通常形 `name(/subpath...)` と scoped 形 `@scope/name(/subpath...)` を受理する
+/// (spec §2.4「specifier 規則」)。
+fn is_valid_bare_specifier(specifier: &str) -> bool {
+    let rest_after_name: Option<&str> = if let Some(after_at) = specifier.strip_prefix('@') {
+        let mut scope_parts = after_at.splitn(2, '/');
+        let scope = scope_parts.next().unwrap_or("");
+        if !is_name_segment(scope) {
+            return false;
+        }
+        let after_scope = match scope_parts.next() {
+            Some(s) => s,
+            None => return false, // "@scope" のみ(name が無い)は不可
+        };
+        let mut name_parts = after_scope.splitn(2, '/');
+        let name = name_parts.next().unwrap_or("");
+        if !is_name_segment(name) {
+            return false;
+        }
+        name_parts.next()
+    } else {
+        let mut parts = specifier.splitn(2, '/');
+        let name = parts.next().unwrap_or("");
+        if !is_name_segment(name) {
+            return false;
+        }
+        parts.next()
+    };
+    match rest_after_name {
+        None => true,
+        Some(subpath) => subpath.split('/').all(is_subpath_segment),
+    }
+}
+
+/// KEI-E3006(不正な specifier)の message/fix を組み立てる。分類ごとに既存の
+/// reason/fix 文言(空/相対・絶対/URL/その他)を保つ。
+fn specifier_validation_error(specifier: &str) -> Option<(String, Fix)> {
+    match classify_package_specifier(specifier) {
+        SpecifierClass::Valid => None,
+        SpecifierClass::Empty => Some((
+            "a package specifier must not be empty".to_string(),
+            direction("Specify an npm package name, e.g. extern package \"hono\" as hono"),
+        )),
+        SpecifierClass::Relative | SpecifierClass::Absolute => Some((
+            format!("'{specifier}' is not a valid npm package specifier"),
+            direction(
+                "Use a regular 'import' for relative module paths instead of 'extern package'",
+            ),
+        )),
+        SpecifierClass::Url => Some((
+            format!("'{specifier}' is not a valid npm package specifier"),
+            direction("'extern package' binds an npm bare specifier, not a URL"),
+        )),
+        SpecifierClass::InvalidChar => Some((
+            format!("'{specifier}' is not a valid npm package specifier"),
+            direction("Specify an npm package name, e.g. extern package \"hono\" as hono"),
+        )),
+    }
 }
 
 /// `List<T>` の builtin メソッド名一覧(候補提示・エラーメッセージで使う唯一の定義元)。
@@ -527,6 +643,7 @@ enum NameKind {
     Alias,
     Func,
     Import,
+    ExternPackage,
 }
 
 #[derive(Debug, Clone)]
@@ -694,6 +811,38 @@ impl Env {
                 imported_names.insert(ident.name.clone());
                 first.insert(ident.name.clone(), ident.span);
             }
+        }
+
+        // M35: extern package 束縛名の登録。import と同じ重複検出パス
+        // (IMPORT_CONFLICT / DUPLICATE_DEF)に乗せる。
+        for pkg in &module.extern_packages {
+            if let Some((reason, fix)) = specifier_validation_error(&pkg.specifier) {
+                env.push(
+                    diags,
+                    codes::INVALID_PACKAGE_SPECIFIER,
+                    reason,
+                    pkg.span,
+                    vec![fix],
+                );
+            }
+            let ident = &pkg.alias;
+            if let Some(prev) = first.get(&ident.name) {
+                env.push(
+                    diags,
+                    codes::IMPORT_CONFLICT,
+                    format!(
+                        "name '{}' is imported more than once (first introduced at line {})",
+                        ident.name, prev.start.line
+                    ),
+                    ident.span,
+                    vec![direction("Remove or alias the duplicate import")],
+                );
+                continue;
+            }
+            env.kinds
+                .insert(ident.name.clone(), NameKind::ExternPackage);
+            imported_names.insert(ident.name.clone());
+            first.insert(ident.name.clone(), ident.span);
         }
 
         // 2) item 名の登録(最初の定義が有効。以降は重複エラー)
@@ -1058,6 +1207,14 @@ impl Env {
                 }
                 return Ty::Unknown;
             }
+            if self.kinds.get(root) == Some(&NameKind::ExternPackage) {
+                for a in &t.args {
+                    self.resolve_ty(a, diags);
+                }
+                let (msg, fixes) = extern_package_scope_diag(root);
+                self.push(diags, codes::EXTERN_PACKAGE_SCOPE, msg, t.span, fixes);
+                return Ty::Unknown;
+            }
             let full: Vec<&str> = t.path.iter().map(|i| i.name.as_str()).collect();
             let full = full.join(".");
             self.push(
@@ -1138,6 +1295,14 @@ impl Env {
                     for a in &t.args {
                         self.resolve_ty(a, diags);
                     }
+                    Ty::Unknown
+                }
+                Some(NameKind::ExternPackage) => {
+                    for a in &t.args {
+                        self.resolve_ty(a, diags);
+                    }
+                    let (msg, fixes) = extern_package_scope_diag(root);
+                    self.push(diags, codes::EXTERN_PACKAGE_SCOPE, msg, t.span, fixes);
                     Ty::Unknown
                 }
                 Some(NameKind::Func) => {
@@ -1830,6 +1995,11 @@ impl FnChecker<'_> {
                 Ty::Unknown
             }
             Some(NameKind::Import) => Ty::Unknown,
+            Some(NameKind::ExternPackage) => {
+                let (msg, fixes) = extern_package_scope_diag(name);
+                self.push(codes::EXTERN_PACKAGE_SCOPE, msg, span, fixes);
+                Ty::Unknown
+            }
             None => {
                 let scope_names: Vec<String> =
                     self.scopes.iter().flat_map(|s| s.keys().cloned()).collect();
@@ -1860,6 +2030,12 @@ impl FnChecker<'_> {
                 match self.env.kinds.get(root.as_str()) {
                     Some(NameKind::Enum) => return self.variant_ref(root.clone(), name),
                     Some(NameKind::Import) => return Ty::Unknown,
+                    Some(NameKind::ExternPackage) => {
+                        let root = root.clone();
+                        let (msg, fixes) = extern_package_scope_diag(&root);
+                        self.push(codes::EXTERN_PACKAGE_SCOPE, msg, name.span, fixes);
+                        return Ty::Unknown;
+                    }
                     Some(NameKind::Record) | Some(NameKind::Alias) => {
                         let root = root.clone();
                         self.push(
@@ -2184,7 +2360,10 @@ impl FnChecker<'_> {
                 // 時のみ、未宣言の外部呼び出しを警告する(M16 / #44)。
                 if let Some(path) = field_path(callee) {
                     if self.lookup_scope(&path[0]).into_option().is_none()
-                        && self.env.kinds.get(&path[0]) == Some(&NameKind::Import)
+                        && matches!(
+                            self.env.kinds.get(&path[0]),
+                            Some(&NameKind::Import) | Some(&NameKind::ExternPackage)
+                        )
                     {
                         let key = path.join(".");
                         if let Some(sig) = self.env.externs.get(&key).cloned() {
@@ -2999,6 +3178,14 @@ impl FnChecker<'_> {
                 }
                 Ty::Unknown
             }
+            Some(NameKind::ExternPackage) => {
+                for a in args {
+                    self.infer(a);
+                }
+                let (msg, fixes) = extern_package_scope_diag(name);
+                self.push(codes::EXTERN_PACKAGE_SCOPE, msg, span, fixes);
+                Ty::Unknown
+            }
             Some(NameKind::Record) => {
                 for a in args {
                     self.infer(a);
@@ -3413,6 +3600,13 @@ impl FnChecker<'_> {
                     self.infer_lit_fields(spread, fields);
                     Ty::Unknown
                 }
+                Some(NameKind::ExternPackage) => {
+                    let root = root.clone();
+                    self.infer_lit_fields(spread, fields);
+                    let (msg, fixes) = extern_package_scope_diag(&root);
+                    self.push(codes::EXTERN_PACKAGE_SCOPE, msg, span, fixes);
+                    Ty::Unknown
+                }
                 Some(NameKind::Func) => {
                     let root = root.clone();
                     self.infer_lit_fields(spread, fields);
@@ -3522,6 +3716,12 @@ impl FnChecker<'_> {
             }
         } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::Import) {
             self.infer_lit_fields(spread, fields);
+            Ty::Unknown
+        } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::ExternPackage) {
+            let root = root.clone();
+            self.infer_lit_fields(spread, fields);
+            let (msg, fixes) = extern_package_scope_diag(&root);
+            self.push(codes::EXTERN_PACKAGE_SCOPE, msg, span, fixes);
             Ty::Unknown
         } else {
             let full: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
@@ -4236,6 +4436,20 @@ fn direction(title: impl Into<String>) -> Fix {
     }
 }
 
+/// KEI-E3007(extern package 束縛名のスコープ外使用)の message/fix を組み立てる、
+/// 7 箇所共通のヘルパー。呼び出し元ごとに異なる `self.push` の引数形(4引数/5引数)は
+/// 統一できないため、message/fix の構築だけをここに集約する。
+fn extern_package_scope_diag(name: &str) -> (String, Vec<Fix>) {
+    (
+        format!(
+            "'{name}' is bound via 'extern package' and can only be used as a namespace for 'extern' signatures"
+        ),
+        vec![direction(format!(
+            "Declare 'extern {name}.<fn>(...)' or remove this usage"
+        ))],
+    )
+}
+
 /// `List<T>` 上のコンビネータ名(M9 / spec v0.3-collections §9・spec §2.5)。
 /// F7: 非 List receiver でこれらを呼んでいる場合に、専用の「receiver is not List」
 /// 診断を出すか判定するために使う。`length` / `isEmpty` / `get` はコールバックを
@@ -4721,6 +4935,44 @@ mod tests {
             panic!("expected a function item");
         };
         f.requires[0].clone()
+    }
+
+    #[test]
+    fn package_specifier_accepts_valid_bare_specifiers() {
+        for spec in [
+            "hono",
+            "@scope/pkg",
+            "hono/tiny",
+            "@scope/pkg/sub.path",
+            "left-pad",
+            "a.b_c-d",
+            "@a1/b2",
+        ] {
+            assert!(
+                specifier_validation_error(spec).is_none(),
+                "expected '{spec}' to be accepted, but it was rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn package_specifier_rejects_invalid_specifiers_with_kei_e3006() {
+        for spec in [
+            "a\"b", "Foo", "hono/.", "@scope", "a\nb", "a b", "a\\b", "hono/..",
+        ] {
+            let err = specifier_validation_error(spec);
+            assert!(
+                err.is_some(),
+                "expected '{spec:?}' to be rejected, but it was accepted"
+            );
+        }
+        // 空・相対・絶対・URL も引き続き拒否される(既存挙動の固定)。
+        for spec in ["", "./x", "../x", "/x", "http://x", "https://x"] {
+            assert!(
+                specifier_validation_error(spec).is_some(),
+                "expected '{spec:?}' to be rejected"
+            );
+        }
     }
 
     #[test]

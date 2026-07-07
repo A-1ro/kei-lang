@@ -1,0 +1,8 @@
+module syntax.externpackage
+
+extern package "hono" as hono
+extern package "@scope/pkg" as scoped
+extern package "hono/tiny" as tiny
+
+extern hono.text(body: String) -> String
+extern scoped.run() uses Clock

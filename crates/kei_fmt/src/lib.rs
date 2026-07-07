@@ -9,7 +9,7 @@
 //! 入力に取るため、コメントは持たない(proptest 等の純粋経路向け)。
 
 use kei_syntax::ast::*;
-use kei_syntax::{Comment, Module, SyntaxError};
+use kei_syntax::{Comment, Module, Span, SyntaxError};
 
 const INDENT: &str = "  ";
 
@@ -113,6 +113,33 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// トップレベルの均質な宣言列(`import` 群 / `extern package` 群)を整形する
+    /// 共通処理(M35 レビュー対応: 両ループがほぼ同一構造だったため切り出し)。
+    /// 空チェック→セパレータ→enumerate ループ→leading/trailing flush→
+    /// `last_top_line` 更新、という既存の各ループと同じ手順を踏む。
+    fn write_section<T>(
+        &mut self,
+        items: &[T],
+        span_of: impl Fn(&T) -> Span,
+        text_of: impl Fn(&T) -> String,
+    ) {
+        if items.is_empty() {
+            return;
+        }
+        self.write_separator_if_needed();
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                self.newline();
+            }
+            let span = span_of(item);
+            self.flush_leading(span.start.line, 0);
+            self.push(&text_of(item));
+            self.flush_trailing_on(span.end.line);
+            self.last_top_line = Some(span.end.line);
+        }
+        self.need_separator = true;
+    }
+
     // ---- コメントストリーム ----
 
     fn peek(&self) -> Option<&'a Comment> {
@@ -181,20 +208,9 @@ impl<'a> Fmt<'a> {
             self.last_top_line = Some(decl.span.end.line);
         }
 
-        if !m.imports.is_empty() {
-            self.write_separator_if_needed();
-            for (i, import) in m.imports.iter().enumerate() {
-                if i > 0 {
-                    self.newline();
-                }
-                // import 群の途中に出現する leading コメントはセクション内インライン
-                self.flush_leading(import.span.start.line, 0);
-                self.push(&import_text(import));
-                self.flush_trailing_on(import.span.end.line);
-                self.last_top_line = Some(import.span.end.line);
-            }
-            self.need_separator = true;
-        }
+        // import 群の途中に出現する leading コメントはセクション内インライン
+        self.write_section(&m.imports, |i| i.span, import_text);
+        self.write_section(&m.extern_packages, |p| p.span, extern_package_text);
 
         let mut i = 0;
         while i < m.items.len() {
@@ -472,6 +488,9 @@ fn earliest_top_line(m: &Module) -> Option<u32> {
     if let Some(i) = m.imports.first() {
         return Some(i.span.start.line);
     }
+    if let Some(p) = m.extern_packages.first() {
+        return Some(p.span.start.line);
+    }
     if let Some(it) = m.items.first() {
         return Some(it.span().start.line);
     }
@@ -499,6 +518,14 @@ fn import_text(import: &Import) -> String {
         s.push_str(&alias.name);
     }
     s
+}
+
+fn extern_package_text(pkg: &ExternPackageDecl) -> String {
+    format!(
+        "extern package {} as {}",
+        string_literal(&pkg.specifier),
+        pkg.alias.name
+    )
 }
 
 fn extern_text(decl: &ExternDecl) -> String {

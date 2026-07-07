@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E1004",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Remove or alias the duplicate import"
+      }
+    ],
+    "message": "name 'hono' is imported more than once (first introduced at line 3)",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 33,
+        "line": 4
+      },
+      "file": "tests/golden/check/err_extern_package_duplicate.kei",
+      "start": {
+        "col": 29,
+        "line": 4
+      }
+    }
+  }
+]

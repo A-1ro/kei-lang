@@ -1,0 +1,5 @@
+module check.externpackagerelative
+
+extern package "./local-thing" as local
+
+extern local.run() -> String

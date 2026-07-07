@@ -1,0 +1,6 @@
+module check.externpackageduplicate
+
+extern package "hono" as hono
+extern package "express" as hono
+
+extern hono.run() -> String

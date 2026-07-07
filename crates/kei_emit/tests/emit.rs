@@ -957,3 +957,60 @@ fn map_get_and_list_get_do_not_cross_contaminate() {
         out.ts
     );
 }
+
+/// M35: `extern package "<spec>" as <name>` は namespace import 1 行を出力する。
+#[test]
+fn extern_package_emits_namespace_import() {
+    let out = emit(concat!(
+        "extern package \"hono\" as hono\n",
+        "\n",
+        "extern hono.text(body: String) -> String\n",
+        "\n",
+        "func greet() -> String {\n",
+        "  return hono.text(\"hi\")\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("import * as hono from \"hono\";"),
+        "expected a namespace import for 'hono': {}",
+        out.ts
+    );
+}
+
+/// M35: scoped パッケージ specifier(`@scope/pkg`)もそのまま埋め込む。
+#[test]
+fn extern_package_emits_scoped_specifier() {
+    let out = emit(concat!(
+        "extern package \"@scope/pkg\" as scoped\n",
+        "\n",
+        "extern scoped.run() -> String\n",
+        "\n",
+        "func run() -> String {\n",
+        "  return scoped.run()\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("import * as scoped from \"@scope/pkg\";"),
+        "expected a namespace import for '@scope/pkg': {}",
+        out.ts
+    );
+}
+
+/// M35: サブパス specifier(`hono/tiny`)もそのまま埋め込む。
+#[test]
+fn extern_package_emits_subpath_specifier() {
+    let out = emit(concat!(
+        "extern package \"hono/tiny\" as tiny\n",
+        "\n",
+        "extern tiny.text(body: String) -> String\n",
+        "\n",
+        "func greet() -> String {\n",
+        "  return tiny.text(\"hi\")\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("import * as tiny from \"hono/tiny\";"),
+        "expected a namespace import for 'hono/tiny': {}",
+        out.ts
+    );
+}

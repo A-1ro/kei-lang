@@ -1,0 +1,8 @@
+module check.externpackagevalueuse
+
+extern package "hono" as hono
+
+func useIt() -> String {
+  let x = hono
+  return x
+}
