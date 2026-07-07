@@ -692,3 +692,20 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 **Why this matters for HANDOFF.md**: 「未使用でも import を出す」「specifier を相対パス化しない」という 2 つの意図的な非対称は、後から最適化したくなる典型ポイントのため先回りで記録する価値がある。
 **Draft entry** (lift verbatim if approved):
 > `extern package` の TS 出力は宣言ごとに `import * as <name> from "<spec>";` を**常時**出力する(未使用検出なし — 既存 `emit_import` と同じ方針に揃えた)。specifier は相対パス化などの変換をせず verbatim で出す(bare specifier は bundler / runtime の解決に委ねる)。「未使用なら省く」最適化を入れる場合は emit_import と同時に方針を変えること。
+
+## PR #124: fix: M36 レビュー対応 — fixture 統合と契約ドキュメント追従 — 2026-07-07 merged
+
+### Candidate: `tests/cli/projects/app` を共有するテストは `app_project_lock()` で直列化必須
+**Why this matters for HANDOFF.md**: cargo test はスレッド並列実行が既定のため、同じ npm プロジェクト fixture を触るテストがロックを取らないと npm install / dist 削除が競合する — コードを読むだけでは「なぜ Mutex があるのか」が分からない landmine。
+**Draft entry** (lift verbatim if approved):
+> `crates/kei_cli/tests/cli.rs` で `tests/cli/projects/app` を使う `#[test]` は必ず `app_project_lock()`(OnceLock<Mutex>)を取ってから `setup_npm_project` を呼ぶこと。cargo test は既定でスレッド並列のため、npm install / dist 削除が競合してフレーキーになる(greeter_app fixture を app へ統合した際に顕在化)。新たに app fixture を触るテストを足すときも同じロックを取る。なお `setup_npm_project` は意図的に `has_npm()` スキップを含まない — 呼び出し元が先に skip する契約。
+
+### Candidate: npm fixture は複製せず既存 `app/` に統合、パッケージは消費者側の層に置く
+**Why this matters for HANDOFF.md**: fixture を丸ごと複製すると CI の npm install(+1321 行 lockfile)が二重化する、という理由は削除された diff からしか読み取れない。
+**Draft entry** (lift verbatim if approved):
+> npm ツールチェーン(typescript/vitest/@kei/runtime + tsconfig + lockfile)を持つ CLI プロジェクト fixture は `tests/cli/projects/app/` の 1 つに統合する。新機能の e2e が必要でも fixture を複製しない(CI の npm install が二重化するため)。file: 依存のミニパッケージは消費者と同じ層 `tests/cli/packages/` に置く(`tests/e2e/packages/` ではなく)。module 名は fixture 内で衝突しないよう命名する(`app.greet` と衝突するため `app.greeter_hello` に改名した前例)。
+
+### Candidate: MCP `kei_check` の `opaque_imports` は `extern package` 束縛を含まない
+**Why this matters for HANDOFF.md**: 「extern package も外部依存なのに opaque_imports に載らない」のは一見バグに見えるが、署名が型・エフェクトを担保するための意図的な設計 — spec §2.4 に明文化済みだが HANDOFF 級の不変条件。
+**Draft entry** (lift verbatim if approved):
+> MCP `kei_check` の `opaque_imports` はファイル `import` の opaque(型・エフェクト不明)のみを報告し、`extern package` 束縛は**含めない**。extern package は宣言された署名が型とエフェクトを担保するため opaque ではない、という別概念(spec v0.2 §2.4)。ツール description(`crates/kei_mcp/src/server.rs`)と MCP golden(`tests/mcp/tools_list.response.json`)もこの区別に追従させること。

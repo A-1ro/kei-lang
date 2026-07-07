@@ -380,3 +380,7 @@ CLAUDE.md に落として、ここからは削除してよい。
 - **Pattern**: prefix 判定だけのバリデーションの境界値漏れ
   **Source**: A-1ro inline (crates/kei_check/src/check.rs)
   **Lesson**: `./` `../` `/` の prefix 判定で相対パスを拒否するとき、`"."` と `".."` 単体という境界値がすり抜けることを必ず確認する — specifier / パス系バリデーションでは prefix 一致に加えて完全一致の境界ケースを列挙し、対応する診断(KEI-E3006)の golden も既存 err golden の枠内で揃える。
+
+## PR #124: fix: M36 レビュー対応 — fixture 統合と契約ドキュメント追従 — 2026-07-07 merged
+
+(no actionable patterns — 0 inline comments / 0 discussion comments / 0 reviews; PR 自体が M36 レビュー対応の追従修正で、新規のレビュー活動なし)
