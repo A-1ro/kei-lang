@@ -363,3 +363,11 @@ CLAUDE.md に落として、ここからは削除してよい。
 - **Pattern**: spec と実装の乖離は実装側を直す
   **Source**: general discussion (A-1ro 承認記録)
   **Lesson**: spec 本文(§7.3 期待型の 3 位置限定など)とチェッカー実装が乖離したら、レビューで承認された spec を正としマージ前に実装側を spec に揃える修正コミットを積む。
+
+## PR #120: chore(deps): bump the npm-minor-patch group across 3 directories with 3 updates — 2026-07-07 merged
+
+(no actionable patterns)
+
+## PR #121: docs: v0.6 ロードマップ — extern package による npm import — 2026-07-07 merged
+
+(no actionable patterns)

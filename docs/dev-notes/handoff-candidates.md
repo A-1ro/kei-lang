@@ -645,3 +645,28 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 **Why this matters for HANDOFF.md**: 「なぜ Map で generative が動かないのか」は spec を読まないと分からず、バグ報告と誤修正を招きやすい。
 **Draft entry** (lift verbatim if approved):
 > generative(M15)は Map 引数を持つ関数を候補ドメイン生成の対象外とする(spec 明記済み、契約は runtime 検証のみ)。Map リテラル(段階2)導入時に再検討する前提の意図的制限であり、生成対応を「修正」として安易に足さないこと。
+
+## PR #120: chore(deps): bump the npm-minor-patch group across 3 directories with 3 updates — 2026-07-07 merged
+
+(no design-decision candidates for this PR)
+
+<!-- 判断根拠: dependabot による純粋な npm minor/patch バンプ。
+     変更ファイルは editors/vscode / tests/cli/projects/app / tests/e2e の
+     package.json + package-lock.json のみで、設計判断・不変条件・landmine を含まない。 -->
+
+## PR #121: docs: v0.6 ロードマップ — extern package による npm import — 2026-07-07 merged
+
+### Candidate: npm import でも検証境界は extern 署名のまま
+**Why this matters for HANDOFF.md**: v0.6 以降 npm パッケージを呼べるようになっても Kei がパッケージの中身を型検査しない、という設計上の一線を将来の貢献者が越えないため。
+**Draft entry** (lift verbatim if approved):
+> `extern package`(v0.6)は npm bare specifier を extern 署名の名前空間に束縛するだけで、**検証境界は extern 署名(v0.2 M11)から動かさない**。.d.ts の自動取り込みは恒久的にスコープ外の可能性が高い — 「extern 署名が合意書」が Kei の設計であり、パッケージ内部を検査し始めると合意モデルが壊れる。署名なし呼び出しは従来どおり opaque / strict-extern の対象。
+
+### Candidate: パッケージ解決はコンパイラに持ち込まない
+**Why this matters for HANDOFF.md**: 「kei build が node_modules を見るべきでは」という自然な発想を明示的に却下した判断で、diff からは理由が読み取れないため。
+**Draft entry** (lift verbatim if approved):
+> `kei build` は node_modules を**見ない**。`extern package` の specifier は文字列として emit に素通しし、解決は TS エコシステム(tsc / wrangler / bundler)の責務。コンパイラに Node のモジュール解決を持ち込むと保守面の泥沼になる上、検証境界(extern 署名)の外の情報に依存することになる。
+
+### Candidate: import 形は namespace のみから段階導入(実需駆動)
+**Why this matters for HANDOFF.md**: named import / default / `new` を「まだ実装していない」のではなく「実需確定まで意図的に設計しない」ことを記録し、先回り実装を防ぐため。
+**Draft entry** (lift verbatim if approved):
+> v0.6 段階1は `import * as ns from "pkg"` の namespace import **のみ**を生成する。named import・default export の直接束縛は v0.8(Hono アダプタ)で実需が確定してから段階2として設計(🤝 合意事項)。`new Hono()` のようなクラス構築は @kei/hono アダプタ側で吸収する前提であり、言語側に構文を足さない。async 署名は v0.7 の主題。
