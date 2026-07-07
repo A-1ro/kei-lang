@@ -351,6 +351,36 @@ func recordedAt() -> Int
 - opt-in。`extern` の無い外部呼び出しは従来どおり opaque で通る(段階移行)。
 - 重複署名は `KEI-E3003`、`uses` に標準外エフェクトは `KEI-E3002`。
 
+### npm パッケージを呼ぶ(extern package / v0.6)
+
+Cloudflare Workers / Node 上の npm パッケージ(例: `hono`)を extern の枠組みで呼び出すには、
+まず `extern package` でパッケージを名前空間に束縛し、その名前空間に対して通常の `extern` 署名を書く。
+
+```kei
+module fx.npm
+
+extern package "greeter" as greeter
+
+extern greeter.greet(name: String) -> String
+
+func hello(name: String) -> String {
+  return greeter.greet(name)
+}
+```
+
+- `extern package "<npm specifier>" as <束縛名>` を import 群の後・`extern` 署名の前に置く。specifier は npm bare specifier のみ(`name` / `name/subpath` / `@scope/name`)。相対パス・絶対パス・URL は `KEI-E3006` で拒否される。
+- `<束縛名>` は `extern <束縛名>.<関数>(...)` 署名の名前空間としてのみ使える。値としての参照・型注釈・裸呼び出しは `KEI-E3007` で拒否される。
+- 生成 TS は宣言ごとに `import * as greeter from "greeter";` を出す(bundler / Workers ランタイム側で解決される。Kei はパッケージの中身を検査しない)。
+- 署名(`extern greeter.greet(...)`)が無いメンバー呼び出しは、通常の `import` 名前空間と同じく既定では opaque で通る。`--strict-extern` を付けると `KEI-E3004`(warning)で検出される:
+
+```text
+extern package "greeter" as greeter
+
+func broken(name: String) -> String {
+  return greeter.shout(name)   // ✗ extern 署名が無い: --strict-extern で KEI-E3004
+}
+```
+
 ---
 
 ## 4. 契約

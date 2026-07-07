@@ -216,6 +216,67 @@ fn strict_extern_golden() {
     );
 }
 
+/// M36: `extern package` 束縛経由の未宣言呼び出しも、通常 import の strict-extern と
+/// 同じく既定では通り(opaque)、`--strict-extern` で KEI-E3004 warning になることを固定する。
+#[test]
+fn strict_extern_package_golden() {
+    let dir = cli_dir().join("checks");
+    let rel = "tests/cli/checks/strict_extern_package.kei";
+    let mut failures = Vec::new();
+
+    // 既定: 未宣言の外部呼び出しは通る(警告なし・exit 0)。
+    let default = run_kei(&["check", rel]);
+    if !default.stdout.is_empty() || default.code != 0 {
+        failures.push(format!(
+            "default check should be clean: code={} stdout={:?}",
+            default.code, default.stdout
+        ));
+    }
+
+    // strict: KEI-E3004 警告(stage a は warning なので exit は 0)。散文 / --json を固定。
+    let strict = run_kei(&["check", "--strict-extern", rel]);
+    expect_golden(
+        &dir.join("strict_extern_package.strict.txt"),
+        &strict.stdout,
+        &mut failures,
+    );
+    if strict.code != 0 {
+        failures.push(format!(
+            "strict check warning must not change exit code (stage a): code={}",
+            strict.code
+        ));
+    }
+
+    let strict_json = run_kei(&["check", "--strict-extern", "--json", rel]);
+    expect_golden(
+        &dir.join("strict_extern_package.strict.json"),
+        &strict_json.stdout,
+        &mut failures,
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&strict_json.stdout).expect("--json emits valid JSON");
+    let diags = parsed["diagnostics"]
+        .as_array()
+        .expect("diagnostics is an array");
+    if !diags.iter().any(|d| {
+        d["code"] == "KEI-E3004"
+            && d["severity"] == "warning"
+            && !d["fixes"].as_array().map(|f| f.is_empty()).unwrap_or(true)
+    }) {
+        failures.push(format!(
+            "strict --json must carry a KEI-E3004 warning with a fix: {strict_json:?}",
+            strict_json = strict_json.stdout
+        ));
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} strict-extern-package case(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
 // ---------------------------------------------------------------------------
 // golden: kei check --generative(M15 / #26)
 // ---------------------------------------------------------------------------
@@ -809,6 +870,53 @@ fn kei_test_builds_then_runs_contracts() {
         combined.contains("KeiContractViolation"),
         "the contract violation must surface KeiContractViolation:\n{combined}"
     );
+}
+
+/// M36: `extern package` 束縛が `kei build` → npm 環境で実際に疎通すること。
+/// namespace import が生成され、tsc --strict --noEmit を通り、file: 依存の実パッケージを
+/// 呼んだ結果(vitest)が正しいことまで確認する。
+#[test]
+fn greeter_package_build_and_test() {
+    if !has_npm() {
+        eprintln!("skipping greeter_package_build_and_test: npm not found");
+        return;
+    }
+    let root = repo_root().canonicalize().expect("repo root");
+    ensure_runtime_built(&root);
+
+    let project = root.join("tests/cli/projects/greeter_app");
+    let dist = project.join("dist");
+    if dist.exists() {
+        fs::remove_dir_all(&dist).expect("clean project dist");
+    }
+    npm(&["install", "--no-audit", "--no-fund"], &project);
+
+    // kei build: extern package 束縛が namespace import を出すこと。
+    let build = run_kei(&["build", "tests/cli/projects/greeter_app"]);
+    assert_eq!(build.code, 0, "build failed: stderr={:?}", build.stderr);
+
+    let generated =
+        fs::read_to_string(dist.join("greeter_app/greet.ts")).expect("generated greet.ts exists");
+    assert!(
+        generated.contains("import * as greeter from \"greeter\";"),
+        "extern package binding must emit a namespace import: {generated}"
+    );
+
+    // tsc --strict --noEmit: bare specifier が file: 依存で解決されること。
+    let tsc = Command::new("npx")
+        .args(["tsc", "--strict", "--noEmit"])
+        .current_dir(&project)
+        .output()
+        .expect("spawn tsc");
+    assert!(
+        tsc.status.success(),
+        "tsc --strict --noEmit failed:\n{}\n{}",
+        String::from_utf8_lossy(&tsc.stdout),
+        String::from_utf8_lossy(&tsc.stderr),
+    );
+
+    // npm test(vitest): 生成コードが実際に npm パッケージへ届くこと。
+    npm(&["test"], &project);
 }
 
 // ---------------------------------------------------------------------------

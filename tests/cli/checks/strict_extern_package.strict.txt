@@ -1,0 +1,7 @@
+warning[KEI-E3004]: external call 'greeter.shout' has no 'extern' declaration; its return type and effects are unverified
+ --> tests/cli/checks/strict_extern_package.kei:6:10
+  |
+6 |   return greeter.shout(name)
+  |          ^^^^^^^^^^^^^^^^^^^
+  = fix: Declare 'extern greeter.shout(...) -> ... uses ...' to bring this external call under verification
+

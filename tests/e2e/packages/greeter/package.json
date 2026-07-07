@@ -1,0 +1,9 @@
+{
+  "name": "greeter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "description": "Kei M36 e2e フィクスチャ: file: 依存のミニ npm パッケージ(extern package 束縛の実疎通確認用)"
+}

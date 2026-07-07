@@ -1,0 +1,9 @@
+module greeter_app.greet
+
+extern package "greeter" as greeter
+
+extern greeter.greet(name: String) -> String
+
+func hello(name: String) -> String {
+  return greeter.greet(name)
+}

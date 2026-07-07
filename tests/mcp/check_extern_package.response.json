@@ -1,0 +1,13 @@
+{
+  "id": 19,
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "text": "{\n  \"diagnostics\": [],\n  \"contracts\": [],\n  \"opaque_imports\": [\n    \"tickets.types\"\n  ],\n  \"generative\": {\n    \"requested\": false,\n    \"max_cases\": 10000,\n    \"skipped\": []\n  }\n}",
+        "type": "text"
+      }
+    ],
+    "isError": false
+  }
+}
