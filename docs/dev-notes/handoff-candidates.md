@@ -709,3 +709,7 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 **Why this matters for HANDOFF.md**: 「extern package も外部依存なのに opaque_imports に載らない」のは一見バグに見えるが、署名が型・エフェクトを担保するための意図的な設計 — spec §2.4 に明文化済みだが HANDOFF 級の不変条件。
 **Draft entry** (lift verbatim if approved):
 > MCP `kei_check` の `opaque_imports` はファイル `import` の opaque(型・エフェクト不明)のみを報告し、`extern package` 束縛は**含めない**。extern package は宣言された署名が型とエフェクトを担保するため opaque ではない、という別概念(spec v0.2 §2.4)。ツール description(`crates/kei_mcp/src/server.rs`)と MCP golden(`tests/mcp/tools_list.response.json`)もこの区別に追従させること。
+
+## PR #125: chore: bump version to 0.6.0 — 2026-07-07 merged
+
+(no design-decision candidates for this PR)

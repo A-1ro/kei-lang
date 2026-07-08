@@ -384,3 +384,11 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #124: fix: M36 レビュー対応 — fixture 統合と契約ドキュメント追従 — 2026-07-07 merged
 
 (no actionable patterns — 0 inline comments / 0 discussion comments / 0 reviews; PR 自体が M36 レビュー対応の追従修正で、新規のレビュー活動なし)
+
+## PR #125: chore: bump version to 0.6.0 — 2026-07-07 merged
+
+(no actionable patterns — version bump PR; 0 inline comments / 0 discussion comments / 0 reviews)
+
+## PR #125: chore: bump version to 0.6.0 — 2026-07-07 merged (hook re-run: post-release `gh release edit` trigger)
+
+(no actionable patterns — 再確認: 0 inline comments / 0 discussion comments / 0 reviews。直近マージ PR は #125 で、上記の初回記録と一致)
