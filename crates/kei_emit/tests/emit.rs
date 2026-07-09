@@ -1111,3 +1111,39 @@ fn uses_async_with_ensures_wraps_body_in_async_iife() {
     assert!(out.ts.contains("clause: \"ensures\","));
     assert!(out.ts.contains("return kei$result;"));
 }
+
+/// M37 レビュー対応: `await` は JS の UnaryExpression 相当の優先順位しか持たない。
+/// `fetchUser(id).name` のように async 呼び出しの結果へ直接 postfix chain(フィールド
+/// アクセス)を続ける文脈で単純に `await ` を前置すると `await fetchUser(id).name` は
+/// `await (fetchUser(id).name)` と解釈され、Promise に `.name` を引いてしまう
+/// (サイレントに壊れた実行時挙動)。`Expr::Unary` と同じ needs_paren パターンで
+/// `(await fetchUser(id)).name` に括弧されることを固定する。
+#[test]
+fn uses_async_call_as_postfix_base_gets_parenthesized_await() {
+    let out = emit(concat!(
+        "record User {\n",
+        "  name: String\n",
+        "}\n",
+        "\n",
+        "func fetchUser(id: Int) -> User\n",
+        "  uses Async\n",
+        "{\n",
+        "  return User { name: \"a\" }\n",
+        "}\n",
+        "\n",
+        "func greetName(id: Int) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  return fetchUser(id).name\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return (await fetchUser(id)).name;"),
+        "expected a parenthesized await when the async call is a postfix base:\n{}",
+        out.ts
+    );
+    // 対照: let 束縛・return 直下(postfix chain なし)の位置は従来どおり括弧なし
+    // (uses_async_call_gets_await_at_let_stmt_and_return_positions で固定済みだが、
+    // 同じ emit 呼び出しの中で回帰しないことも軽く確認する)。
+    assert!(!out.ts.contains("(await fetchUser(id));"));
+}

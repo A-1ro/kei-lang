@@ -946,7 +946,7 @@ impl Emitter<'_> {
                 self.emit_expr(base, Prec::Postfix);
                 self.out.frag(&format!(".{}", name.name));
             }
-            ast::Expr::Call { callee, args, span } => self.emit_call(callee, args, *span),
+            ast::Expr::Call { callee, args, span } => self.emit_call(callee, args, *span, parent),
             ast::Expr::Unary { op, expr, .. } => {
                 let needs_paren = parent > Prec::Unary;
                 if needs_paren {
@@ -1119,8 +1119,18 @@ impl Emitter<'_> {
         }
     }
 
-    fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr], span: Span) {
-        if self.async_calls.contains(&span) {
+    fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr], span: Span, parent: Prec) {
+        // `await` は JS の UnaryExpression 相当の優先順位(Prec::Unary)。postfix 位置
+        // (`f(x).field` の `f(x)` のように、直後にさらに `.`/`()` が続く文脈)では
+        // `await f(x).field` が `await (f(x).field)` と解釈され Promise に `.field` を
+        // 引いてしまう(サイレントに壊れる、M37 レビュー対応)。Prec::Unary の
+        // Expr::Unary(`-x`/`!x`)と同じ needs_paren パターンで防ぐ。
+        let needs_await = self.async_calls.contains(&span);
+        let needs_paren = needs_await && parent > Prec::Unary;
+        if needs_paren {
+            self.out.frag("(");
+        }
+        if needs_await {
             self.out.frag("await ");
         }
         if let ast::Expr::Name { name, .. } = callee {
@@ -1266,6 +1276,9 @@ impl Emitter<'_> {
             self.emit_expr(a, Prec::Implication);
         }
         self.out.frag(")");
+        if needs_paren {
+            self.out.frag(")");
+        }
     }
 
     fn emit_binary(&mut self, op: BinOp, lhs: &ast::Expr, rhs: &ast::Expr, parent: Prec) {
