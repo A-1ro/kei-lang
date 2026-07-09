@@ -1,7 +1,7 @@
 {
   "name": "kei",
-  "description": "Kei 言語を学習なしで正しく書くためのスキル。func/契約/エフェクト/型/失敗処理の最小十分セットと、kei check による検証ループを提供する(v0.6: extern package による npm bare specifier import。v0.5: 論理積 && / List.contains / String stdlib / ラムダ読み取りキャプチャ / record spread / Map<K,V> 段階1 / MCP generative 検証)。",
-  "version": "0.6.0",
+  "description": "Kei 言語を学習なしで正しく書くためのスキル。func/契約/エフェクト/型/失敗処理の最小十分セットと、kei check による検証ループを提供する(v0.7: uses Async エフェクト + async 関数コア + extern async + 契約 async e2e + pbt/MCP スキップ可視化 + async npm パッケージ e2e。v0.6 extern package は簡潔に維持)。",
+  "version": "0.7.0",
   "author": {
     "name": "Eiichiro Iriguchi"
   },
