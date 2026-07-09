@@ -1147,3 +1147,31 @@ fn uses_async_call_as_postfix_base_gets_parenthesized_await() {
     // 同じ emit 呼び出しの中で回帰しないことも軽く確認する)。
     assert!(!out.ts.contains("(await fetchUser(id));"));
 }
+
+/// M38: extern 署名の uses に Async を含めると、`Path.method` 形式(extern package 経由)の
+/// 呼び出しでも M37 の async_calls 経由で await が自動挿入される。
+#[test]
+fn extern_async_signature_gets_await_at_call_site() {
+    let out = emit(concat!(
+        "extern package \"greeter\" as greeter\n",
+        "\n",
+        "extern greeter.shoutAsync(name: String) -> String uses Async\n",
+        "\n",
+        "func hail(name: String) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  return greeter.shoutAsync(name)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts
+            .contains("export async function hail(name: string): Promise<string> {"),
+        "expected an async function signature:\n{}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("return await greeter.shoutAsync(name);"),
+        "expected await at the extern call site:\n{}",
+        out.ts
+    );
+}

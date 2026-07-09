@@ -1,0 +1,11 @@
+module check.extern_async_ok
+
+import infra.net as Net
+
+extern Net.fetch(url: String) -> String uses Network.Read, Async
+
+func loadPage(url: String) -> String
+  uses Network.Read, Async
+{
+  return Net.fetch(url)
+}

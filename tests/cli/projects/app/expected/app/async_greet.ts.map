@@ -1,0 +1,12 @@
+{
+  "file": "async_greet.ts",
+  "mappings": ";;;;;;;;;AAEA;;IAIE;;EAFQ;IAAA",
+  "names": [],
+  "sources": [
+    "async_greet.kei"
+  ],
+  "sourcesContent": [
+    "module app.async_greet\n\nfunc fetchName(id: Int) -> String\n  uses Async\n  ensures result == \"user\"\n{\n  return \"nobody\"\n}\n"
+  ],
+  "version": 3
+}

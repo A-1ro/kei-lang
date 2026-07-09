@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E3005",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Remove 'uses' from the query, or drop 'query' if it has effects"
+      }
+    ],
+    "message": "query observer 'Net.fetchCached' must be pure; a 'query' extern cannot declare 'uses'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 63,
+        "line": 5
+      },
+      "file": "tests/golden/check/err_extern_query_async.kei",
+      "start": {
+        "col": 1,
+        "line": 5
+      }
+    }
+  }
+]

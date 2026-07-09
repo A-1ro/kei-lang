@@ -232,6 +232,10 @@ struct GenerativeInfo {
 struct SkippedInfo {
     function: String,
     required_cases: usize,
+    /// M38: ケース数超過以外の理由(例: `uses Async`)。無いときは JSON から省略する
+    /// (既存の `check_generative_skipped.response.json` golden の形を変えないため)。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 /// 構文+意味検査。応答 JSON は `{ diagnostics, contracts, opaque_imports, generative }`。
@@ -278,6 +282,7 @@ pub fn run_check(source: &str, generative: bool) -> ToolOutcome {
             .map(|s| SkippedInfo {
                 function: s.func,
                 required_cases: s.required_cases,
+                reason: s.reason,
             })
             .collect()
     } else {

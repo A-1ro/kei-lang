@@ -1,0 +1,9 @@
+module cli.strict_extern_async
+
+extern package "greeter" as greeter
+
+func hail(name: String) -> String
+  uses Async
+{
+  return greeter.shoutAsync(name)
+}
