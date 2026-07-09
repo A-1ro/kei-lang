@@ -1,0 +1,28 @@
+[
+  {
+    "code": "KEI-E3001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Replace the combinator call with a synchronous for-loop that calls the effectful function directly and builds the result list"
+      },
+      {
+        "edits": [],
+        "title": "Or compute the values first (e.g. await each call) outside the combinator, then pass the already-computed values in"
+      }
+    ],
+    "message": "call to 'fetchName' (uses Async) is not allowed inside a lambda; combinator lambdas must be pure",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 37,
+        "line": 10
+      },
+      "file": "tests/golden/check/err_uses_async_in_lambda.kei",
+      "start": {
+        "col": 24,
+        "line": 10
+      }
+    }
+  }
+]

@@ -20,6 +20,7 @@ pub const STANDARD_EFFECTS: &[&str] = &[
     "Random",
     "Audit",
     "Audit.Log",
+    "Async",
 ];
 
 /// `path` が標準エフェクト階層のノードか。
@@ -28,10 +29,18 @@ pub fn is_known(path: &str) -> bool {
 }
 
 /// 宣言 `declared` が使用 `used` を包含するか。
-/// 自分自身・祖先ノードが包含し、`IO` は根として全エフェクトを包含する。
+/// 自分自身・祖先ノードが包含し、`IO` は Async 以外の全エフェクトを包含する
+/// (Async は独立ルート、M37)。
 pub fn covers(declared: &str, used: &str) -> bool {
-    if declared == used || declared == "IO" {
+    if declared == used {
         return true;
+    }
+    if declared == "IO" {
+        // Async は IO 傘下ではない独立ルート(v0.7 / M37)。IO 宣言関数が黙って
+        // 非同期になる互換性破壊を避けるための唯一の例外。将来 `Async.X` サブ
+        // エフェクトが追加されても IO に黙って取り込まれないよう、prefix 判定も
+        // 防御的に見る(M37 レビュー対応)。
+        return used != "Async" && !used.starts_with("Async.");
     }
     used.len() > declared.len()
         && used.starts_with(declared)
@@ -52,5 +61,13 @@ mod tests {
         assert!(!covers("Database.Read", "Database.Write"));
         assert!(!covers("Database", "DatabaseX"));
         assert!(!covers("Clock", "IO"));
+    }
+
+    #[test]
+    fn io_does_not_cover_async() {
+        assert!(!covers("IO", "Async"));
+        assert!(!covers("IO", "Async.Foo"));
+        assert!(covers("Async", "Async"));
+        assert!(covers("IO", "Database.Write")); // 既存挙動は不変
     }
 }

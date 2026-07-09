@@ -1,0 +1,16 @@
+module check.uses_async_in_match
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greet(id: Int) -> String
+  uses Async
+{
+  return match Some(id) {
+    Some(v) => fetchName(v)
+    None => ""
+  }
+}

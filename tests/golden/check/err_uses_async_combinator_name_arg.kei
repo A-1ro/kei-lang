@@ -1,0 +1,15 @@
+module check.uses_async_combinator_name_arg
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+// greetAll は uses Async を宣言している(= 修正前は E3001 伝播チェックが素通りし、
+// 診断ゼロで silent に Promise<String>[] を List<String> として emit していた)。
+func greetAll(ids: List<Int>) -> List<String>
+  uses Async
+{
+  return ids.map(fetchName)
+}

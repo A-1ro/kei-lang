@@ -19,12 +19,16 @@ const INDENT: &str = "  ";
 /// `list_ops` は kei_check が確定した「List コンビネータ呼び出し位置」(Call span の開始
 /// `(line, col)`)の集合。emit はこれだけを根拠に配列メソッドへ写す(構文ヒューリスティックで
 /// レシーバ型を推測しない。外部呼び出しの連鎖・同名フィールドの誤写を防ぐ。M9)。
+#[allow(clippy::too_many_arguments)]
 pub fn emit_checked(
     file: &str,
     source: &str,
     module: &ast::Module,
     list_ops: &HashSet<(u32, u32)>,
     map_ops: &HashSet<(u32, u32)>,
+    async_calls: &HashSet<Span>,
+    async_match_spans: &HashSet<Span>,
+    async_funcs: &HashSet<Span>,
 ) -> EmitOutput {
     let ts_path = ts_path_for(file, module);
     let ts_file = ts_path.rsplit('/').next().expect("non-empty path");
@@ -33,6 +37,9 @@ pub fn emit_checked(
         module,
         list_ops,
         map_ops,
+        async_calls,
+        async_match_spans,
+        async_funcs,
         out: Out::default(),
         old_index: HashMap::new(),
         in_ensures: false,
@@ -373,6 +380,15 @@ struct Emitter<'a> {
     /// Map メソッド呼び出し位置(Call span 開始、M33)。List とは独立した集合(理由は
     /// kei_check::op_spans_with_resolver のコメント参照)。
     map_ops: &'a HashSet<(u32, u32)>,
+    /// `uses Async` 呼び出しの Call 式 span 集合(検査器由来、M37)。emit_call がこの位置の
+    /// Call を出力する直前に `await ` を挿入する。
+    async_calls: &'a HashSet<Span>,
+    /// async 化が必要な match 式の span 集合(検査器由来、M37 レビュー対応)。
+    /// `emit_match` がこの位置の match を出力するとき IIFE を `async` にする。
+    async_match_spans: &'a HashSet<Span>,
+    /// `uses Async` を宣言している関数宣言の span 集合(検査器由来、M37 レビュー対応)。
+    /// `emit_func` がこれだけを根拠に `async function` として出す。
+    async_funcs: &'a HashSet<Span>,
     out: Out,
     /// ensures 内 `old(...)` の割当。span をキーに kei$old$N の割当を引く。fold など引数の
     /// emit 順が AST 順と一致しないコンビネータがあるため、位置カウンタではなく式の同一性
@@ -683,11 +699,18 @@ impl Emitter<'_> {
             .as_ref()
             .map(|t| self.ts_type(t))
             .unwrap_or_else(|| "void".to_string());
+        let is_async = self.async_funcs.contains(&f.span);
+        let sig_ret = if is_async {
+            format!("Promise<{ret}>")
+        } else {
+            ret.clone()
+        };
 
         self.out.start_line();
         self.out.map(f.span);
         self.out.frag(&format!(
-            "export function {}({}): {ret} {{",
+            "export {}function {}({}): {sig_ret} {{",
+            if is_async { "async " } else { "" },
             f.name.name,
             params.join(", ")
         ));
@@ -716,8 +739,14 @@ impl Emitter<'_> {
         if f.ensures.is_empty() {
             self.emit_block_stmts(&f.body);
         } else {
-            self.out
-                .line(&format!("const kei$result = ((): {ret} => {{"));
+            if is_async {
+                self.out.line(&format!(
+                    "const kei$result = await (async (): Promise<{ret}> => {{"
+                ));
+            } else {
+                self.out
+                    .line(&format!("const kei$result = ((): {ret} => {{"));
+            }
             self.out.indent += 1;
             self.emit_block_stmts(&f.body);
             self.out.indent -= 1;
@@ -928,7 +957,7 @@ impl Emitter<'_> {
                 self.emit_expr(base, Prec::Postfix);
                 self.out.frag(&format!(".{}", name.name));
             }
-            ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args),
+            ast::Expr::Call { callee, args, span } => self.emit_call(callee, args, *span, parent),
             ast::Expr::Unary { op, expr, .. } => {
                 let needs_paren = parent > Prec::Unary;
                 if needs_paren {
@@ -974,8 +1003,10 @@ impl Emitter<'_> {
                 self.out.frag(" })");
             }
             ast::Expr::Match {
-                scrutinee, arms, ..
-            } => self.emit_match(scrutinee, arms),
+                scrutinee,
+                arms,
+                span,
+            } => self.emit_match(scrutinee, arms, *span),
             // M22 / #57: List リテラル `[a, b, c]` は JS 配列リテラルへ素直に写す。
             // 空 `[]` は要素ゼロのまま出る。
             ast::Expr::ListLit { elements, .. } => {
@@ -1024,11 +1055,20 @@ impl Emitter<'_> {
     /// `match` を即時実行アロー関数(IIFE)に展開する。各腕は判別子で分岐する
     /// `if` ガードに落ち、束縛は腕の冒頭で `const` する。網羅性はチェッカが
     /// 保証するため、末尾の `throw` は到達不能(opaque な import 値の防御)。
-    fn emit_match(&mut self, scrutinee: &ast::Expr, arms: &[ast::MatchArm]) {
+    /// M37 レビュー対応(PR #127): scrutinee か何らかの arm body に async 呼び出しが
+    /// あると checker が `async_match_spans` にこの match の span を登録する。その場合は
+    /// IIFE 自体を `async` にし `await` 付きで即時実行する(そうしないと内側の
+    /// `await fetchName(v)` が非 async 関数内での使用になり TS が SyntaxError になる)。
+    fn emit_match(&mut self, scrutinee: &ast::Expr, arms: &[ast::MatchArm], span: Span) {
         let id = self.match_counter;
         self.match_counter += 1;
         let var = format!("kei$m{id}");
-        self.out.frag("(() => {");
+        let is_async = self.async_match_spans.contains(&span);
+        if is_async {
+            self.out.frag("await (async () => {");
+        } else {
+            self.out.frag("(() => {");
+        }
         self.out.newline();
         self.out.indent += 1;
         self.out.start_line();
@@ -1101,7 +1141,20 @@ impl Emitter<'_> {
         }
     }
 
-    fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) {
+    fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr], span: Span, parent: Prec) {
+        // `await` は JS の UnaryExpression 相当の優先順位(Prec::Unary)。postfix 位置
+        // (`f(x).field` の `f(x)` のように、直後にさらに `.`/`()` が続く文脈)では
+        // `await f(x).field` が `await (f(x).field)` と解釈され Promise に `.field` を
+        // 引いてしまう(サイレントに壊れる、M37 レビュー対応)。Prec::Unary の
+        // Expr::Unary(`-x`/`!x`)と同じ needs_paren パターンで防ぐ。
+        let needs_await = self.async_calls.contains(&span);
+        let needs_paren = needs_await && parent > Prec::Unary;
+        if needs_paren {
+            self.out.frag("(");
+        }
+        if needs_await {
+            self.out.frag("await ");
+        }
         if let ast::Expr::Name { name, .. } = callee {
             if name == "old" {
                 // 事前キャプチャ済みの値を span で引く(fold など emit 順が AST 順と
@@ -1245,6 +1298,9 @@ impl Emitter<'_> {
             self.emit_expr(a, Prec::Implication);
         }
         self.out.frag(")");
+        if needs_paren {
+            self.out.frag(")");
+        }
     }
 
     fn emit_binary(&mut self, op: BinOp, lhs: &ast::Expr, rhs: &ast::Expr, parent: Prec) {
@@ -1421,5 +1477,27 @@ mod tests {
         assert_eq!(ts_string("a\"b"), "\"a\\\"b\"");
         assert_eq!(ts_string("a\\b"), "\"a\\\\b\"");
         assert_eq!(ts_string("a\nb"), "\"a\\nb\"");
+    }
+
+    /// M37 レビュー対応(PR #127): match の scrutinee/arm body に async 呼び出しがあると、
+    /// 従来の同期 IIFE `(() => {...})()` の中に `await` が出て TS が SyntaxError に
+    /// なっていた(実機再現済みのバグ)。IIFE 自体を async 化し
+    /// `await (async () => {...})()` として出すことで、内側の `await fetchName(v)` と
+    /// 整合させる。
+    #[test]
+    fn match_with_async_arm_body_emits_async_iife() {
+        let source = "module check.uses_async_in_match\n\nfunc fetchName(id: Int) -> String\n  uses Async\n{\n  return \"user\"\n}\n\nfunc greet(id: Int) -> String\n  uses Async\n{\n  return match Some(id) {\n    Some(v) => fetchName(v)\n    None => \"\"\n  }\n}\n";
+        let out = crate::emit_module("check/uses_async_in_match.kei", source)
+            .expect("source checks clean");
+        assert!(
+            out.ts.contains("await (async () => {"),
+            "match IIFE must be async-wrapped when an arm body awaits an async call, got:\n{}",
+            out.ts
+        );
+        assert!(
+            out.ts.contains("return await fetchName(v);"),
+            "arm body call must still be individually awaited, got:\n{}",
+            out.ts
+        );
     }
 }

@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E3008",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Rewrite as a synchronous for-loop that awaits each call in sequence and collects the results into a new list"
+      }
+    ],
+    "message": "'fetchName' uses Async and cannot be passed to a combinator; M37 does not support async callbacks in higher-order functions (calls are not sequentially awaited, so the result would silently contain unresolved Promises instead of values)",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 27,
+        "line": 14
+      },
+      "file": "tests/golden/check/err_uses_async_combinator_name_arg.kei",
+      "start": {
+        "col": 18,
+        "line": 14
+      }
+    }
+  }
+]

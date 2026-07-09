@@ -42,6 +42,7 @@ mod codes {
     pub const QUERY_WITH_EFFECTS: &str = "KEI-E3005";
     pub const INVALID_PACKAGE_SPECIFIER: &str = "KEI-E3006";
     pub const EXTERN_PACKAGE_SCOPE: &str = "KEI-E3007";
+    pub const COMBINATOR_ASYNC_FN: &str = "KEI-E3008";
     pub const IMPURE_CONTRACT: &str = "KEI-E4001";
     pub const CONTRACT_CONSTRUCT: &str = "KEI-E4002";
     pub const CONST_FALSE_CONTRACT: &str = "KEI-E4003";
@@ -250,6 +251,8 @@ pub fn check_module_with_resolver(
                 map_ops: None,
                 expected_ty: None,
                 lambda_floor: None,
+                async_calls: None,
+                async_match_spans: None,
             }
             .check();
         }
@@ -282,6 +285,21 @@ pub fn check_module_with_resolver(
 pub struct OpSpans {
     pub list_ops: std::collections::HashSet<(u32, u32)>,
     pub map_ops: std::collections::HashSet<(u32, u32)>,
+    /// `uses Async` 関数への直接呼び出し位置(Call 式の完全な Span、M37)。list_ops/map_ops が
+    /// メソッド名トークンの `(line, col)` 開始位置をキーにするのに対し、こちらは Call の
+    /// start・end 両方を含む完全な Span をキーにする — メソッド連鎖(`a.f().g()`)は外側・
+    /// 内側の Call が開始位置を共有しうるため、start だけでは衝突する。
+    /// emit はこの位置の Call 式を出力する直前に `await ` を挿入する。
+    pub async_calls: std::collections::HashSet<SynSpan>,
+    /// `match` 式のうち、scrutinee か何らかの arm body に `async_calls` に載る呼び出しが
+    /// あるものの Span(M37 レビュー対応、PR #127)。emit はこの位置の match IIFE を
+    /// `await (async () => {...})()` として出す(そうしないと内側の `await` が
+    /// SyntaxError になる)。
+    pub async_match_spans: std::collections::HashSet<SynSpan>,
+    /// `uses Async` を宣言している関数宣言の Span 集合(M37 レビュー対応、PR #127)。
+    /// emit はこれだけを根拠に `async function` として出す(構文ヒューリスティックの
+    /// `func_is_async` を廃止し、checker が確定した宣言エフェクトに一本化する)。
+    pub async_funcs: std::collections::HashSet<SynSpan>,
 }
 
 /// resolver なしの版(後方互換)。import 由来の型は opaque 扱いなので、
@@ -301,8 +319,14 @@ pub fn op_spans_with_resolver(module: &ast::Module, resolver: &dyn ModuleResolve
     let (env, fn_sigs) = Env::build(file, module, &mut diags, resolver);
     let mut list_ops = HashSet::new();
     let mut map_ops = HashSet::new();
+    let mut async_calls = HashSet::new();
+    let mut async_match_spans = HashSet::new();
+    let mut async_funcs = HashSet::new();
     for (item, sig) in module.items.iter().zip(&fn_sigs) {
         if let (ast::Item::Func(f), Some(sig)) = (item, sig) {
+            if sig.effects.iter().any(|e| effects::covers("Async", e)) {
+                async_funcs.insert(f.span);
+            }
             FnChecker {
                 env: &env,
                 diags: &mut diags,
@@ -315,11 +339,19 @@ pub fn op_spans_with_resolver(module: &ast::Module, resolver: &dyn ModuleResolve
                 map_ops: Some(&mut map_ops),
                 expected_ty: None,
                 lambda_floor: None,
+                async_calls: Some(&mut async_calls),
+                async_match_spans: Some(&mut async_match_spans),
             }
             .check();
         }
     }
-    OpSpans { list_ops, map_ops }
+    OpSpans {
+        list_ops,
+        map_ops,
+        async_calls,
+        async_match_spans,
+        async_funcs,
+    }
 }
 
 /// 検査結果(診断)に加えて、各契約の達成検証レベルを併せて返す(M12)。
@@ -1519,6 +1551,12 @@ struct FnChecker<'a> {
     /// に対応するため、`check_combinator_lambda_arg` で `prev_floor = self.lambda_floor` を
     /// 退避して内側用 floor を立てる save/restore パターンを使う。
     lambda_floor: Option<usize>,
+    /// `uses Async` 呼び出しの位置(M37)。`OpSpans::async_calls` のコメント参照。
+    /// 通常検査では `None`。
+    async_calls: Option<&'a mut HashSet<SynSpan>>,
+    /// `match` 式のうち async 化が必要なものの Span(M37 レビュー対応)。
+    /// `OpSpans::async_match_spans` のコメント参照。通常検査では `None`。
+    async_match_spans: Option<&'a mut HashSet<SynSpan>>,
 }
 
 impl FnChecker<'_> {
@@ -2976,9 +3014,35 @@ impl FnChecker<'_> {
                 );
             }
         }
+        // M37 レビュー対応(PR #127): Async は combinator 経由で安全に伝播できない
+        // (Array.prototype.map 等はコールバックを await せず、結果は T[] ではなく
+        // Promise<T>[] になる — v0.7 は sequential のみで Promise.all 相当は実装しない)。
+        // 呼び出し元が uses Async を宣言していても救えないため、通常の E3001 伝播より
+        // 前に専用診断で拒否する(伝播チェックまで到達すると「caller も Async 宣言済み
+        // なら診断ゼロ」という silent breakage になる — 元のバグ)。
+        if sig.effects.iter().any(|e| effects::covers("Async", e)) {
+            self.push_combinator_async_diag(name, *nspan);
+            return sig.ret.clone();
+        }
         // 関数のエフェクトを呼び出し元へ推移伝播(§8.1。契約式なら KEI-E4001)。
         self.check_call_effects(&sig.effects, name, span);
         sig.ret.clone()
+    }
+
+    /// M37 レビュー対応(PR #127): combinator の引数位置に名前参照で渡された関数が
+    /// `uses Async` を持つときの専用診断。呼び出し元の `uses` 宣言の有無に関わらず
+    /// 無条件で拒否する(Async は combinator 越しに安全に伝播できないため)。
+    fn push_combinator_async_diag(&mut self, callee: &str, span: SynSpan) {
+        self.push(
+            codes::COMBINATOR_ASYNC_FN,
+            format!(
+                "'{callee}' uses Async and cannot be passed to a combinator; M37 does not support async callbacks in higher-order functions (calls are not sequentially awaited, so the result would silently contain unresolved Promises instead of values)"
+            ),
+            span,
+            vec![direction(
+                "Rewrite as a synchronous for-loop that awaits each call in sequence and collects the results into a new list",
+            )],
+        );
     }
 
     /// F7 / M25: receiver が List でないと確定したコンビネータ風呼び出しの引数を
@@ -3348,6 +3412,16 @@ impl FnChecker<'_> {
         }
 
         self.check_call_effects(&callee.effects, name, span);
+        // M37: 呼び出し先が uses Async を持つ直接呼び出し(そのまま `f(...)` として
+        // emit される位置)は、emit が await を挿入する対象として記録する
+        // (altitude: 以前は check_call_effects 内の is_direct_call フラグ経由で行って
+        // いたが、「直接呼び出しかどうか」は呼び出し側が一番よく知っているので、
+        // ここで自然に判定する。PR #118 の教訓)。
+        if callee.effects.iter().any(|e| e == "Async") {
+            if let Some(calls) = self.async_calls.as_deref_mut() {
+                calls.insert(span);
+            }
+        }
         callee.ret
     }
 
@@ -3392,6 +3466,12 @@ impl FnChecker<'_> {
             );
         } else {
             self.check_call_effects(&sig.effects, key, span);
+            // 6-c と同じ理由(M37 / PR #118 教訓)。
+            if sig.effects.iter().any(|e| e == "Async") {
+                if let Some(calls) = self.async_calls.as_deref_mut() {
+                    calls.insert(span);
+                }
+            }
         }
         sig.ret.clone()
     }
@@ -3405,6 +3485,28 @@ impl FnChecker<'_> {
         // (1) ラムダ body 内のエフェクト呼び出し(E3001、文脈を文面で明示)。
         //     外側関数の uses 包含は判定しない(あっても許さない)。
         if self.lambda_floor.is_some() && !effects.is_empty() {
+            // M37 レビュー対応(PR #127): 旧文言「use a named function inside the
+            // function body」は Async については「combinator に名前関数を直接渡せ」と
+            // 誤読されうる(async 関数だとそれ自体が別の soundness バグになる、
+            // KEI-E3008 参照 — 名前参照は Promise<T>[] を生む)。だが非 Async の効果は
+            // 名前参照に置き換えても安全(Array.prototype.map 等が同期関数を直接呼ぶのは
+            // 型的にも実行時的にも無害)なので、Async が絡む場合だけ silent breakage に
+            // 繋がらない2択に差し替える。
+            let is_async = effects.iter().any(|e| effects::covers("Async", e));
+            let fixes = if is_async {
+                vec![
+                    direction(
+                        "Replace the combinator call with a synchronous for-loop that calls the effectful function directly and builds the result list",
+                    ),
+                    direction(
+                        "Or compute the values first (e.g. await each call) outside the combinator, then pass the already-computed values in",
+                    ),
+                ]
+            } else {
+                vec![direction(
+                    "Move the effectful call out of the lambda, or use a named function inside the function body",
+                )]
+            };
             self.push(
                 codes::EFFECT_UNDECLARED,
                 format!(
@@ -3412,9 +3514,7 @@ impl FnChecker<'_> {
                     effects.join(", ")
                 ),
                 span,
-                vec![direction(
-                    "Move the effectful call out of the lambda, or use a named function inside the function body",
-                )],
+                fixes,
             );
         }
         // (2) 契約式の中のエフェクト呼び出し(E4001)。lambda の中にいる時も契約は契約。
@@ -3853,6 +3953,7 @@ impl FnChecker<'_> {
         // (M33 レビュー対応: 1 回 take() すると 2 個目以降のアームで消費済みになり、
         // `return match c { A => Map.empty() B => Map.empty() }` の 2 個目が偽の
         // KEI-E2012 になっていた)。
+        let async_before = self.async_calls.as_deref().map(|s| s.len());
         let expected_for_arms = self.expected_ty.take();
         let scrut_ty = self.infer(scrutinee);
         let shape = self.match_shape(&scrut_ty);
@@ -3874,6 +3975,7 @@ impl FnChecker<'_> {
                 self.infer(&arm.body);
                 self.scopes.pop();
             }
+            self.mark_async_match_if_needed(async_before, span);
             return Ty::Unknown;
         }
 
@@ -3920,7 +4022,25 @@ impl FnChecker<'_> {
         }
 
         self.check_exhaustiveness(&shape, &seen, span);
+        self.mark_async_match_if_needed(async_before, span);
         result_ty
+    }
+
+    /// `infer_match` が scrutinee/arms を処理する間に `async_calls` へ新規追加が
+    /// あれば、この match 自身を `async_match_spans` に登録する(M37 レビュー対応)。
+    /// `async_calls`/`async_match_spans` がどちらも `None`(通常検査パス)のときは何もしない。
+    fn mark_async_match_if_needed(&mut self, before: Option<usize>, span: SynSpan) {
+        let Some(before) = before else { return };
+        let after = self
+            .async_calls
+            .as_deref()
+            .map(|s| s.len())
+            .unwrap_or(before);
+        if after > before {
+            if let Some(spans) = self.async_match_spans.as_deref_mut() {
+                spans.insert(span);
+            }
+        }
     }
 
     fn match_shape(&self, scrut: &Ty) -> MatchShape {
