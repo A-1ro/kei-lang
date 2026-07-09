@@ -1059,8 +1059,7 @@ impl Env {
                 .unwrap_or(Ty::Unit);
             let mut declared = Vec::new();
             for u in &f.uses {
-                let path: Vec<&str> = u.path.iter().map(|i| i.name.as_str()).collect();
-                let path = path.join(".");
+                let path = u.dotted();
                 if effects::is_known(&path) {
                     if !declared.contains(&path) {
                         declared.push(path);
@@ -1138,12 +1137,7 @@ impl Env {
             }
             let mut effects = Vec::new();
             for u in &e.uses {
-                let path = u
-                    .path
-                    .iter()
-                    .map(|i| i.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".");
+                let path = u.dotted();
                 if effects::is_known(&path) {
                     if !effects.contains(&path) {
                         effects.push(path);

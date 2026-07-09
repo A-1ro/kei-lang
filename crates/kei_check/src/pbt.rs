@@ -198,16 +198,27 @@ pub fn run_module_with_limit(module: &ast::Module, max_cases: usize) -> Vec<Prop
     run_module_with_limit_reporting(module, max_cases).outcomes
 }
 
-/// 生成ケース総数の上限超過で無検査スキップされた関数(MCP など呼び出し元に
-/// 「反例なし=充足」という誤読をさせないための可視化情報)。
+/// 生成ケース総数の上限超過、またはエフェクト保有により無検査スキップされた関数
+/// (MCP など呼び出し元に「反例なし=充足」という誤読をさせないための可視化情報)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedFunction {
     pub func: String,
-    pub required_cases: usize,
-    /// ケース数超過以外の理由(M38)。`uses Async` のようにケース数と無関係な理由が
-    /// あるときだけ `Some`。ケース数超過だけが理由のときは `None`
-    /// (`required_cases` で説明が足りるため、既存 MCP JSON の形を変えない)。
+    /// 上限超過が理由のスキップのときだけ `Some(必要ケース数)`。エフェクト保有など
+    /// ケース数と無関係な理由のときは `None`(「N/A のときは 0」という数値 sentinel を
+    /// 型に混ぜない — PR #112 の教訓)。
+    pub required_cases: Option<usize>,
+    /// ケース数超過以外の理由。`uses Database.Read` のようにケース数と無関係な理由が
+    /// あるときだけ `Some`。ケース数超過だけが理由のときは `None`。
     pub reason: Option<String>,
+}
+
+/// [`run_function`] が対象外と判定したときの内訳。`skip: Option<(usize, Option<String>)>`
+/// という無名 tuple だと write site 3 箇所・destructure 1 箇所で `SkippedFunction` の
+/// 2 field を鏡写ししてしまい、field 順が壊れやすかった(PR #128 レビュー対応)。
+#[derive(Debug, Clone)]
+struct SkipInfo {
+    required_cases: Option<usize>,
+    reason: Option<String>,
 }
 
 /// [`run_module_with_limit_reporting`] の戻り値。既存の [`run_module_with_limit`] は
@@ -238,11 +249,15 @@ pub fn run_module_with_limit_reporting(module: &ast::Module, max_cases: usize) -
     let mut skipped = Vec::new();
     for item in &module.items {
         let ast::Item::Func(f) = item else { continue };
-        let mut skip: Option<(usize, Option<String>)> = None;
+        let mut skip: Option<SkipInfo> = None;
         match run_function(f, &funcs, &ctx, max_cases, &mut skip) {
             Some(outcome) => outcomes.push(outcome),
             None => {
-                if let Some((required_cases, reason)) = skip {
+                if let Some(SkipInfo {
+                    required_cases,
+                    reason,
+                }) = skip
+                {
                     skipped.push(SkippedFunction {
                         func: f.name.name.clone(),
                         required_cases,
@@ -255,38 +270,33 @@ pub fn run_module_with_limit_reporting(module: &ast::Module, max_cases: usize) -
     GenerativeRun { outcomes, skipped }
 }
 
-/// `EffectRef` のドット結合パスが Async(またはその子ノード)を指すか。
-/// `crate::effects::covers` と同じ判定を使う(M37 / check.rs の async 判定と揃える)。
-fn is_async_effect(u: &ast::EffectRef) -> bool {
-    let path = u
-        .path
-        .iter()
-        .map(|i| i.name.as_str())
-        .collect::<Vec<_>>()
-        .join(".");
-    crate::effects::covers("Async", &path)
-}
-
 /// 純粋関数 1 つを生成テストする。対象外なら `None`。
 fn run_function(
     f: &ast::FuncDecl,
     funcs: &HashMap<&str, &ast::FuncDecl>,
     ctx: &DomainCtx,
     max_cases: usize,
-    skip: &mut Option<(usize, Option<String>)>,
+    skip: &mut Option<SkipInfo>,
 ) -> Option<PropertyOutcome> {
-    // M38: `uses Async` 関数は同期評価器では扱えない(Promise の resolve タイミングを
-    // 模擬できない)ため常に対象外。ensures を持つ関数だけ「なぜ検証されなかったか」を
-    // skipped に理由付きで可視化する(ensures が無ければそもそも生成対象になり得ないので、
-    // 他の対象外理由(Map 引数など)と同じく静かに除外する — 可視化のノイズを増やさない)。
-    if f.uses.iter().any(is_async_effect) {
+    // M38 レビュー対応: `uses` を持つ関数は同期評価器では扱えない(Promise の resolve を
+    // 待てないのは Async に限らず、Database.Read 等の一般エフェクトも実環境の観測を伴うため
+    // 純粋評価器の対象外)。ensures を持つ関数だけ「なぜ検証されなかったか」を skipped に
+    // 理由付きで可視化する(捏造不能性 — 反例なし=充足という誤読を防ぐ。spec v0.2 §5.1)。
+    // ensures が無ければそもそも生成対象になり得ないので、他の対象外理由(Map 引数など)と
+    // 同じく静かに除外する(可視化のノイズを増やさない)。
+    if !f.uses.is_empty() {
         if !f.ensures.is_empty() {
-            *skip = Some((0, Some("function has 'uses Async' effect".to_string())));
+            // reason は先頭の uses エフェクトだけを短く示す(複数 uses でも冗長にしない)。
+            let head = f.uses[0].dotted();
+            *skip = Some(SkipInfo {
+                required_cases: None,
+                reason: Some(format!("function has 'uses {head}' effect")),
+            });
         }
         return None;
     }
-    // 対象条件: 純粋(uses なし)・ensures あり・全パラメータがスカラ / List / record 生成可能。
-    if !f.uses.is_empty() || f.ensures.is_empty() {
+    // 対象条件: 純粋(uses なし、確認済み)・ensures あり・全パラメータがスカラ / List / record 生成可能。
+    if f.ensures.is_empty() {
         return None;
     }
     let mut domains: Vec<Vec<Value>> = Vec::new();
@@ -312,13 +322,19 @@ fn run_function(
     {
         Some(n) if n <= max_cases => {}
         Some(n) => {
-            *skip = Some((n, None));
+            *skip = Some(SkipInfo {
+                required_cases: Some(n),
+                reason: None,
+            });
             return None;
         }
         None => {
             // 積がオーバーフローするほど巨大 = 上限超過の極端な場合。正確な値ではなく
             // 「途方もなく大きい」ことだけ伝えれば十分なので usize::MAX を積む。
-            *skip = Some((usize::MAX, None));
+            *skip = Some(SkipInfo {
+                required_cases: Some(usize::MAX),
+                reason: None,
+            });
             return None;
         }
     }
@@ -2455,7 +2471,10 @@ mod tests {
             .find(|s| s.func == "big")
             .expect("oversized function must be reported in skipped");
         assert!(
-            skipped.required_cases > MAX_GENERATIVE_CASES,
+            skipped
+                .required_cases
+                .expect("oversized skip must carry a case count")
+                > MAX_GENERATIVE_CASES,
             "required_cases must exceed the limit: {skipped:?}"
         );
     }
@@ -2482,6 +2501,10 @@ mod tests {
             Some("function has 'uses Async' effect"),
             "skip reason must explain the Async effect: {skipped:?}"
         );
+        assert_eq!(
+            skipped.required_cases, None,
+            "effect-based skip must not carry a case count sentinel: {skipped:?}"
+        );
     }
 
     #[test]
@@ -2494,6 +2517,49 @@ mod tests {
         assert!(
             !run.skipped.iter().any(|s| s.func == "fetchName"),
             "async function without ensures should not be reported as skipped: {run:?}"
+        );
+    }
+
+    #[test]
+    fn effect_function_with_ensures_is_reported_as_skipped_with_reason() {
+        // M38 レビュー対応: Async 以外の一般エフェクトも、ensures があれば理由付きで
+        // skipped に可視化される(Async だけを特別視しない一般化)。
+        let m = module(
+            "module t\n\nfunc readBalance(id: Int) -> Int\n  uses Database.Read\n  ensures result >= 0\n{\n  return 0\n}\n",
+        );
+        let run = run_module_with_limit_reporting(&m, MAX_GENERATIVE_CASES);
+        assert!(
+            !run.outcomes.iter().any(|o| o.func == "readBalance"),
+            "effectful function must not appear in outcomes: {run:?}"
+        );
+        let skipped = run
+            .skipped
+            .iter()
+            .find(|s| s.func == "readBalance")
+            .expect("effectful function with ensures must be reported in skipped");
+        assert_eq!(
+            skipped.reason.as_deref(),
+            Some("function has 'uses Database.Read' effect"),
+            "skip reason must explain the effect: {skipped:?}"
+        );
+        assert_eq!(
+            skipped.required_cases, None,
+            "effect-based skip must not carry a case count sentinel: {skipped:?}"
+        );
+    }
+
+    #[test]
+    fn effect_function_without_ensures_is_silently_excluded() {
+        // ensures が無ければそもそも generative 対象になり得ないので、Async 以外の
+        // エフェクトでも静かに除外される(skipped に載らない)。
+        let m = module(
+            "module t\n\nfunc readBalance(id: Int) -> Int\n  uses Database.Read\n{\n  return 0\n}\n",
+        );
+        let run = run_module_with_limit_reporting(&m, MAX_GENERATIVE_CASES);
+        assert!(!run.outcomes.iter().any(|o| o.func == "readBalance"));
+        assert!(
+            !run.skipped.iter().any(|s| s.func == "readBalance"),
+            "effectful function without ensures should not be reported as skipped: {run:?}"
         );
     }
 
