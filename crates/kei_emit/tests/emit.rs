@@ -1014,3 +1014,100 @@ fn extern_package_emits_subpath_specifier() {
         out.ts
     );
 }
+
+/// M37: `uses Async` 関数は `async function` + `Promise<T>` に写る。
+#[test]
+fn uses_async_emits_async_function_and_promise_return() {
+    let out = emit(concat!(
+        "func fetchName(id: Int) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  return \"user\"\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts
+            .contains("export async function fetchName(id: number): Promise<string> {"),
+        "expected an async function signature with Promise return type:\n{}",
+        out.ts
+    );
+}
+
+/// M37: `uses Async` 関数への直接呼び出しは、let 束縛位置・文式位置・return 位置の
+/// いずれでも `await` が自動挿入される(呼び出し側の Kei コードに `await` は登場しない)。
+#[test]
+fn uses_async_call_gets_await_at_let_stmt_and_return_positions() {
+    let out = emit(concat!(
+        "func fetchName(id: Int) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  return \"user\"\n",
+        "}\n",
+        "\n",
+        "func greet(id: Int) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  let name = fetchName(id)\n",
+        "  fetchName(id)\n",
+        "  return fetchName(id)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("const name = await fetchName(id);"),
+        "expected await at the let-binding position:\n{}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("await fetchName(id);\n"),
+        "expected await at the bare statement-expression position:\n{}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("return await fetchName(id);"),
+        "expected await at the return position:\n{}",
+        out.ts
+    );
+}
+
+/// M37: `ensures` を持つ async 関数は IIFE 自体を async 化し、`await` で resolve してから
+/// 同期述語で `kei$result` を検証する。`KeiContractViolation` の throw ロジックは
+/// 非 async 版(`ensures_wraps_body_and_captures_old`)と同じ構造のまま。
+#[test]
+fn uses_async_with_ensures_wraps_body_in_async_iife() {
+    let out = emit(concat!(
+        "func fetchName(id: Int) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  return \"user\"\n",
+        "}\n",
+        "\n",
+        "func greetChecked(id: Int) -> String\n",
+        "  uses Async\n",
+        "  ensures result != \"\"\n",
+        "{\n",
+        "  return fetchName(id)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts
+            .contains("export async function greetChecked(id: number): Promise<string> {"),
+        "expected an async function signature:\n{}",
+        out.ts
+    );
+    assert!(
+        out.ts
+            .contains("const kei$result = await (async (): Promise<string> => {"),
+        "expected the ensures IIFE to be async and awaited:\n{}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("return await fetchName(id);"),
+        "expected the body's return to await the async call:\n{}",
+        out.ts
+    );
+    assert!(out.ts.contains("})();"));
+    assert!(out.ts.contains("if (!(kei$result !== \"\")) {"));
+    assert!(out.ts.contains("throw new KeiContractViolation({"));
+    assert!(out.ts.contains("clause: \"ensures\","));
+    assert!(out.ts.contains("return kei$result;"));
+}

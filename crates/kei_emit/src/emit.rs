@@ -25,6 +25,7 @@ pub fn emit_checked(
     module: &ast::Module,
     list_ops: &HashSet<(u32, u32)>,
     map_ops: &HashSet<(u32, u32)>,
+    async_calls: &HashSet<Span>,
 ) -> EmitOutput {
     let ts_path = ts_path_for(file, module);
     let ts_file = ts_path.rsplit('/').next().expect("non-empty path");
@@ -33,6 +34,7 @@ pub fn emit_checked(
         module,
         list_ops,
         map_ops,
+        async_calls,
         out: Out::default(),
         old_index: HashMap::new(),
         in_ensures: false,
@@ -373,6 +375,9 @@ struct Emitter<'a> {
     /// Map メソッド呼び出し位置(Call span 開始、M33)。List とは独立した集合(理由は
     /// kei_check::op_spans_with_resolver のコメント参照)。
     map_ops: &'a HashSet<(u32, u32)>,
+    /// `uses Async` 呼び出しの Call 式 span 集合(検査器由来、M37)。emit_call がこの位置の
+    /// Call を出力する直前に `await ` を挿入する。
+    async_calls: &'a HashSet<Span>,
     out: Out,
     /// ensures 内 `old(...)` の割当。span をキーに kei$old$N の割当を引く。fold など引数の
     /// emit 順が AST 順と一致しないコンビネータがあるため、位置カウンタではなく式の同一性
@@ -683,11 +688,18 @@ impl Emitter<'_> {
             .as_ref()
             .map(|t| self.ts_type(t))
             .unwrap_or_else(|| "void".to_string());
+        let is_async = func_is_async(f);
+        let sig_ret = if is_async {
+            format!("Promise<{ret}>")
+        } else {
+            ret.clone()
+        };
 
         self.out.start_line();
         self.out.map(f.span);
         self.out.frag(&format!(
-            "export function {}({}): {ret} {{",
+            "export {}function {}({}): {sig_ret} {{",
+            if is_async { "async " } else { "" },
             f.name.name,
             params.join(", ")
         ));
@@ -716,8 +728,14 @@ impl Emitter<'_> {
         if f.ensures.is_empty() {
             self.emit_block_stmts(&f.body);
         } else {
-            self.out
-                .line(&format!("const kei$result = ((): {ret} => {{"));
+            if is_async {
+                self.out.line(&format!(
+                    "const kei$result = await (async (): Promise<{ret}> => {{"
+                ));
+            } else {
+                self.out
+                    .line(&format!("const kei$result = ((): {ret} => {{"));
+            }
             self.out.indent += 1;
             self.emit_block_stmts(&f.body);
             self.out.indent -= 1;
@@ -928,7 +946,7 @@ impl Emitter<'_> {
                 self.emit_expr(base, Prec::Postfix);
                 self.out.frag(&format!(".{}", name.name));
             }
-            ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args),
+            ast::Expr::Call { callee, args, span } => self.emit_call(callee, args, *span),
             ast::Expr::Unary { op, expr, .. } => {
                 let needs_paren = parent > Prec::Unary;
                 if needs_paren {
@@ -1101,7 +1119,10 @@ impl Emitter<'_> {
         }
     }
 
-    fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) {
+    fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr], span: Span) {
+        if self.async_calls.contains(&span) {
+            self.out.frag("await ");
+        }
         if let ast::Expr::Name { name, .. } = callee {
             if name == "old" {
                 // 事前キャプチャ済みの値を span で引く(fold など emit 順が AST 順と
@@ -1377,6 +1398,15 @@ fn collect_old_exprs(ensures: &[ast::Expr]) -> Vec<&ast::Expr> {
 /// TS 文字列リテラル(JSON エスケープは TS と互換)。
 fn ts_string(s: &str) -> String {
     serde_json::to_string(s).expect("strings are serializable")
+}
+
+/// `f` が `uses Async` を宣言しているか(M37)。Async は他エフェクトと合成されない単独の
+/// リーフなので、`uses` 節に厳密に 1 セグメント "Async" があるかだけを見る(covers の
+/// 再実装はしない — emit は検査済みの uses 節を読むだけ)。
+fn func_is_async(f: &ast::FuncDecl) -> bool {
+    f.uses
+        .iter()
+        .any(|u| u.path.len() == 1 && u.path[0].name == "Async")
 }
 
 /// `callee(args)` が「検査器が確定したランタイムヘルパー行きメソッド呼び出し」か。

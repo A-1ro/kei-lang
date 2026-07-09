@@ -20,6 +20,7 @@ pub const STANDARD_EFFECTS: &[&str] = &[
     "Random",
     "Audit",
     "Audit.Log",
+    "Async",
 ];
 
 /// `path` が標準エフェクト階層のノードか。
@@ -30,8 +31,13 @@ pub fn is_known(path: &str) -> bool {
 /// 宣言 `declared` が使用 `used` を包含するか。
 /// 自分自身・祖先ノードが包含し、`IO` は根として全エフェクトを包含する。
 pub fn covers(declared: &str, used: &str) -> bool {
-    if declared == used || declared == "IO" {
+    if declared == used {
         return true;
+    }
+    if declared == "IO" {
+        // Async は IO 傘下ではない独立ルート(v0.7 / M37)。IO 宣言関数が黙って
+        // 非同期になる互換性破壊を避けるための唯一の例外。
+        return used != "Async";
     }
     used.len() > declared.len()
         && used.starts_with(declared)
@@ -52,5 +58,12 @@ mod tests {
         assert!(!covers("Database.Read", "Database.Write"));
         assert!(!covers("Database", "DatabaseX"));
         assert!(!covers("Clock", "IO"));
+    }
+
+    #[test]
+    fn io_does_not_cover_async() {
+        assert!(!covers("IO", "Async"));
+        assert!(covers("Async", "Async"));
+        assert!(covers("IO", "Database.Write")); // 既存挙動は不変
     }
 }

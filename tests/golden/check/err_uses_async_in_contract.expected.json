@@ -1,0 +1,46 @@
+[
+  {
+    "code": "KEI-E3001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Move the effectful call out of the lambda, or use a named function inside the function body"
+      }
+    ],
+    "message": "call to 'fetchName' (uses Async) is not allowed inside a lambda; combinator lambdas must be pure",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 42,
+        "line": 15
+      },
+      "file": "tests/golden/check/err_uses_async_in_contract.kei",
+      "start": {
+        "col": 27,
+        "line": 15
+      }
+    }
+  },
+  {
+    "code": "KEI-E4001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Move the effectful call into the function body"
+      }
+    ],
+    "message": "call to 'fetchName' (uses Async) is not allowed in a contract; contract expressions must be pure",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 42,
+        "line": 15
+      },
+      "file": "tests/golden/check/err_uses_async_in_contract.kei",
+      "start": {
+        "col": 27,
+        "line": 15
+      }
+    }
+  }
+]

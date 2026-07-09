@@ -250,6 +250,7 @@ pub fn check_module_with_resolver(
                 map_ops: None,
                 expected_ty: None,
                 lambda_floor: None,
+                async_calls: None,
             }
             .check();
         }
@@ -282,6 +283,12 @@ pub fn check_module_with_resolver(
 pub struct OpSpans {
     pub list_ops: std::collections::HashSet<(u32, u32)>,
     pub map_ops: std::collections::HashSet<(u32, u32)>,
+    /// `uses Async` 関数への直接呼び出し位置(Call 式の完全な Span、M37)。list_ops/map_ops が
+    /// メソッド名トークンの `(line, col)` 開始位置をキーにするのに対し、こちらは Call の
+    /// start・end 両方を含む完全な Span をキーにする — メソッド連鎖(`a.f().g()`)は外側・
+    /// 内側の Call が開始位置を共有しうるため、start だけでは衝突する。
+    /// emit はこの位置の Call 式を出力する直前に `await ` を挿入する。
+    pub async_calls: std::collections::HashSet<SynSpan>,
 }
 
 /// resolver なしの版(後方互換)。import 由来の型は opaque 扱いなので、
@@ -301,6 +308,7 @@ pub fn op_spans_with_resolver(module: &ast::Module, resolver: &dyn ModuleResolve
     let (env, fn_sigs) = Env::build(file, module, &mut diags, resolver);
     let mut list_ops = HashSet::new();
     let mut map_ops = HashSet::new();
+    let mut async_calls = HashSet::new();
     for (item, sig) in module.items.iter().zip(&fn_sigs) {
         if let (ast::Item::Func(f), Some(sig)) = (item, sig) {
             FnChecker {
@@ -315,11 +323,16 @@ pub fn op_spans_with_resolver(module: &ast::Module, resolver: &dyn ModuleResolve
                 map_ops: Some(&mut map_ops),
                 expected_ty: None,
                 lambda_floor: None,
+                async_calls: Some(&mut async_calls),
             }
             .check();
         }
     }
-    OpSpans { list_ops, map_ops }
+    OpSpans {
+        list_ops,
+        map_ops,
+        async_calls,
+    }
 }
 
 /// 検査結果(診断)に加えて、各契約の達成検証レベルを併せて返す(M12)。
@@ -1519,6 +1532,9 @@ struct FnChecker<'a> {
     /// に対応するため、`check_combinator_lambda_arg` で `prev_floor = self.lambda_floor` を
     /// 退避して内側用 floor を立てる save/restore パターンを使う。
     lambda_floor: Option<usize>,
+    /// `uses Async` 呼び出しの位置(M37)。`OpSpans::async_calls` のコメント参照。
+    /// 通常検査では `None`。
+    async_calls: Option<&'a mut HashSet<SynSpan>>,
 }
 
 impl FnChecker<'_> {
@@ -2977,7 +2993,7 @@ impl FnChecker<'_> {
             }
         }
         // 関数のエフェクトを呼び出し元へ推移伝播(§8.1。契約式なら KEI-E4001)。
-        self.check_call_effects(&sig.effects, name, span);
+        self.check_call_effects(&sig.effects, name, span, false);
         sig.ret.clone()
     }
 
@@ -3347,7 +3363,7 @@ impl FnChecker<'_> {
             self.infer(arg);
         }
 
-        self.check_call_effects(&callee.effects, name, span);
+        self.check_call_effects(&callee.effects, name, span, true);
         callee.ret
     }
 
@@ -3391,7 +3407,7 @@ impl FnChecker<'_> {
                 ))],
             );
         } else {
-            self.check_call_effects(&sig.effects, key, span);
+            self.check_call_effects(&sig.effects, key, span, true);
         }
         sig.ret.clone()
     }
@@ -3401,7 +3417,13 @@ impl FnChecker<'_> {
     /// M25 / #59 + F6: 「契約式の中の lambda」が両方の制約を持つので、early return せず
     /// 両方の経路で個別に push する。lambda は純粋限定(E3001)・契約は副作用禁止(E4001)、
     /// 双方が同時に違反するケース(`ensures xs.all(p => effectful(p))`)で 2 件出す。
-    fn check_call_effects(&mut self, effects: &[String], callee: &str, span: SynSpan) {
+    fn check_call_effects(
+        &mut self,
+        effects: &[String],
+        callee: &str,
+        span: SynSpan,
+        is_direct_call: bool,
+    ) {
         // (1) ラムダ body 内のエフェクト呼び出し(E3001、文脈を文面で明示)。
         //     外側関数の uses 包含は判定しない(あっても許さない)。
         if self.lambda_floor.is_some() && !effects.is_empty() {
@@ -3461,6 +3483,18 @@ impl FnChecker<'_> {
                 span,
                 vec![fix],
             );
+        }
+
+        // M37: 呼び出し先が uses Async を持ち、かつ「そのまま f(...) として emit される直接
+        // 呼び出し」(ローカル関数 / extern)なら、emit が await を挿入する位置として記録する。
+        // コンビネータへの名前参照渡し(`xs.map(asyncFn)`)は is_direct_call=false で除外する:
+        // 対象の Call は `xs.map(...)` そのものであり、await を付けると `await xs.map(...)` という
+        // 誤った TS になる(Array.prototype.map は非同期コールバックを正しく待てない。
+        // v0.7 は sequential のみ、Promise.all 相当は実装しない)。
+        if is_direct_call && effects.iter().any(|e| e == "Async") {
+            if let Some(calls) = self.async_calls.as_deref_mut() {
+                calls.insert(span);
+            }
         }
     }
 

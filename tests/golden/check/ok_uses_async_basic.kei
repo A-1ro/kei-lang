@@ -1,0 +1,16 @@
+module check.uses_async_basic
+
+func fetchName(id: Int) -> String
+  uses Async
+  requires id >= 0
+{
+  return "user"
+}
+
+func greet(id: Int) -> String
+  uses Async
+  ensures result != ""
+{
+  let name = fetchName(id)
+  return name
+}

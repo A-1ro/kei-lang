@@ -1,0 +1,11 @@
+module check.uses_async_missing
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greet(id: Int) -> String {
+  return fetchName(id)
+}

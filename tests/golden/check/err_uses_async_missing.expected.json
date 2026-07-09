@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E3001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Add 'uses Async' to 'greet'"
+      }
+    ],
+    "message": "effect 'Async' used but not declared in 'uses' clause of 'greet' (required by call to 'fetchName')",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 23,
+        "line": 10
+      },
+      "file": "tests/golden/check/err_uses_async_missing.kei",
+      "start": {
+        "col": 10,
+        "line": 10
+      }
+    }
+  }
+]
