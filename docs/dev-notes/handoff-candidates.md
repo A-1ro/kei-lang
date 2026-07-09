@@ -1015,3 +1015,50 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 > (M38 async 境界統合の commit 確認)。`gh pr merge` 非該当のため #127 を六度目に再選択。
 > 現ブランチ `feat/m38-async-boundaries` の M38 コミット(`bc49dce`, `0b890f4`)は未マージ。
 > matcher 未修正が 6 回連続。設計判断は既出セクションで網羅済み。
+
+## PR #128: feat: M38 async 境界統合 — extern async + 契約 e2e + pbt / MCP / SKILL — 2026-07-09 merged
+
+### Candidate: pbt の skipped 可視化は Async 特別扱いを廃して「エフェクト保有 + ensures」の一般則へ
+**Why this matters for HANDOFF.md**: 初版(M38 コミット `0b890f4`)は Async だけを skipped に載せていたが、レビュー対応(`b7dc6601`)で「同期評価器で扱えないのは Async に限らず全 `uses` エフェクト」という一般則へ書き換えた経緯。次に新エフェクトを追加する人が「Async だけ特別」というコードを再導入しない invariant として残す価値がある。
+**Draft entry** (lift verbatim if approved):
+> `kei_check::pbt::run_function` の generative 検証対象外判定は **エフェクト保有(`!f.uses.is_empty()`)** で一般化する — Async 特別扱いは持たない。同期評価器は Promise の resolve を待てないだけでなく、`Database.Read` 等の一般エフェクトも実環境の観測を伴うため純粋評価器の対象外。**ensures を持つ関数だけ** `skipped[]` に「なぜ検証されなかったか」を `reason: "function has 'uses X' effect"` として載せる(捏造不能性 — 反例なし=充足という誤読を防ぐ、spec v0.2 §5.1)。ensures が無ければ他の対象外理由(Map 引数など)と同じく静かに除外する(可視化のノイズを増やさない)。`reason` は先頭の uses エフェクトだけを短く示す(複数 uses でも冗長にしない)。回帰防止テストは `effect_function_with_ensures_is_reported_as_skipped_with_reason`(`uses Database.Read` を代表として固定)。
+
+### Candidate: `SkippedFunction.required_cases` は `Option<usize>` — 「N/A のときは 0」という数値 sentinel を型に混ぜない(PR #112 教訓の再適用)
+**Why this matters for HANDOFF.md**: PR #112 の教訓「N/A を数値 sentinel(0 や `usize::MAX`)で表さない」が M38 初版で再発しかけ、レビューで根本の `pbt::SkippedFunction` から `Option<usize>` 化した。MCP 応答 JSON の後方互換性(既存 golden への影響)も含めて非自明な判断が必要で、次に skipped 情報を拡張する人が同じ穴を踏まないための landmine。
+**Draft entry** (lift verbatim if approved):
+> `kei_check::pbt::SkippedFunction.required_cases` は `Option<usize>` にする。**上限超過が理由のスキップのときだけ `Some(必要ケース数)`**、エフェクト保有などケース数と無関係な理由のときは `None`(「N/A のときは 0」という数値 sentinel を型に混ぜない — PR #112 の教訓)。MCP 応答 JSON 側(`kei_mcp::tools::SkippedInfo`)は `#[serde(skip_serializing_if = "Option::is_none")]` で JSON からキー自体を省略する(既存の「上限超過だけをスキップ理由に持つ」golden との後方互換を維持)。`reason: Option<String>` も同じ規約で載せる。既存の usize::MAX(積が overflow するほど巨大なケース)は "上限超過の極端な場合" として `Some(usize::MAX)` を維持する(sentinel ではなく「途方もなく大きい」ことを伝える正当な値)。
+
+### Candidate: `EffectRef::dotted()` は AST の唯一の合流点 — 呼び出し側で `path.iter().map(...).join(".")` を書かない
+**Why this matters for HANDOFF.md**: レビューで検出された「同じロジックが check.rs 2 箇所と pbt.rs 1 箇所に散らばっていた」問題への恒久ガード。将来 EffectRef の内部表現が変わっても(例: 区切り文字を `::` に変更、あるいは `Vec<Ident>` を `SmallVec` に変更)、変更点が 1 箇所に閉じる。
+**Draft entry** (lift verbatim if approved):
+> `EffectRef` を dotted 文字列(`Database.Write` 等)に落とすロジックは **`kei_syntax::ast::EffectRef::dotted()` が唯一の場所**。呼び出し側で `u.path.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join(".")` を書き直さない(check.rs / pbt.rs 全て `u.dotted()` を経由する)。将来 EffectRef の内部表現が変わっても変更点が 1 箇所に閉じるだけでなく、区切り文字を将来 `::` に変えたいような仕様変更も dotted() の実装差し替えだけで済む。同種のヘルパを他の AST ノード(Path, Ident 列など)で書くときも、この「AST 型に impl を生やして呼び出し側の join を根絶する」パターンに揃える。
+
+### Candidate: 内部 skip 状態は `Option<SkipInfo>` に named field 化 — 無名 tuple の field 順ミラー同期は禁止
+**Why this matters for HANDOFF.md**: PR #128 レビューで検出された「`Option<(usize, Option<String>)>` の 2-tuple が `SkippedFunction` の 2 field を鏡写しし、write site 3 箇所・destructure 1 箇所で field 順ズレのリスクがあった」問題への恒久ガード。次に skip 情報を拡張する人が「tuple で軽く済ませる」誘惑に負けないための landmine。
+**Draft entry** (lift verbatim if approved):
+> `run_function` が呼び出し元に渡す skip 内訳は **`SkipInfo` という named field 構造体** に閉じる(`Option<(usize, Option<String>)>` のような無名 tuple を作らない)。理由: 無名 tuple は write site 3 箇所・destructure 1 箇所で `SkippedFunction` の 2 field を鏡写しにするため、片方だけ field 順を入れ替えたときにコンパイラが警告しない(silent bug になる)。`SkipInfo` は crate 内部専用の struct で公開しない(外部 API は `SkippedFunction` のまま)。将来 skip 情報が 3 field 以上に増えたら、`SkipInfo` の field を追加するだけで write site を機械的に追随できる。
+
+### Candidate: async 契約 e2e は npm パッケージも file: 依存の実 Promise で疎通 — M36 greeter パターンの async 版
+**Why this matters for HANDOFF.md**: PR #128 が新設した `tests/cli/packages/async-greeter/` は「実 npm パッケージ経由で extern async を tsc --strict + vitest で疎通する」M38 完了条件の最小固定点。M36 で確立した「file: 依存の実 npm パッケージで extern の疎通を固定」パターンを async 版で再適用しており、次に extern の新側面(例: streaming, generators)を追加する人が同じ流儀で fixture を作れるようにするための invariant。
+**Draft entry** (lift verbatim if approved):
+> extern 境界の e2e 検証は **`tests/cli/packages/<name>/` に file: 依存の実 npm パッケージを配置** して行う(M36 の greeter パターン)。async 版は `async-greeter` として `index.js` が実 `async` 関数(実 Promise を返す)、`index.d.ts` で型を宣言、`tests/cli/projects/app/package.json` に `"async-greeter": "file:../packages/async-greeter"` を追加する。Kei 側からは `extern package "async-greeter" as ...` で束縛し、`extern ...uses Async` の署名を tsc --strict + vitest で検証する。この流儀は (a) tsc --strict の型検査を通ることで extern 署名が真に外部型と合っていることを固定できる、(b) vitest から `await expect(...).rejects.toThrow(KeiContractViolation)` で contract violation の実 Promise 経由伝播を捕捉できる、(c) `build_golden_tree` の `wrote N module(s)` カウントで golden として一体固定できる、という 3 つの効用がある。新しい extern 側面(例: streaming)を追加するときも `tests/cli/packages/<新 fixture>/` を同じ形で作る。
+
+### Candidate: `extern query` は Async 化不可 — 純粋観測子のシルエットを既存 KEI-E3005 で守る(新規診断を作らない)
+**Why this matters for HANDOFF.md**: 前 PR #126 で「Async 化禁止」の設計判断は記録済み(候補 4)だが、PR #128 でその**実装形態**が確定した — 新規診断コードを作らず、既存の「query は uses を宣言できない」KEI-E3005 に自然に包含された。診断コードを増やさずに invariant を守る好例で、次に「query に別の新規制約を足したい」場面で参考になる。
+**Draft entry** (lift verbatim if approved):
+> `extern query ... uses ..., Async` は **既存 KEI-E3005(query cannot declare uses)がそのまま拒否する** — M38 で新規診断コードを追加していない。理由: query は「純粋観測子」のシルエットを守るため、そもそも uses 節を持てない仕様(spec v0.2 §2.5)。Async は uses の要素なので、query に Async を付けようとした瞬間に uses 節の存在自体が E3005 で拒否される。fix hint は既存の「query は純粋観測子、通常の extern を使え」のまま流用できる。golden `err_extern_query_async.expected.json` はこの経路を固定する — 新規診断コードを作らずに新しい invariant を守れる好例として、次に query の制約を足すときは「既存の E3005 が拾ってくれる形にできないか」を先に検討する。
+
+## PR #129: chore: bump version to 0.7.0 — 2026-07-09 merged
+
+(no design-decision candidates for this PR)
+
+## PR #129 (re-fire): chore: bump version to 0.7.0 — 2026-07-09 merged
+
+> **Note**: hook が `gh release edit v0.7.0 ... && mkdir dogfood scratchpad` Bash
+> コマンド(PR merge ではない)に対して再発火した。`tool_input.command` に
+> `gh pr merge <N>` が含まれないため fallback で「最新 merged PR = #129」を
+> 選択したが、実体は release ノート編集 + ドッグフード環境構築であり、内容は
+> 上の #129 セクションと同じ(pure version bump)。
+
+(no design-decision candidates for this PR)
+

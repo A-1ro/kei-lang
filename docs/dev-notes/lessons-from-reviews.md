@@ -456,3 +456,33 @@ CLAUDE.md に落として、ここからは削除してよい。
 
 メタ観察(hook 発火条件そのものの問題、レビュー由来ではないため正式教訓化はしない — PR #127 だけで 4 回目の再発 + PR #126 の 3 回と併せて累計 7 回):
 - **PostToolUse hook の誤発火が PR #127 でも収まらず、M38 の内部検証コマンドすべてを拾って子セッションを起動している**。:436 の初回記録から数えて 7 回目の同種メタ観察になっており、`.claude/settings.json` の PostToolUse matcher を `Bash(gh pr merge*)` に絞るか、`post-merge-lessons.prompt.md` 冒頭で `tool_input.command` に `gh pr merge` を含まない場合の早期 exit を追加する改修の優先度は**明確に上がった**。この改修自体が M38 の作業スコープではないため、M38 マージ後の別 PR で切り出すのが妥当。それまでの間、本ファイルに増え続ける no-actionable エントリは "hook が生きている" 証跡以上の情報を持たないので、次に本エントリを見る Opus は改修 PR を提案してよい。)
+
+## PR #128: feat: M38 async 境界統合 — extern async + 契約 e2e + pbt / MCP / SKILL — 2026-07-09 merged
+
+(no actionable patterns — 今回は本物の `gh pr merge 128 --squash --delete-branch --admin` に対する真正な post-merge 発火。ただし PR #128 は M38 async 境界統合(extern async / 契約 e2e / pbt / MCP / SKILL 更新)を `--admin` 即マージしたため、`gh api pulls/128/comments` / `issues/128/comments` は共に `[]`、`gh pr view 128 --json reviews,reviewDecision` も `reviews:[]` / `reviewDecision:""` で **inline review 0 / issue comment 0 / review summary 0**。CI(clippy / fmt / test)は全 pass で機械的な赤信号もなし。外部由来の教訓は得られなかったので、hook が生きていることの証跡としてのみ本エントリを残す。M37→M38 と 2 連続で `--admin` 即マージが続いており、次に codex bot や人間が触った PR で改めて patterns を拾う予定。)
+
+メタ観察(前回までの hook 誤発火メタ観察の続報 — レビュー由来ではないため正式教訓化はしない):
+- **PR #128 に関しては、hook は今回 `gh pr merge 128 --squash --delete-branch --admin` を含む複合コマンドで正しく発火した**。すなわち :447 / :457 で 7 回連続していた「`gh pr merge` を含まない Bash で fire する」誤発火は、**M38 マージという本来の発火タイミングでは今回きちんと動いた**。これは matcher が壊れているわけではなく単に「広すぎて false-positive を大量に拾う」問題であることを再確認するデータ点となる。M38 がマージされた今、:458 で予告した改修 PR(matcher を `Bash(gh pr merge*)` に絞る、または prompt 冒頭で `tool_input.command` を grep して早期 exit する)を次のセッションで切り出すのが妥当。改修 PR がマージされたら、:436 以降の 8 件の no-actionable エントリ(#126 x3 + #127 x4 + #128 x0)は "hook が発火した証跡" 以上の情報を持たないので、まとめて 1 段落に圧縮してよい。
+
+## PR #128: feat: M38 async 境界統合 — extern async + 契約 e2e + pbt / MCP / SKILL — 2026-07-09 merged (hook re-run #2: SKILL.md kei ブロックの `kei check`/`kei fmt --check` 一括検証)
+
+(no actionable patterns — hook がまた `gh pr merge` 以外の Bash コマンド(今回は別サブエージェントが `skills/kei/SKILL.md` 内の全 ```kei フェンスドコードブロックを `skill-blocks/manifest.tsv` の一覧に沿って抽出し、各ブロックに `kei check` と `kei fmt --check` を回して `skill-blocks/results.txt` に集約するループの完了時点)で PostToolUse fire した。現在のブランチは `chore/bump-0.7.0`、`gh pr list --state merged --limit 3` でも直近マージ PR は依然 #128 のまま、`gh api pulls/128/comments` / `issues/128/comments` / `gh pr view 128 --json reviews,reviewDecision` を再確認しても inline 0 / issue comment 0 / review 0 で :462 からの増分ゼロ。新規のレビュー活動なし。)
+
+メタ観察(hook 発火条件そのものの問題、レビュー由来ではないため正式教訓化はしない — PR #128 で 2 回目の再発、:436 以降通算 9 回目):
+- **PostToolUse hook の誤発火は M38 マージ後も収まらず、今回は SKILL.md のドキュメント品質チェック(kei ブロックの check/fmt 検証)という実装作業ですらない補助タスクまで拾って子セッションを起動した**。:465 で「M38 マージという本来の発火タイミングでは今回きちんと動いた」ことを確認したはずが、マージ後の何気ない Bash 呼び出しでも依然として fire しており、matcher が広すぎる問題は未解決のまま継続している。:458 / :465 で予告済みの改修(matcher を `Bash(gh pr merge*)` に絞る、または `post-merge-lessons.prompt.md` 冒頭で `tool_input.command` に `gh pr merge` を含まない場合の早期 exit を追加する)を、次に手が空いたセッションで優先的に切り出すことを改めて推奨する。本エントリ自体は SKILL.md 検証結果(ブロックごとの pass/fail)を教訓化する材料を持たないため、hook が生きていることの証跡としてのみ残す。
+
+## PR #129: chore: bump version to 0.7.0 — 2026-07-09 merged
+
+(no actionable patterns — PR #129 は v0.7.0 リリース向けの純粋なバージョンバンプ PR(Cargo.toml workspace version / plugin.json / marketplace.json / MCP golden の 7 files 更新、`14 insertions(+), 14 deletions(-)`)であり、hook prompt の "Ignore: 純粋な formatting noise, version bumps, dependency PRs" に該当する。今回の hook 発火は `gh pr checks 129 --watch` 完了直後に `gh pr merge 129 --squash --delete-branch --admin` + タグ v0.7.0 push + `cargo install` + `kei --version` 確認までを 1 本の複合コマンドで走らせた真正な post-merge タイミングだったが、`gh api pulls/129/comments` / `issues/129/comments` は共に `[]`、`gh pr view 129 --json reviews,reviewDecision` も `reviews:[]` / `reviewDecision:""` で **inline review 0 / issue comment 0 / review summary 0**。CI(clippy 17s / fmt 19s / test 46s)は全 pass。教訓化する材料なし。)
+
+メタ観察(v0.7.0 リリース完了に伴う節目のメモ、レビュー由来ではないため正式教訓化はしない):
+- **v0.7.0 リリースが完了した(M37 uses Async エフェクト + M38 async 境界統合)ため、v0.7 ロードマップは完了、v1.0 blocker は 2/3 解消**。次期 v0.8+ の作業に入る前に、:458 / :465 / :472 で 3 回連続で予告済みの hook matcher 改修 PR を先に切り出すのが妥当な順序。改修 PR がマージされたら、:436 以降の 10 件の no-actionable エントリ(#126 x3 + #127 x4 + #128 x2 + #129 x1)は "hook が発火した証跡" 以上の情報を持たないので、まとめて 1 段落に圧縮してよい。
+- なお PR #129 のような "純粋なバージョンバンプ" は hook prompt の Ignore 対象として明示されているにもかかわらず、現在の実装ではバージョンバンプ PR に対しても子セッションを起動して本ファイルに no-actionable エントリを書き込んでいる。matcher 改修とあわせて、`post-merge-lessons.prompt.md` 冒頭で PR タイトル/変更内容から version-bump PR を早期検出して skip する分岐を追加すると、リリースごとに増える定型 no-actionable エントリも抑制できる。
+
+## PR #129: chore: bump version to 0.7.0 — 2026-07-09 merged (hook re-run #2: `gh release edit v0.7.0` + dogfood scratchpad 準備)
+
+(no actionable patterns — 今回の hook 発火は `gh pr merge` ではなく、v0.7.0 リリース公開直後の一連の release-polish + dogfood 準備コマンド(`until gh release view v0.7.0 ...; do sleep 10; done` で release が世に出るのを待機 → `gh release edit v0.7.0 --title "..." --notes "..."` でリリースノートを M37/M38 の設計判断ハイライト付きに書き換え → `rm -rf $D && mkdir -p $D/docs && cp skills/kei/SKILL.md $D/docs/ && cp -r spec $D/docs/spec && cp -r examples $D/docs/examples && echo ready` で `scratchpad/dogfood-v0.7.0` にドッグフード検証用ディレクトリを組み立てる複合 Bash)で PostToolUse fire した。直近マージ PR は依然 #129(v0.7.0 バージョンバンプ)のまま、`gh api pulls/129/comments` / `issues/129/comments` / `gh pr view 129 --json reviews,reviewDecision` を再確認しても inline 0 / issue comment 0 / review 0 で :479 からの増分ゼロ、そもそも PR #129 は hook prompt の Ignore 対象(pure version bump)。教訓化する材料なし。)
+
+メタ観察(:436 以降通算 11 回目 の同種メタ観察 — レビュー由来ではないため正式教訓化はしない):
+- **hook 誤発火は v0.7.0 リリース工程の release-notes 編集 + ドッグフード scratchpad 準備という "PR とは無関係な release polish 作業" までも拾って子セッションを起動している**。:458 / :465 / :472 / :479 で 4 回連続で予告済みの hook matcher 改修 PR は、v0.7.0 リリースが完了した今、v0.8 の HTTP/JSON 境界 + Hono アダプタ作業に入る前に最初に切り出すのが妥当な順序として改めて浮上する。改修候補は変わらず (a) `.claude/settings.json` の PostToolUse matcher を `Bash(gh pr merge*)` に限定、(b) `post-merge-lessons.prompt.md` 冒頭で `tool_input.command` が `gh pr merge` を含まない場合の早期 exit、(c) `tool_input.command` が `gh pr merge` を含む場合でも直近マージ PR タイトルが `^chore: bump version to` にマッチしたら Ignore で終了 の 3 段構え。
+- **今回の tool_input.command には `gh release edit v0.7.0 --title "v0.7.0 — async(v1.0 blocker 2/3 解消)"` の release-notes 本文が丸ごと入っている** — release-notes は v0.7 の設計判断(async は uses モデル統合 / `await` を Kei ソースに露出させない / 契約は同期のまま / 高階関数 async 名前参照は KEI-E3008 で拒否 / `SkippedInfo.required_cases` の Option 化)を要約しており、これはレビュー指摘ではなく self-authored なので教訓化はしないが、次に触った Opus が v0.8 実装の「HTTP/JSON 境界 + Hono アダプタ」で参照すべき invariants の圧縮版として `SKILL.md` か spec 側のどこかに落とすと便利。release-notes ↔ SKILL.md / spec の同期は現状マニュアルで、リリースごとにドリフトしやすい。
