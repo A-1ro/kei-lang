@@ -15,6 +15,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "greeter": "file:../../packages/greeter"
+    "greeter": "file:../../packages/greeter",
+    "async-greeter": "file:../../packages/async-greeter"
   }
 }

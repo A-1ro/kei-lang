@@ -1,0 +1,9 @@
+{
+  "name": "async-greeter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "description": "Kei M38 e2e フィクスチャ: async な file: 依存ミニ npm パッケージ(extern async 束縛の実疎通確認用)"
+}
