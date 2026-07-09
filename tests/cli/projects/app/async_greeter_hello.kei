@@ -1,0 +1,11 @@
+module app.async_greeter_hello
+
+extern package "async-greeter" as asyncGreeter
+
+extern asyncGreeter.greetAsync(name: String) -> String uses Async
+
+func helloAsync(name: String) -> String
+  uses Async
+{
+  return asyncGreeter.greetAsync(name)
+}

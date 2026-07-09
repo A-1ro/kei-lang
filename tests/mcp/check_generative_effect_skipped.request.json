@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 22,
+  "method": "tools/call",
+  "params": {
+    "name": "kei_check",
+    "arguments": {
+      "source": "module bank.read_balance\n\nfunc readBalance(id: Int) -> Int\n  uses Database.Read\n  ensures result >= 0\n{\n  return 0\n}\n",
+      "generative": true
+    }
+  }
+}

@@ -182,6 +182,18 @@ pub struct EffectRef {
     pub span: Span,
 }
 
+impl EffectRef {
+    /// `path` をドット結合した文字列(`Database.Write` 等)。`EffectRef` のドット文字列化は
+    /// ここが唯一の場所(呼び出し側で `path.iter().map(...).join(".")` を書き直さない)。
+    pub fn dotted(&self) -> String {
+        self.path
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
 /// 型参照。`Result<TransferReceipt, TransferError>` 等。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Type {

@@ -713,3 +713,207 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 ## PR #125: chore: bump version to 0.6.0 — 2026-07-07 merged
 
 (no design-decision candidates for this PR)
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged
+
+### Candidate: Async は「関数の色」ではなくエフェクト(uses モデル統合)
+**Why this matters for HANDOFF.md**: Kei の言語アイデンティティを決める根幹の合意で、後続 Milestone で「async キーワードを追加したくなる」誘惑に対する最上位判断軸。ロードマップ本文にしか書かれておらず、コードだけ見ても意図が復元できない。
+**Draft entry** (lift verbatim if approved):
+> Kei は非同期性を**関数の色ではなくエフェクト**として扱う。`async` キーワードを Kei ソースに追加せず、`func f() -> T uses Network.Read, Async` のように既存の uses モデルに `Async` を追加するだけで表現する。理由: (1) 色システムは呼び出し規約を二分するが、Kei は既にエフェクトで副作用を分類しており重複する、(2) uses モデルの推移伝播機構(KEI-E3001)がそのまま非同期の伝播にも効く、(3) 「色ではなくエフェクト」を保つことで契約純粋性(KEI-E4001)との交差診断が自然に成立する。将来「async fn を復活させたい」提案が来ても、この立場を崩すと契約系の診断設計が総崩れになるため受け入れない。
+
+### Candidate: `Async` は IO 傘下ではなく独立ルート — IO は Async を包含しない
+**Why this matters for HANDOFF.md**: エフェクト階層の非自明な形状で、「IO 宣言があれば Async も許可される」という自然な直感を明示的に否定している。互換性破壊(既存の `uses IO` 関数が黙って async 化してしまう)を避けるための意図的な設計。
+**Draft entry** (lift verbatim if approved):
+> `effects.rs` の `STANDARD_EFFECTS` において、`Async` は IO 傘下ではなく**独立ルート**として置く。`uses IO` は「IO 全包括の雑な許可」だが、Async はそこに含めない。理由: IO を宣言している既存の同期関数(v0.6 以前に書かれた extern net.* など)が v0.7 以降黙って async として扱われる互換性破壊を避けるため。spec §3.2 の「`uses IO` は全 IO の包括許可」記述には**「Async は例外」**の一文を階層図と本文の両方に明記する。実装時は `covers` テーブルで IO → Async の辺が張られていないことをテストで固定する。
+
+### Candidate: Kei ソースに `await` 演算子を持たない — compiler が emit 時に自動挿入
+**Why this matters for HANDOFF.md**: 「なぜ await の書き忘れ診断が不要か」の根拠と、v0.8 で並列制御を追加するときに `spawn`/`join` を別プリミティブとして設計する理由が、この判断からしか読めない。
+**Draft entry** (lift verbatim if approved):
+> Kei ソースには `await` 演算子を追加しない。`let u = fetchUser(id)` と同期的な書き味で書き、生成 TS が `const u = await fetchUser(id);` を出す。根拠: v0.7 は sequential のみで並列制御が言語に不要なため、await の書き忘れが起きえない(uses Async 関数の呼び出しは自動で await される)。並列化が必要になった v0.8 の段階2で `spawn` / `join` 相当を別プリミティブとして 🤝 で設計する — async 自体は v0.7 に閉じる、が Kei の分割方針。「TypeScript ユーザーに合わせて await を出したい」提案は、書き忘れ診断の複雑度と Kei の同期的な書き味の両方を壊すので却下する。
+
+### Candidate: `Promise<T>` 型は Kei に露出しない — emit の責務
+**Why this matters for HANDOFF.md**: Kei 型システムを「同期的な値の型」に閉じる設計判断。「非同期性を型に表す」誘惑(Haskell の `IO T` 相当)に対する明確な立場表明。
+**Draft entry** (lift verbatim if approved):
+> `Promise<T>` は Kei 型システムに露出させない。async 関数の戻り型は `-> T`(第一級関数値と同じく、Promise 化は emit の責務)。生成 TS 側では `uses Async` 関数が `async function f(): Promise<T>` に写る。この判断は「非同期性は型ではなくエフェクトで表す」立場の帰結であり、型システムを同期的な値の代数に閉じる。将来「Promise 型を露出させて `await` を書けるように」という提案があっても、上記の「await 演算子を持たない」と一体の設計なので、両方一緒にでない限り受け入れない。
+
+### Candidate: 契約式は同期・純粋のまま — async 呼び出しは既存の二重診断で拒否
+**Why this matters for HANDOFF.md**: 契約系の設計不変条件で、async 追加という大きな言語変更が既存の診断機構(KEI-E4001 + KEI-E3001)にゼロ変更で吸収されるという構造的な整合性を明文化する。
+**Draft entry** (lift verbatim if approved):
+> `requires` / `ensures` / `old(...)` は v0.7 以降も**同期・純粋**のまま。async 関数(`uses Async` 持ちや extern async)を契約式から呼ぶのは、KEI-E4001(契約純粋性)+ KEI-E3001(uses 越え)の**既存二重診断**で拒否する(新規診断を追加しない)。async 関数の ensures は同期述語で結果を検証し、emit は async wrapper 内で `await → ensures 評価` の順に出す。requires 違反は関数入口(await 前)で throw、ensures 違反は Promise resolve 後に throw(reject ではなく throw で await 側に例外として届く)。「契約で await を使いたい」という将来要望は、契約の同期・純粋性を壊すので受け入れない — 代替は同期の `extern query` 観測子。
+
+### Candidate: `extern query` の Async 化は禁止 — query は純粋観測子のシルエットを守る
+**Why this matters for HANDOFF.md**: `extern query` の意味論的な役割(純粋観測子)を守るための境界条件で、実装時に「エフェクト列に Async を足せるようにするだけ」と誤読しないための landmine。
+**Draft entry** (lift verbatim if approved):
+> `extern query` に `Async` を含む uses を付けるのは M38 で **KEI-E3005 相当の新規診断(または既存 3005 の拡張)で拒否**する。query は「純粋観測子」のシルエットを守るための構文で、非同期化するとその不変条件が崩れる。fix hint は「query は純粋観測子、通常の extern を使え」。extern async 自体は普通の `extern` に `uses ..., Async` を付ける形で表現できるため、query に Async を許す必要はない。
+
+### Candidate: fmt は uses 節をソースのまま素通し — `.sort()` を追加しない
+**Why this matters for HANDOFF.md**: レビュー修正コミットで新設された注記で、「fmt は識別子リストをソートするのが自然」という直感に対する明示的な否定。実装エージェントが「既存踏襲」を誤読するのを防ぐための landmine。
+**Draft entry** (lift verbatim if approved):
+> `kei_fmt/src/lib.rs` は uses 節をソート機構なしで**ソース順に素通し**する(現状 `.sort()` 系のロジックは存在しない)。M37 で `Async` を uses 節に足すとき、fmt 側で識別子をアルファベット順に並べ替えたくなる誘惑があるが、fmt は AST の意味を保存する原則(HANDOFF)に加えて、uses 節の順序も**ユーザーが書いた順を尊重する**規約になっている。もし将来「uses 節を並べ替えたい」提案が来たら、`kei check` の等価判定(順序非依存)を先に固定し、golden 更新のインパクトを見積もってから議論する。fmt 変更は M37 完了条件に含まれない。
+
+## PR #126 (PostToolUse re-fire — cargo check trigger): docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09
+
+> **Note**: この hook 発火は `gh pr merge` ではなく `cargo check --workspace` の PostToolUse イベントで
+> トリガーされた(`tool_input.command` が `cargo check` のため、prompt のフォールバックで最新 merged PR
+> = #126 を選択)。上記の PR #126 セクションで 7 件の設計判断候補を既に記録済みのため、本パスで
+> 新規に追加すべき候補はない。
+
+(no new design-decision candidates for this PR — already covered above)
+
+## PR #126 (PostToolUse re-fire #2 — M37 3-command verify trigger): docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09
+
+> **Note**: 本 hook 発火も `gh pr merge` ではなく `cargo fmt --all -- --check && cargo clippy ... && cargo test ...`(M37 着手前の 3 コマンド検証)の PostToolUse で
+> トリガーされた。prompt のフォールバックで最新 merged PR = #126 を再度選択したが、上記 2 セクション
+> (初回発火 + cargo check 再発火)で PR #126 の候補は網羅済み。**新規に追加すべき候補はない**。
+>
+> 参考メモ: この検証コマンド出力に `error: could not compile kei_syntax (lib test)` を含む clippy stderr
+> が乗っていた(`CLIPPY=0` で最終的な exit は 0)が、これはユーザー側の作業ログであって設計判断
+> ではなく、PR #126 のマージ内容(docs のみ)には無関係。ハンドオフ候補ではないので記録しない。
+
+(no new design-decision candidates for this PR — already covered above)
+
+## PR #126 (PostToolUse re-fire #3 — M37 emit bug repro trigger): docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09
+
+> **Note**: 本 hook 発火も `gh pr merge` ではなく、M37 実装ブランチで発見された emit バグの
+> 再現スクリプト(`git stash → git checkout pr-127 → cargo run -p kei_emit --example transpile → git checkout main → git stash pop`)の
+> PostToolUse でトリガーされた。prompt のフォールバックで最新 merged PR = #126 を再度選択したが、
+> 上記 3 セクション(初回発火 + cargo check 再発火 + 3-command verify 再発火)で PR #126 の候補は
+> 網羅済み。**新規に追加すべき候補はない**。
+>
+> 参考メモ: この検証コマンド出力に `match` 式の分岐内で `await` が生成され `Promise<string>` を
+> `string` として返そうとする emit バグの再現(`return (() => { ...; return await fetchName(v); })()` が
+> Promise を返してしまう問題)が写っていたが、これは **PR #127 の実装対象バグ**であって PR #126
+> (docs のみ)には無関係。M37 の完了条件「async 関数の check + emit(await 自動挿入)」の一環として
+> PR #127 側で処理されるべき事項なので、本ハンドオフ候補には記録しない(PR #127 マージ時に別途評価)。
+
+(no new design-decision candidates for this PR — already covered above)
+
+## PR #126 (PostToolUse re-fire #4 — async_match.kei repro creation): docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09
+
+> **Note**: 本 hook 発火も `gh pr merge` ではなく、scratchpad に `async_match.kei` を書き出す
+> `mkdir + cat > EOF + ls -la` のヒアドキュメントコマンドの PostToolUse でトリガーされた
+> (`tool_input.command` が `gh pr merge` を含まないため、prompt のフォールバックで最新 merged PR
+> = #126 を再度選択)。上記 4 セクション(初回発火 + cargo check 再発火 + 3-command verify 再発火
+> + emit bug repro 再発火)で PR #126 の候補は既に網羅済み。**新規に追加すべき候補はない**。
+>
+> 参考メモ: 今回書き出された `async_match.kei` は、`match Some(id) { Some(v) => fetchName(v), None => "default" }`
+> という「match アーム内から async 関数を呼ぶ」ケースで、M37 の emit バグ(match アームを
+> 即時実行 IIFE `(() => { ... })()` に落とすと、IIFE 内の `await` の resolved 値を返す IIFE 自身が
+> `Promise<T>` になり、`match` 式全体の型が `T` から `Promise<T>` にズレる)を最小再現するための
+> ものと推測される。これは **PR #127(M37 実装)側で処理される emit 責務**であり、PR #126(docs のみ)
+> の設計判断ではない。ハンドオフ候補としては PR #127 マージ時に「match アーム内 await の IIFE
+> 落とし込みは Promise-of-Promise を作るので、非同期 match は `async` IIFE + outer `await` にする」
+> のような設計メモが上がる可能性があるが、それは PR #127 側の担当で、本パスでは記録しない。
+
+(no new design-decision candidates for this PR — already covered above)
+
+## PR #126 (PostToolUse re-fire #5 — async name-ref combinator probe trigger): docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09
+
+> **Note**: 本 hook 発火も `gh pr merge` ではなく、M37 実装調査で `ids.map(fetchName)`
+> (async 関数を name-ref で高階関数 combinator に渡すパターン)が現行 `kei check --json` を
+> 通るかを確認する `cargo run -p kei_cli --bin kei -- check .../async_map.kei --json` の
+> PostToolUse でトリガーされた(`tool_input.command` が `gh pr merge` を含まないため、
+> prompt のフォールバックで最新 merged PR = #126 を再度選択)。上記 5 セクション
+> (初回発火 + cargo check 再発火 + 3-command verify 再発火 + emit bug repro 再発火 +
+> async_match.kei repro 再発火)で PR #126 の候補は既に網羅済み。**新規に追加すべき候補はない**。
+>
+> 参考メモ: 今回の probe 出力は `diagnostics: []` で checker が通過し、`fetchName` の
+> `requires id >= 0` 契約が `verification: "runtime"` として拾えていることが確認できた。
+> つまり **現行 checker は「async 関数を name-ref で map/filter などに渡す」ケースを型検査で
+> 弾いていない**。しかしこれは M37(async 関数の check + emit)実装作業の途中観察であって、
+> PR #126(docs のみ)のマージ内容とは無関係。async name-ref を high-order combinator に
+> 渡したときに emit をどう成立させるか(呼び出し側 `map` を `Promise.all(xs.map(async ...))`
+> に展開するのか、call site での await 自動挿入を諦めて `List<Promise<T>>` を返すのか、
+> effect row の Async が map の返り値型に伝播するか)は **PR #127 側の設計判断**であり、
+> そちらのマージ時に別途評価する。本ハンドオフ候補には記録しない。
+>
+> メタ観察(#3 の再掲): PR #126 マージ後、M37 実装フェーズに入ってから同一 PR に対する
+> 再発火が 5 回目となった。post-merge-handoff hook は Bash tool のあらゆる呼び出しで
+> PostToolUse が発火する現在の設定では、実装作業中の cargo/kei/mkdir コマンドすべてに反応して
+> しまう。**hook 側で `tool_input.command` が `gh pr merge` を含むケースにのみ発火するよう
+> matcher を絞る** のが本来の設計意図(prompt 冒頭「A `gh pr merge` command just completed」)
+> に近い。これは `.claude/settings.json` の hook matcher 設定変更で対処すべき事項であり、
+> handoff 候補(HANDOFF.md 昇格対象の設計判断メモ)ではなく hook 運用改善タスクとして
+> 別途対応する筋合いの話。ここでは 5 回目の重複としてメタ観察を再記録するに留める。
+
+(no new design-decision candidates for this PR — already covered above)
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged(hook 7 回目・重複発火)
+
+(no new design-decision candidates for this PR — already covered above)
+
+> **Note**: 本 hook 発火は `gh pr merge` ではなく、M37 実装作業の一環で
+> `cargo check --workspace --all-targets --quiet` を実行した PostToolUse でトリガーされた
+> (`tool_input.command` に `gh pr merge` を含まないため、prompt のフォールバックで
+> 最新 merged PR = #126 を再選択)。PR #126(docs のみ、v0.7 async ロードマップ)の
+> 設計判断は既に上記 6 セクションで網羅済み(Async を IO 傘下から外す独立ルート化 /
+> await 演算子を Kei ソースに持たない / Promise<T> を露出させない / 契約は同期・純粋を
+> 保つ / extern query の Async 禁止 / fmt は uses 節を素通し等)。**新規に追加すべき候補はない**。
+>
+> メタ観察(前セクションの再々掲): PR #126 マージ後 M37 実装フェーズにおける同一 PR への
+> hook 再発火は 6 回目(このセクションで 7 回目)。**根本原因は `.claude/settings.json` の
+> matcher が Bash tool 全体をキャプチャしていること**であり、handoff-candidates.md 側で
+> 対処するものではない。前セクションで指摘した「matcher を `gh pr merge` に絞る」設定変更が
+> 未実施のため再発火が続いている。ここでは 6 回目の重複としてメタ観察を保持するに留め、
+> hook 運用改善(settings.json の matcher 修正)を別タスクとして明示的に切り出す必要がある
+> ことを再度記録する。
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged
+
+### Candidate: `Async` は `IO` の子ではない独立ルートエフェクト(covers に唯一の例外)
+**Why this matters for HANDOFF.md**: 既存 `uses IO` 宣言関数群が M37 の導入で「黙って非同期になる」互換性破壊を起こさないための根本設計。エフェクト階層の直感(「IO が最上位でその下に全部ぶら下がる」)に対する意図的な唯一の例外であり、将来 `Async.X` サブエフェクトを追加する人が最初にぶつかる landmine。
+**Draft entry** (lift verbatim if approved):
+> `Async` エフェクトは `IO` の子ではなく、独立ルートとして定義する(v0.7 / M37)。`effects::covers` は「declared が自分自身か祖先」の基本則に加え、**`declared == "IO"` かつ `used == "Async"` または `used.starts_with("Async.")` のときは false を返す** という唯一の例外を持つ。理由: この例外がないと、v0.6 以前から存在する `uses IO` 宣言の関数が M37 の導入で黙って `uses Async` を包含したことになり、呼び出し側は既存 `IO` 宣言だけで async 関数を呼べる = ソース側の `await` 記述なしに Promise 汚染が広がる silent breakage が起きる。`Async` 呼び出しは常に明示 `uses Async` を要求する。`Async.X` サブエフェクト(将来)の追加時も、この例外の `starts_with("Async.")` が防御的に効くよう検査済み(`effects::tests::io_does_not_cover_async`)。
+
+### Candidate: async 情報は checker が確定して `OpSpans` で emit へ渡す(構文ヒューリスティック `func_is_async` は廃止)
+**Why this matters for HANDOFF.md**: 「emit が構文形から async 判定する」誘惑への恒久的な回答であり、list_ops/map_ops で確立した「checker が権威、emit は span 所属だけを見る」パターンを Async にも徹底したことの記録。PR #127 の初版は `func_is_async` という構文ヒューリスティックを持っていたが、レビューで soundness バグ(高階関数への async 名前渡し・contract 内での判定漏れ等)が発覚し、レビュー対応コミットで廃止された。
+**Draft entry** (lift verbatim if approved):
+> Async に関する三種の情報は **すべて checker(`kei_check::op_spans_with_resolver`)が確定** し、`OpSpans` の 3 集合として emit に渡す。emit は span 所属テーブル引きだけで判断し、検査ロジックは持たない(list_ops / map_ops と同じ流儀)。
+>
+> - `async_calls: HashSet<Span>` — `uses Async` 関数への直接呼び出し(Call 式の完全な Span)。**start だけでなく end も含む完全 Span がキー**(`a.f().g()` のように連鎖する Call は開始位置を共有しうるため、start だけでは衝突する — list_ops/map_ops がメソッド名トークンの (line, col) をキーにするのと対照的)。emit はこの位置の Call の直前に `await ` を挿入する。
+> - `async_match_spans: HashSet<Span>` — scrutinee か何らかの arm body に `async_calls` に載る呼び出しを含む match 式の Span。emit はこの位置の match IIFE を `await (async () => {...})()` として出す(**そうしないと内側の `await` が非 async な IIFE 内での使用になり TS が SyntaxError**)。実機再現済みのバグとして `kei_emit::tests::match_with_async_arm_body_emits_async_iife` で固定。
+> - `async_funcs: HashSet<Span>` — `uses Async` を宣言している **関数宣言そのものの Span** 集合。emit はこれだけを根拠に `async function` + `Promise<T>` として出す。**構文ヒューリスティック(「body に async 呼び出しがあれば async 化」)は廃止済み** — PR #127 初版はそれを持っていたが、レビューで「宣言はしているが body から呼んでいない async 関数」等でズレる soundness 穴が指摘され、checker 権威の宣言集合に一本化した。
+>
+> 将来 Async 関連の情報が増えるとき(例: `Async.Retry` の retry policy span、Promise.all 対応の並列化位置)も、同じパターン(checker が確定 → OpSpans 経由 → emit は span 所属だけ)を踏襲する。
+
+### Candidate: async 呼び出しは高階コンビネータに渡せない — 専用診断 KEI-E3008(伝播チェックより前に発火)
+**Why this matters for HANDOFF.md**: 「呼び出し側が `uses Async` を宣言していれば通してよいのでは?」という直感的な緩和が silent breakage(`Promise<T>[]` を `T[]` として emit)を生む理由の恒久記録。診断コード順(E3008 は E3001 より前)の意味も含めて記録すべき invariant。
+**Draft entry** (lift verbatim if approved):
+> `xs.map(asyncFn)` のようにコンビネータ引数へ **名前参照で** `uses Async` 関数を渡すケースは、`caller` 側が `uses Async` を宣言していても専用診断 **KEI-E3008(COMBINATOR_ASYNC_FN)で無条件に拒否** する。理由: `Array.prototype.map` などは JS ネイティブ実装でコールバックを await せず、結果は `T[]` ではなく `Promise<T>[]` になる。v0.7 は sequential await のみで `Promise.all` 相当の並列化は未実装のため、combinator 越しに Async を安全に伝播する経路が存在しない。通常のエフェクト伝播チェック(`check_call_effects` → E3001)まで到達すると「caller が Async 宣言済み = 診断ゼロ」で通ってしまうため、**専用診断は伝播チェックより前に発火させて return する** 制御フロー(`check.rs::infer_call_name_arg` 相当の位置)。ラムダ内の async 呼び出し(`xs.filter(id => hasAccess(id))`)は既存 E3001(EFFECT_UNDECLARED)で拒否されるが、fix 文面は Async 特有の 2 択(「同期 for ループに書き換える」「事前に await して値を渡す」)に差し替えている — 非 Async のケースは従来通り「名前関数に置き換える」誘導を維持(名前渡しは非 Async では安全)。
+
+### Candidate: `await` 前置は postfix chain 位置で括弧が必要(Prec::Unary、`Expr::Unary` と同じ needs_paren パターン)
+**Why this matters for HANDOFF.md**: `await` の JS 演算子優先順位(UnaryExpression)への対応が抜けると **サイレントに実行時が壊れる**(Promise に `.field` を引く)。PR #127 の 2 番目のコミットで修正されたバグの再発防止として、needs_paren パターンを Async 導入時から明文化しておく価値がある landmine。
+**Draft entry** (lift verbatim if approved):
+> `await` は JS の UnaryExpression 相当の優先順位(`Prec::Unary`)しか持たない。`fetchUser(id).name` のように async 呼び出しの結果へ postfix chain(フィールドアクセスやメソッドチェーン)を直接続ける文脈で単純に `await ` を前置すると、`await fetchUser(id).name` は `await (fetchUser(id).name)` と解釈され、**Promise オブジェクトに `.name` を引く** サイレントな実行時破壊になる(型検査は通る — Promise<User> と User の構造が偶然合うと `.name` が undefined として返る)。`emit_call` は `emit_expr` の `parent: Prec` を受け取り、`needs_await && parent > Prec::Unary` のとき `(await f(x)).field` に括弧する — 既存 `Expr::Unary`(`-x` / `!x`)と同一の needs_paren パターンを踏襲する。回帰防止テスト `uses_async_call_as_postfix_base_gets_parenthesized_await` は「対照として let 束縛・return 直下(postfix chain なし)は括弧なし」も同時に固定している。
+
+### Candidate: `ensures` を持つ async 関数は契約 IIFE 自体を async 化する(requires は await 前、ensures は resolve 後)
+**Why this matters for HANDOFF.md**: 契約(requires / ensures)は「同期・純粋」という強い invariant を保つが、async 関数の body の中では位置関係が重要 — requires は入口(await より前)、ensures は resolve 後(kei$result は同期述語で検証)という定型パターンを固定するための記録。M38 で契約 async の e2e 検証が入るときの前提。
+**Draft entry** (lift verbatim if approved):
+> `uses Async` かつ `ensures` を持つ関数の emit 形は:
+> ```ts
+> export async function f(...): Promise<T> {
+>   // requires チェック(同期・純粋、await より前で throw)
+>   const kei$result = await (async (): Promise<T> => {
+>     // body(内部の async 呼び出しは通常通り await)
+>   })();
+>   // ensures チェック(kei$result は resolve 済みなので同期述語で検証可能)
+>   if (!(<ensures 式>)) { throw new KeiContractViolation({...}); }
+>   return kei$result;
+> }
+> ```
+> 要点: (a) 契約 IIFE 自体を `async (): Promise<T> => {...}` にして外側で `await` する — こうすると `kei$result` の型は `T`(Promise が剥がれた後)になり、ensures 式は **同期・純粋な述語のまま** で書ける。(b) requires は IIFE の外側(入口)で評価 = await より前で throw する。(c) ensures は resolve 後の値を検証するので、契約式に `await` を持ち込む必要がない — 「契約は同期・純粋」の invariant を破らずに async 関数の contract を検証できる。この形は非 async 版(`ensures_wraps_body_and_captures_old`)と throw ロジック構造は同じで、変わるのは IIFE の宣言・呼び出しに `async`/`await` が付くだけ。M38 の契約 async e2e はこの emit 形の上で拡張する予定。
+
+### Candidate: `check_call_effects` から `is_direct_call` フラグを排除 — 「直接呼び出しかどうか」は呼び出し側で判定する
+**Why this matters for HANDOFF.md**: PR #118(list_ops)で確立し、PR #127 で Async にも徹底した「span 集合への挿入は呼び出し側で判定、共通ヘルパは effects 伝播だけを担う」という抽象境界の教訓。次に新エフェクトの emit 支援情報を追加する人が「共通関数にフラグを増やす」誘惑に負けないための記録。
+**Draft entry** (lift verbatim if approved):
+> `check_call_effects`(エフェクト伝播チェックの共通ヘルパ)には **呼び出し形態のフラグ(`is_direct_call` 等)を持たせない**。理由: 「その Call が直接呼び出しか(そのまま `f(...)` として emit される位置か)」は呼び出し側(`infer_call_name_arg` / `infer_call_field_method` 等)が一番よく知っている情報であり、共通ヘルパに持ち込むと呼び出し側ごとに条件がずれて把握しづらくなる(PR #118 で list_ops の位置判定で同じ問題を踏んだ教訓)。async_calls 集合への挿入は `check_call_effects` を呼んだ **直後の呼び出し側コード** で行う:
+> ```rust
+> self.check_call_effects(&callee.effects, name, span);
+> if callee.effects.iter().any(|e| e == "Async") {
+>     if let Some(calls) = self.async_calls.as_deref_mut() {
+>         calls.insert(span);
+>     }
+> }
+> ```
+> このパターンは Async 呼び出しの複数箇所(名前呼び出し・フィールドメソッド呼び出し等)で明示的に反復するが、各箇所は数行で読めるし、共通ヘルパのシグネチャを膨らませない。将来別のエフェクト(例: `Async.Retry`)で同種の span 集合が必要になっても、同じ「呼び出し側で判定 → span 集合に insert」パターンを繰り返す。
+

@@ -381,6 +381,91 @@ func broken(name: String) -> String {
 }
 ```
 
+### 非同期を書く(uses Async / v0.7)
+
+非同期呼び出しは「色」ではなく **エフェクト**。関数が `uses Async` を宣言すれば、生成 TS は
+`async function` + `Promise<T>` になり、呼び出し側の `await` はコンパイラが emit 時に自動挿入する。
+Kei ソースに `await` 演算子は登場しない。
+
+```kei
+module fx.async_basic
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greet(id: Int) -> String
+  uses Async // ← fetchName を呼ぶので、ここにも宣言が要る(推移伝播は他エフェクトと同じ)
+{
+  let name = fetchName(id) // 生成 TS: const name = await fetchName(id);
+  return name
+}
+```
+
+- `Async` は `IO` の傘下ではない独立エフェクト。`uses IO` は `Async` を包含しない(IO を宣言した
+  関数が黙って非同期になる互換性破壊を避けるため)。非同期呼び出しには必ず明示的な `uses Async` が要る。
+- 戻り型は Kei 側では常に `-> T`(`Promise<T>` は生成 TS 側だけの写像。Kei 型システムには
+  Promise が現れない)。
+
+#### extern async
+
+外部境界(`extern`)も同じモデル。`uses` に `Async` を足すだけ。
+
+```kei
+module fx.async_extern
+
+import infra.net as Net
+
+extern Net.fetch(url: String) -> String uses Network.Read, Async
+
+func loadPage(url: String) -> String
+  uses Network.Read, Async
+{
+  return Net.fetch(url) // 生成 TS: return await Net.fetch(url);
+}
+```
+
+**`extern query` に `Async` は付けられない。** query は同期・純粋観測子であることが定義そのもの
+(`spec/kei-spec-v0.2.md` §4.3 参照)なので、`uses`(Async 含む)を付けると `KEI-E3005` で拒否される:
+
+```text
+extern query Net.fetchCached(url: String) -> String uses Async   // ✗ KEI-E3005
+```
+
+#### 契約式は同期のまま
+
+`requires` / `ensures` から `uses Async` 関数(ローカル・extern 問わず)を呼ぶのは禁止
+(`KEI-E4001` + 境界越しなら `KEI-E3001` の二重診断)。契約は状態を**観測**するもので、非同期の
+完了を待つものではない。同期の `extern query` 観測子を使う。
+
+#### 制約: 高階関数への async 名前参照は未対応
+
+`xs.map(fetchName)` のように **async 関数を名前でコンビネータへ直接渡す**のは `KEI-E3008` で拒否される
+(コンビネータのラムダは純粋限定で、async 関数の結果を待たずに `Promise<T>[]` を生んでしまう
+soundness の穴になるため)。値を先に(1件ずつ順番に)取得してから、具体値だけをコンビネータへ渡す:
+
+```kei
+module fx.async_sequential
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greetTwo(idA: Int, idB: Int) -> List<String>
+  uses Async
+{
+  let nameA = fetchName(idA) // 1件目を先に取得(await 済みの具体値)
+  let nameB = fetchName(idB) // 2件目を順番に取得
+  return [nameA, nameB] // 具体値だけを渡すのでコンビネータ制約に触れない
+}
+```
+
+並列実行(`Promise.all` 相当)は v0.8 以降で検討される(v0.7 は sequential のみ)。
+
 ---
 
 ## 4. 契約

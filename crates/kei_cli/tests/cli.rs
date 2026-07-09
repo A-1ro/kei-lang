@@ -227,6 +227,14 @@ fn strict_extern_package_golden() {
     strict_extern_case("strict_extern_package");
 }
 
+/// M38: `extern package` 束縛経由の未宣言呼び出しが async かどうかは strict-extern の
+/// 挙動を変えない(未宣言なら opaque で、declared になって初めて Async かどうかが分かる)。
+/// 既存の strict-extern 経路がそのまま適用されることを固定する。
+#[test]
+fn strict_extern_async_golden() {
+    strict_extern_case("strict_extern_async");
+}
+
 // ---------------------------------------------------------------------------
 // golden: kei check --generative(M15 / #26)
 // ---------------------------------------------------------------------------
@@ -622,7 +630,7 @@ fn build_golden_tree() {
     assert_eq!(run.code, 0, "build failed: stderr={:?}", run.stderr);
     assert_eq!(run.stdout, "", "build must not write stdout");
     assert!(
-        run.stderr.contains("wrote 3 module(s)"),
+        run.stderr.contains("wrote 5 module(s)"),
         "build summary missing: stderr={:?}",
         run.stderr
     );

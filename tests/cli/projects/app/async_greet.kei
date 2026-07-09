@@ -1,0 +1,8 @@
+module app.async_greet
+
+func fetchName(id: Int) -> String
+  uses Async
+  ensures result == "user"
+{
+  return "nobody"
+}

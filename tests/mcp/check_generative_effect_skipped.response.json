@@ -1,0 +1,13 @@
+{
+  "id": 22,
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "text": "{\n  \"diagnostics\": [],\n  \"contracts\": [\n    {\n      \"func\": \"readBalance\",\n      \"kind\": \"ensures\",\n      \"expr\": \"result >= 0\",\n      \"verification\": \"runtime\",\n      \"span\": {\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"line\": 5,\n          \"col\": 11\n        },\n        \"end\": {\n          \"line\": 5,\n          \"col\": 22\n        }\n      }\n    }\n  ],\n  \"opaque_imports\": [],\n  \"generative\": {\n    \"requested\": true,\n    \"max_cases\": 10000,\n    \"skipped\": [\n      {\n        \"function\": \"readBalance\",\n        \"reason\": \"function has 'uses Database.Read' effect\"\n      }\n    ]\n  }\n}",
+        "type": "text"
+      }
+    ],
+    "isError": false
+  }
+}

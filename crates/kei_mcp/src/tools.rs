@@ -226,12 +226,20 @@ struct GenerativeInfo {
     skipped: Vec<SkippedInfo>,
 }
 
-/// 生成ケース総数の上限超過で無検査スキップされた関数(M34 レビュー対応)。JSON 上のキー名は
-/// `function`(kei_check 側の `SkippedFunction.func` ではない)— MCP 応答契約としての指定。
+/// 生成ケース総数の上限超過、またはエフェクト保有で無検査スキップされた関数(M34 / M38 レビュー
+/// 対応)。JSON 上のキー名は `function`(kei_check 側の `SkippedFunction.func` ではない)— MCP
+/// 応答契約としての指定。
 #[derive(serde::Serialize)]
 struct SkippedInfo {
     function: String,
-    required_cases: usize,
+    /// 上限超過が理由のスキップのときだけ載る。エフェクト保有などケース数と無関係な理由の
+    /// ときは JSON から省略する(「N/A のときは 0」という数値 sentinel を JSON スキーマに
+    /// 混ぜない — PR #112 の教訓)。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_cases: Option<usize>,
+    /// ケース数超過以外の理由(例: `uses Database.Read`)。無いときは JSON から省略する。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 /// 構文+意味検査。応答 JSON は `{ diagnostics, contracts, opaque_imports, generative }`。
@@ -278,6 +286,7 @@ pub fn run_check(source: &str, generative: bool) -> ToolOutcome {
             .map(|s| SkippedInfo {
                 function: s.func,
                 required_cases: s.required_cases,
+                reason: s.reason,
             })
             .collect()
     } else {

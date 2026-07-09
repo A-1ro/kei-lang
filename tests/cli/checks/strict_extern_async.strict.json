@@ -1,0 +1,27 @@
+{
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "KEI-E3004",
+      "message": "external call 'greeter.shoutAsync' has no 'extern' declaration; its return type and effects are unverified",
+      "span": {
+        "file": "tests/cli/checks/strict_extern_async.kei",
+        "start": {
+          "line": 8,
+          "col": 10
+        },
+        "end": {
+          "line": 8,
+          "col": 34
+        }
+      },
+      "fixes": [
+        {
+          "title": "Declare 'extern greeter.shoutAsync(...) -> ... uses ...' to bring this external call under verification",
+          "edits": []
+        }
+      ]
+    }
+  ],
+  "contracts": []
+}

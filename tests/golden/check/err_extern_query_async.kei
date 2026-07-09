@@ -1,0 +1,5 @@
+module check.extern_query_async
+
+import infra.net as Net
+
+extern query Net.fetchCached(url: String) -> String uses Async

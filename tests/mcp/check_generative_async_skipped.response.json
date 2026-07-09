@@ -1,0 +1,13 @@
+{
+  "id": 21,
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "text": "{\n  \"diagnostics\": [],\n  \"contracts\": [\n    {\n      \"func\": \"fetchName\",\n      \"kind\": \"ensures\",\n      \"expr\": \"result != \\\"\\\"\",\n      \"verification\": \"runtime\",\n      \"span\": {\n        \"file\": \"source.kei\",\n        \"start\": {\n          \"line\": 5,\n          \"col\": 11\n        },\n        \"end\": {\n          \"line\": 5,\n          \"col\": 23\n        }\n      }\n    }\n  ],\n  \"opaque_imports\": [],\n  \"generative\": {\n    \"requested\": true,\n    \"max_cases\": 10000,\n    \"skipped\": [\n      {\n        \"function\": \"fetchName\",\n        \"reason\": \"function has 'uses Async' effect\"\n      }\n    ]\n  }\n}",
+        "type": "text"
+      }
+    ],
+    "isError": false
+  }
+}

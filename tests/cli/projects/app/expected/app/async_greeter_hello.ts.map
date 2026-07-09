@@ -1,0 +1,12 @@
+{
+  "file": "async_greeter_hello.ts",
+  "mappings": ";;;AAEA;;;;;AAIA;EAGE",
+  "names": [],
+  "sources": [
+    "async_greeter_hello.kei"
+  ],
+  "sourcesContent": [
+    "module app.async_greeter_hello\n\nextern package \"async-greeter\" as asyncGreeter\n\nextern asyncGreeter.greetAsync(name: String) -> String uses Async\n\nfunc helloAsync(name: String) -> String\n  uses Async\n{\n  return asyncGreeter.greetAsync(name)\n}\n"
+  ],
+  "version": 3
+}
