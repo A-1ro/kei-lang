@@ -438,3 +438,21 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged
 
 (no actionable patterns — hook 入力 JSON の `tool_input.command` は今回本物の `gh pr merge 127 --squash --delete-branch --admin` を含んでおり、意図通りの発火。ただし PR #127 は `--admin` 即マージで **inline review 0 / issue comment 0 / review summary 0**(`reviews:[]`, `reviewDecision:""` を確認)、外部由来の教訓ゼロ。M37 は spec 側で計画済みのマイルストーンを実装しただけで、review 摩擦が生じる前にマージされた。次に人間 / codex bot が触った PR で改めて patterns を拾う。)
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged (hook re-run #2: M38 実装中の generative check プローブ)
+
+(no actionable patterns — hook がまた `gh pr merge` 以外のコマンド(今回は `cargo run -q -p kei_cli --bin kei -- check ... --generative --json`、M38 タスク4向けに `uses Async` + `ensures` 関数の generative 出力ベースラインを確認するプローブ)で PostToolUse fire した。現在のブランチは `feat/m38-async-boundaries` で未マージ、直近マージ PR は依然 #127 のまま、review 活動を再確認しても inline 0 / issue comment 0 / review 0 で増分ゼロ。新規追記はせず、以下のメタ観察のみ残す。)
+
+メタ観察(hook 発火条件そのものの問題、レビュー由来ではないため正式教訓化はしない — PR #126 のときに 3 回、PR #127 でも 2 回目の再発):
+- **PostToolUse hook が `gh pr merge` 以外の Bash コマンドで繰り返し fire している事象が、PR をまたいで継続している**。:436 で「設定改修 PR が別途上がってからここは削除してよい」と記録済みだが、その改修は M38 着手時点でもまだ入っていない。次に手が空いたタイミングで `.claude/settings.json` の PostToolUse matcher を `gh pr merge` 系コマンドに限定するか、`post-merge-lessons.prompt.md` 冒頭に `tool_input.command` の早期 grep exit を追加することを推奨する(この2回目の再発で優先度を上げてよい)。
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged (hook re-run #3: M38 async-boundaries `.kei` scratchpad `check`/`fmt --check` 検証)
+
+(no actionable patterns — hook がまた `gh pr merge` 以外の Bash コマンド(今回は `feat/m38-async-boundaries` ブランチ上で `basic.kei` / `extern.kei` / `sequential.kei` の 3 scratchpad ファイルに対する `kei check --json` と `kei fmt --check` の実行 — check は 3 件とも diagnostics 0、fmt --check は 3 件ともコメント前空白の正規化差分のみで exit=1)で PostToolUse fire した。現在のブランチは `feat/m38-async-boundaries` で未マージ、直近マージ PR は依然 #127 のまま、review 活動を再確認しても inline 0 / issue comment 0 / review 0 で増分ゼロ。新規追記はせず、PR #126/#127 で繰り返し記録済みのメタ観察(hook matcher が `gh pr merge` 以外の Bash コマンドを拾い続けている、3 回目の PR #127 再発)を更新するに留める。)
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged (hook re-run #4: M38 コミット + `cargo check --workspace` 確認)
+
+(no actionable patterns — hook がまた `gh pr merge` 以外の Bash コマンド(今回は `git log --oneline main..HEAD; cargo check --workspace --quiet 2>&1 | tail -3; echo CHECK=$?` — `feat/m38-async-boundaries` ブランチで M38 の 2 コミット `bc49dce feat: M38 async npm パッケージ e2e — extern async 境界の実疎通確認` / `0b890f4 feat: M38 async 境界統合 — extern async + 契約 e2e + pbt / MCP / SKILL` を確認 + `cargo check --workspace` が CHECK=0 で通ったことを確認)で PostToolUse fire した。現在のブランチは `feat/m38-async-boundaries` で未マージ、直近マージ PR は依然 #127 のまま、`gh pr list --state open` も空で開いた PR なし、`gh api pulls/127/comments` / `issues/127/comments` / `pulls/127/reviews` を再確認しても inline 0 / issue comment 0 / review 0 で増分ゼロ。新規のレビュー活動なし。
+
+メタ観察(hook 発火条件そのものの問題、レビュー由来ではないため正式教訓化はしない — PR #127 だけで 4 回目の再発 + PR #126 の 3 回と併せて累計 7 回):
+- **PostToolUse hook の誤発火が PR #127 でも収まらず、M38 の内部検証コマンドすべてを拾って子セッションを起動している**。:436 の初回記録から数えて 7 回目の同種メタ観察になっており、`.claude/settings.json` の PostToolUse matcher を `Bash(gh pr merge*)` に絞るか、`post-merge-lessons.prompt.md` 冒頭で `tool_input.command` に `gh pr merge` を含まない場合の早期 exit を追加する改修の優先度は**明確に上がった**。この改修自体が M38 の作業スコープではないため、M38 マージ後の別 PR で切り出すのが妥当。それまでの間、本ファイルに増え続ける no-actionable エントリは "hook が生きている" 証跡以上の情報を持たないので、次に本エントリを見る Opus は改修 PR を提案してよい。)

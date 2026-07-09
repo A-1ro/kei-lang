@@ -917,3 +917,101 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 > ```
 > このパターンは Async 呼び出しの複数箇所(名前呼び出し・フィールドメソッド呼び出し等)で明示的に反復するが、各箇所は数行で読めるし、共通ヘルパのシグネチャを膨らませない。将来別のエフェクト(例: `Async.Retry`)で同種の span 集合が必要になっても、同じ「呼び出し側で判定 → span 集合に insert」パターンを繰り返す。
 
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged(hook 再発火・重複)
+
+(no new design-decision candidates for this PR — already covered above)
+
+> **Note**: 本 hook 発火は `gh pr merge` ではなく、PR #127 マージ **後** の状態確認
+> `gh pr view 127 --json state,mergedAt ...; git checkout main -q; git pull --rebase ...`
+> という main 同期 Bash コマンドの PostToolUse でトリガーされた
+> (`tool_input.command` に `gh pr merge` を含まないため、prompt のフォールバックで
+> 最新 merged PR = #127 を再選択)。PR #127(M37 uses Async エフェクトと async 関数コア)の
+> 設計判断は既に直前セクション 6 件で網羅済み(Async の IO 非包含 / OpSpans 経由の
+> checker 権威化 / KEI-E3008 combinator 拒否 / await の needs_paren / 契約 IIFE の
+> async 化 / `is_direct_call` フラグ排除の抽象境界)。**新規に追加すべき候補はない**。
+>
+> tool_response からは:
+> - `gh pr view 127` が `MERGED 2026-07-09T13:07:06Z` を返し、直前の PR #127 セクションの
+>   `merged` 日付と一致していることを確認できる(重複追記していないという証跡)。
+> - `git pull --rebase` 前に `docs/dev-notes/handoff-candidates.md` と `lessons-from-reviews.md`
+>   がワークツリーで変更されていたため、`git add docs/dev-notes/ && git commit ... && git pull --rebase`
+>   というリカバリ経路が回った(コミット `de6c472 chore(dev-notes): record post-merge hook output for PR #127`)。
+>   これは post-merge-handoff hook 自身の追記結果を親セッションが手動でコミットしたもので、
+>   本 hook prompt の「Do NOT commit, push, or stage anything」規則には抵触しない
+>   (**hook 内**での禁止であって、**親セッションのユーザ操作**は自由という切り分け)。
+>
+> メタ観察(前 PR #126 の再々掲): PR #127 でも `gh pr merge` 以外の Bash PostToolUse で
+> hook が発火する現象が継続している。ただし今回は「マージ直後の main 同期」という
+> **PR #127 に強く関連する文脈** での発火であり、無関係な cargo/kei 実装コマンドとは
+> 質が異なる。それでも `.claude/settings.json` の matcher が `gh pr merge` のみを
+> キャプチャするよう絞る運用改善は依然として未実施のまま。hook 運用改善タスクとして
+> 明示的に切り出す必要がある事実を再々度記録する(handoff-candidates.md 側で
+> 対処するものではないため、hook 側の運用改善は本ファイルの候補には昇格させない)。
+
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged(hook 三度目の誤発火)
+
+(no new design-decision candidates for this PR — already covered above, twice)
+
+> **Note**: 本 hook 発火も `gh pr merge` ではなく、`async_greet.kei` フィクスチャ(uses Async +
+> ensures 違反)の `cargo run ... check --json` / `... emit` 検証コマンドの PostToolUse で
+> トリガーされた(`tool_input.command` に `gh pr merge` を含まないため、prompt のフォールバックで
+> 最新 merged PR = #127 を三度目の再選択)。`gh pr list --state merged --limit 3` を確認しても
+> #127 より新しい merged PR は存在せず、設計判断は直前 2 セクションで既に網羅済みのため
+> 新規追加なし。
+>
+> メタ観察: `.claude/settings.json` の post-merge-handoff hook matcher が `gh pr merge` 以外の
+> Bash 呼び出し(今回は無関係な `cargo run` 検証コマンド)でも発火する問題が三度目も再現。
+> 前回・前々回のセクションで記録済みの「matcher を `gh pr merge` に絞る運用改善が未実施」
+> という事実を再度確認しただけであり、これ以上同じ指摘を繰り返し追記する実益は薄い。
+> hook 側の運用改善タスクとして早めに切り出すことを推奨する(本ファイルの候補には
+> 昇格させない)。
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged(hook 四度目の誤発火)
+
+(no new design-decision candidates for this PR — already covered above, three times)
+
+> **Note**: 本 hook 発火も `gh pr merge` ではなく、SKILL.md 用の async サンプルドラフト
+> (`skill_async_draft.kei`: `uses Async` な `fetchName` / `greet` / `greetTwo` を含む)を
+> `cargo run ... kei check --json` と `kei fmt --check` で検証する Bash コマンドの
+> PostToolUse でトリガーされた(`tool_input.command` に `gh pr merge` を含まないため、
+> prompt のフォールバックで最新 merged PR = #127 を四度目の再選択)。現在のブランチは
+> `feat/m38-async-boundaries` で、`gh pr list --state merged --limit 3` を確認しても
+> #127 より新しい merged PR は存在せず、設計判断は直前 3 セクションで既に網羅済みのため
+> 新規追加なし。
+>
+> メタ観察: `.claude/settings.json` の post-merge-handoff hook matcher が `gh pr merge` 以外の
+> Bash 呼び出し(今回は SKILL.md ドラフト例の検証という、M37/M38 の実装作業そのものではなく
+> ドキュメント作成中の副産物)でも発火する問題が四度目も再現。過去3回のセクションで
+> 記録済みの「matcher を `gh pr merge` に絞る運用改善が未実施」という事実を再度確認した
+> だけであり、これ以上同じ指摘を繰り返し追記する実益はほぼゼロに近い。hook 側の運用改善
+> タスクとして早急に切り出すことを強く推奨する(本ファイルの候補には昇格させない)。
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged(hook 五度目の誤発火)
+
+(no new design-decision candidates for this PR — already covered above, four times)
+
+> **Note**: 本 hook 発火も `gh pr merge` ではなく、`fx.async_basic` / `fx.async_extern` /
+> `fx.async_sequential` という skill 用 async サンプル3種を `kei check --json` /
+> `kei fmt --check` で検証する Bash コマンドの PostToolUse でトリガーされた
+> (`tool_input.command` に `gh pr merge` を含まないため、prompt のフォールバックで
+> 最新 merged PR = #127 を五度目の再選択)。`gh pr list --state merged --limit 3` でも
+> #127 より新しい merged PR は存在せず、設計判断は直前 4 セクションで既に網羅済みのため
+> 新規追加なし。同一 PostToolUse hook 発火に対応した実装 subagent 自身のトランスクリプトを
+> 確認したが、`pbt.rs` / `kei_cli/tests/cli.rs` / `kei_emit/tests/emit.rs` / `kei_mcp/src/tools.rs` /
+> `SKILL.md` / spec / golden fixture の実装編集のみで、`gh pr` 系コマンドや
+> `handoff-candidates.md` への追記・git add/commit/push は一切行っていないことも確認済み
+> (=hook 自身が誤発火文脈で独立に本ファイルへ追記している)。
+>
+> メタ観察: matcher 修正が5回連続で未実施のまま継続している。今後は同一事実の再確認を
+> 都度長文化せず、本ノートのように短く「五度目」「六度目」の見出しと発火元コマンドの
+> 一行要約のみに留める運用が妥当(本ファイルの候補には昇格させない)。
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged(hook 六度目の誤発火)
+
+(no new design-decision candidates for this PR — already covered above, five times)
+
+> 発火元: `git log --oneline main..HEAD; cargo check --workspace --quiet` の PostToolUse
+> (M38 async 境界統合の commit 確認)。`gh pr merge` 非該当のため #127 を六度目に再選択。
+> 現ブランチ `feat/m38-async-boundaries` の M38 コミット(`bc49dce`, `0b890f4`)は未マージ。
+> matcher 未修正が 6 回連続。設計判断は既出セクションで網羅済み。
