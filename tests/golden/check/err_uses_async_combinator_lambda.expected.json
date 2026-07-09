@@ -11,16 +11,16 @@
         "title": "Or compute the values first (e.g. await each call) outside the combinator, then pass the already-computed values in"
       }
     ],
-    "message": "call to 'fetchName' (uses Async) is not allowed inside a lambda; combinator lambdas must be pure",
+    "message": "call to 'hasAccess' (uses Async) is not allowed inside a lambda; combinator lambdas must be pure",
     "severity": "error",
     "span": {
       "end": {
-        "col": 37,
+        "col": 40,
         "line": 10
       },
-      "file": "tests/golden/check/err_uses_async_in_lambda.kei",
+      "file": "tests/golden/check/err_uses_async_combinator_lambda.kei",
       "start": {
-        "col": 24,
+        "col": 27,
         "line": 10
       }
     }
