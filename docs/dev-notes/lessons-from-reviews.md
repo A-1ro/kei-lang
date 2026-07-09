@@ -392,3 +392,49 @@ CLAUDE.md に落として、ここからは削除してよい。
 ## PR #125: chore: bump version to 0.6.0 — 2026-07-07 merged (hook re-run: post-release `gh release edit` trigger)
 
 (no actionable patterns — 再確認: 0 inline comments / 0 discussion comments / 0 reviews。直近マージ PR は #125 で、上記の初回記録と一致)
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged
+
+- **Pattern**: Source of Truth 欠番の**再発**(PR #102 教訓が効かなかった)
+  **Source**: A-1ro (owner) — CLAUDE.md:20 (inline, CONFIRMED/kei-invariants)
+  **Lesson**: PR #102 で「Source of Truth 一覧の欠番を残さない」教訓を記録したにもかかわらず、本 PR でも v0.6 行編集 + v0.7 行追加時に既存の v0.4 参照抜けを見逃した(v0.3 → v0.5 の欠番が残ったまま v0.7 を追加)。**CLAUDE.md の Source of Truth 一覧を編集するときは、編集する行だけでなく一覧全体を目視し、v0.1〜現行までのロードマップファイルすべて(`docs/kei-roadmap-v*.md` の `ls` 結果と一致するか)を機械的に突き合わせる**。差分レビューでは「追加した行が正しい」ことしか見えず、「既存で抜けている行」を検出できないため、"追加時に全体スキャン" をチェックリスト化する。この教訓は 2 回目の再発なので、SKILL.md か CLAUDE.md 側の恒久ガード(例: pre-commit hook で `ls docs/kei-roadmap-v*.md` と CLAUDE.md 記載を diff)への昇格を検討すべき段階。
+- **Pattern**: 既存教訓の再発時は「昇格候補」フラグを立てる
+  **Source**: general discussion(inline コメント内メタ観察)
+  **Lesson**: `lessons-from-reviews.md` にすでに記録された教訓が再発した場合、単に新エントリを追加するだけでなく **元の教訓を CLAUDE.md / SKILL.md / spec / hook / lint に昇格させる時期が来た** ことを明示する。この蓄積は「卒業した教訓は SKILL.md / spec / CLAUDE.md に落として、ここからは削除してよい」と冒頭に書かれているが、再発が発生したということは "卒業タイミングを逸した" ということ。Opus は次セッションで PR #102 と #126 の重複を検知したら、CLAUDE.md 一覧編集の恒久ガード化(ls diff hook など)を優先課題として提案する。
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged (hook re-run: M37 の 3 コマンド検証)
+
+(no actionable patterns — hook fired on a non-merge command (M37 の `cargo fmt/clippy/test` 検証、tool_response 上は FMT=0/CLIPPY=0/TEST=0 と表示)。直近マージ PR は #126 のままで、review 活動(1 inline / 0 discussion / 1 review)にも増分なし — 既存 2 教訓は上に記録済み。ただし今回の tool_response には **`--quiet` + `tail` パイプにより clippy の `error: could not compile kei_syntax (lib test)` が出ているのに `CLIPPY=0` が印字される** メタ観察あり — パイプの exit code は最後のコマンド(`tail`)のもので `$?` は clippy 本来の exit code を捕らえない。今後の検証コマンドでは `set -o pipefail` か `${PIPESTATUS[0]}` を使うか、`tail` を通さずに exit code を先に保存する必要がある(この観察はレビュー由来ではないため教訓としては未追加、次 PR で本現象がレビュー指摘に発展したら正式教訓化する))
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged (hook re-run: M37 match+async バグ再現検証)
+
+(no actionable patterns — hook fired on a non-merge command (`pr-127` チェックアウト → `cargo run -p kei_emit --example transpile` で match 式 + `uses Async` 呼び出しの emit 出力を確認、tool_response には `return (() => { ... return await fetchName(v); ... })()` — **async 化されていない IIFE 内で `await` を使う broken TS** が生成される様子が記録されている)。直近マージ PR は #126 のままで、review 活動(1 inline / 0 discussion / 1 review)にも増分なし — 既存の 2 教訓(v0.4 欠番再発 + 教訓昇格フラグ)は上に記録済み。
+
+メタ観察(レビュー由来ではないため教訓としては未追加、pr-127 が正式レビュー付きでマージされたときに教訓化する):
+- **match アーム内で `uses Async` 関数を呼ぶと、emit が `(() => { ... await fn() ... })()`(同期 IIFE 内 await)を出す** — TypeScript として構文エラーになる。`match` を IIFE に脱糖する層が、アーム式が `await` を含む可能性を伝播できていない。次 PR (#127) が この修正なら、pull_request review コメントを教訓化する際に「脱糖層は呼び出し式の effect(uses Async → await 挿入)を捨てず、生成する IIFE の `async` フラグへ伝播する」を pattern として追加する。
+
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged (hook re-run: async name-ref combinator 検証)
+
+(no actionable patterns — hook fired on a non-merge command (`kei check` を async_map.kei に対して実行、`fetchName uses Async` を `ids.map(fetchName)` に名前参照として渡すコードの diagnostics を確認、tool_response は `diagnostics: []` + `fetchName` の runtime `requires id >= 0` 契約のみ)。直近マージ PR は #126 のままで review 活動(1 inline / 0 discussion / 1 review)にも増分なし — 既存 2 教訓(v0.4 欠番再発 + 教訓昇格フラグ)は上に記録済み。
+
+メタ観察(レビュー由来ではないため教訓としては未追加、後続の pr-127+ が正式レビュー付きでマージされたときに教訓化する):
+- **`uses Async` 関数を高階関数(`.map` 等)に**name 参照**で渡しても check は通る**(diagnostics 0)。しかし M37 段階の emit がこの経路で `await` を挿入する脱糖を持っているかは check 出力からは分からない。名前参照経由の async 関数値は、呼び出しサイト(`ids.map(fn)`)で `fn` の effect を型/emit まで伝播しないと、ランタイムで `Promise<String>` の配列が `List<String>` として観測される。次 PR で「関数値として渡された `uses Async` の効果 伝播」レビュー指摘が出たら、pattern として「関数値経由の effect も呼び出しサイトへ伝播する(name-ref combinator は同期関数と同じ扱いにしない)」を追加する。
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged (hook re-run: scratchpad 上の match+async 最小再現ファイル配置)
+
+(no actionable patterns — hook fired on a non-merge command (`mkdir -p .../scratchpad && cat > async_match.kei <<EOF ... EOF && ls -la` すなわち scratchpad に `match Some(id) { Some(v) => fetchName(v), None => "default" }` を持つ `uses Async` 関数の最小再現 `.kei` を配置しただけ)。直近マージ PR は #126 のままで review 活動(1 inline / 0 discussion / 1 review)にも増分なし — 既存 4 セクションの教訓と重複するため新規追記なし。
+
+メタ観察(レビュー由来ではないため教訓としては未追加、次 PR で本現象がレビュー指摘に発展したときに正式教訓化する):
+- **同一の M37 バグ(match アーム内 `uses Async` 呼び出しで broken IIFE が出る)を再現する `.kei` が scratchpad 内に世代ごと作られている**(`async_match.kei` を含め、過去 hook の `pr-127` チェックアウト履歴でも類似の再現ファイルが観測されている)。scratchpad 上の反復再現は "hook が実装フェーズを回している" 兆候であり、同じバグの最小再現を毎回作り直すより、`crates/*/tests/regression/M37_match_async.rs` か `tests/golden/regression/M37_match_async.kei.expected.ts` のような**永続化された regression fixture** に昇格させ、`cargo test` が自動で拾えるようにするほうが再発防止に効く。次の pr-127 系レビューで「同じバグの ad-hoc 再現が繰り返されている」と指摘されたら、pattern として「バグ最小再現は scratchpad ではなく tests/regression/ に置き、`cargo test` の網に載せる」を追加する。
+
+## PR #126: docs: v0.7 ロードマップ — async(uses Async エフェクト) — 2026-07-09 merged (hook re-run #3: `cargo check --workspace --all-targets --quiet` の PostToolUse で発火)
+
+(no actionable patterns — hook がまた `gh pr merge` 以外のコマンド(今回は `cargo check --workspace --all-targets --quiet 2>&1 | tail -10; echo CHECK_EXIT=$?`、workspace 全体の compile 確認)で PostToolUse fire した。直近マージ PR は依然 #126、review 活動は 1 inline / 0 discussion / 1 review のまま増分ゼロ。inline は A-1ro (owner) の `CLAUDE.md:20` に対する CONFIRMED/kei-invariants 指摘(v0.4 ロードマップが Source of Truth 一覧から欠番)で、これは本ファイル :151-153 の PR #102 教訓「Source of Truth 一覧の欠番を残さない」の**そのままの再発**(reviewer 自身が :153 を参照している)。新規追記はせず、代わりに以下のメタ観察を残す。)
+
+メタ観察(hook 発火条件そのものの問題、レビュー由来ではないため正式教訓化はしない):
+- **PostToolUse hook が `gh pr merge` 以外のコマンドで繰り返し fire している**(PR #126 に対して確認できるだけで 3 回目)。`.claude/hooks/post-merge-lessons.prompt.md` の意図は「`gh pr merge` 完了直後に一度だけ走る」だが、実際の matcher が Bash tool 全般または広めの pattern を拾っており、`mkdir`/`cargo check` のような無関係コマンドでも子セッションが起動している。子セッション自体は「直近マージ PR を探して no-op で追記」する保険設計で機能しているが、Sonnet トークンとこのファイルの行数を消費し続けるので、`.claude/settings.json` の hook matcher を `"Bash(gh pr merge*)"` などに絞るか、prompt 先頭で `tool_input.command` が `gh pr merge` を含まないなら即 exit する早期リターンを入れるのが望ましい。設定改修 PR が別途上がってからここは削除してよい。
+
+## PR #127: feat: M37 uses Async エフェクトと async 関数コア — 2026-07-09 merged
+
+(no actionable patterns — hook 入力 JSON の `tool_input.command` は今回本物の `gh pr merge 127 --squash --delete-branch --admin` を含んでおり、意図通りの発火。ただし PR #127 は `--admin` 即マージで **inline review 0 / issue comment 0 / review summary 0**(`reviews:[]`, `reviewDecision:""` を確認)、外部由来の教訓ゼロ。M37 は spec 側で計画済みのマイルストーンを実装しただけで、review 摩擦が生じる前にマージされた。次に人間 / codex bot が触った PR で改めて patterns を拾う。)
