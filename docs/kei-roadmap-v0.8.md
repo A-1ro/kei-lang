@@ -54,6 +54,11 @@ Cloudflare Workers 実デプロイ(wrangler)は v0.9 の領分。
    - `@kei/hono` は Hono アダプタ(HttpRequest/HttpResponse type + Hono Context 変換 helper +
      parseAs helper + Kei ハンドラを Hono に接続する wrapper)。
    - 責務分離。**npm 公開はしない**(v1.0 以降で検討)。e2e は M36 と同じ `file:` 依存で扱う。
+   - **v0.9 リスク(明記)**: file: 依存のみで v0.9 の wrangler(esbuild ベース)bundling が
+     通ることは技術的に妥当だが未検証。実 Workers デプロイ時に file: 参照解決の破綻が起きた場合、
+     v0.9 で「npm 公開の前倒し」あるいは「Workers テンプレート内への直接コピー」への切替を
+     検討する。v0.8 では **file: のみでスコープを閉じる**が、v0.9 冒頭でこの経路の疎通を最初に
+     確認すること(既に v0.9 の /goal 契約書に反映すべき事項)。
 
 4. **Cloudflare Workers 特有の型は Kei に露出させない。**
    - `env` / `KVNamespace` / `D1Database` / `ExecutionContext` などの Workers bindings 型は
@@ -76,7 +81,7 @@ v0.8 は Milestone 1 個。言語機能変更なし、成果物はすべて runt
 
 | M | テーマ | 優先度 | 状態 | 主な成果物 |
 |---|---|---|---|---|
-| **M39** | @kei/hono アダプタ + HTTP/JSON 境界 + e2e + SKILL 節 | high 🤝 | ⬜ 未着手 | `tests/cli/packages/kei-hono/` / tests/cli/projects/app/ / spec / skill |
+| **M39** | @kei/hono アダプタ + HTTP/JSON 境界 + e2e + SKILL 節 | high 🤝 | ⬜ 未着手 | `tests/cli/packages/kei-hono/` / tests/cli/projects/app/ / skill(spec 更新なし) |
 
 ## M39: @kei/hono アダプタ + HTTP 境界(🤝)
 
@@ -92,6 +97,19 @@ v0.8 は Milestone 1 個。言語機能変更なし、成果物はすべて runt
     独立 `Headers` record を検討。
 - **JSON parse extern の型パラメータ問題**: 上記設計原則 2 のとおり、**record 型ごとの専用 extern
   を書く**(Kei のジェネリック無しへの正しい対応)。SKILL.md に定型を示す。
+- **parseXxxRequest extern の位置づけ(重要)**: `@kei/hono` は汎用アダプタとして
+  `parseAs<T>(text, shapeCheck) -> Option<T>`(TS 側の generic ヘルパー)だけを提供する。
+  record 固有の `parseUserRequest` などは **アプリ側のローカル TS wrapper**(例:
+  `tests/cli/projects/app/app-extern/parse.ts`)で shapeCheck を定義し、
+  Kei 側の `extern kh.parseUserRequest` を **アプリローカル npm パッケージ経由**(または既存の
+  `@kei/hono` の再エクスポート機構経由)で解決する。汎用アダプタにアプリ固有関数を混ぜない。
+  実装時に「アプリローカル file: パッケージ」か「@kei/hono の module 拡張」のどちらを採るかは
+  M39 着手時に確定して報告(🤝 事前合意の一部)。
+- **文字列 stdlib との整合**: v0.5 M30(文字列 stdlib 段階1)のスコープ外に「slice / indexOf /
+  split / trim 等の本格 String API は v0.8 の HTTP 境界設計と合わせて段階2で」と予告があった。
+  本 v0.8 の設計では **パース処理をアダプタ層(TS 側 shapeCheck)に押し出したため、Kei 側で
+  文字列を分解する必要がなく、String API の追加は不要**と判断する。v0.9 以降で実需が出た時点で
+  独立 Milestone として扱う。
 - **e2e 構成**: `tests/cli/packages/kei-hono/`(file: 依存)+ Kei ハンドラを Kei で書き、TS 側で
   Hono app に登録して `app.request(...)` で in-memory テスト。実 fetch/wrangler は v0.9。
 
