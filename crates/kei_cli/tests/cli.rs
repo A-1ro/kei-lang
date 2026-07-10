@@ -822,6 +822,15 @@ fn setup_npm_project(rel_project: &str) -> (PathBuf, PathBuf) {
         "tests/cli/packages/kei-hono",
         "tests/cli/packages/kei-hono/dist/index.js",
     );
+    // parse-app が @kei/hono を import するため、parse-app 自身の node_modules にも
+    // @kei/hono の symlink が必要(Node module resolution は requester から親を辿るため
+    // parse-app/node_modules/@kei/hono が無いと ERR_MODULE_NOT_FOUND になる — CI で顕在化)。
+    // build は no-op スクリプト(素の .js のみ)。
+    ensure_npm_dist(
+        &root,
+        "tests/cli/packages/parse-app",
+        "tests/cli/packages/parse-app/node_modules/@kei/hono/package.json",
+    );
     let project = root.join(rel_project);
     let dist = project.join("dist");
     if dist.exists() {
