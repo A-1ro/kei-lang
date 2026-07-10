@@ -486,3 +486,41 @@ CLAUDE.md に落として、ここからは削除してよい。
 メタ観察(:436 以降通算 11 回目 の同種メタ観察 — レビュー由来ではないため正式教訓化はしない):
 - **hook 誤発火は v0.7.0 リリース工程の release-notes 編集 + ドッグフード scratchpad 準備という "PR とは無関係な release polish 作業" までも拾って子セッションを起動している**。:458 / :465 / :472 / :479 で 4 回連続で予告済みの hook matcher 改修 PR は、v0.7.0 リリースが完了した今、v0.8 の HTTP/JSON 境界 + Hono アダプタ作業に入る前に最初に切り出すのが妥当な順序として改めて浮上する。改修候補は変わらず (a) `.claude/settings.json` の PostToolUse matcher を `Bash(gh pr merge*)` に限定、(b) `post-merge-lessons.prompt.md` 冒頭で `tool_input.command` が `gh pr merge` を含まない場合の早期 exit、(c) `tool_input.command` が `gh pr merge` を含む場合でも直近マージ PR タイトルが `^chore: bump version to` にマッチしたら Ignore で終了 の 3 段構え。
 - **今回の tool_input.command には `gh release edit v0.7.0 --title "v0.7.0 — async(v1.0 blocker 2/3 解消)"` の release-notes 本文が丸ごと入っている** — release-notes は v0.7 の設計判断(async は uses モデル統合 / `await` を Kei ソースに露出させない / 契約は同期のまま / 高階関数 async 名前参照は KEI-E3008 で拒否 / `SkippedInfo.required_cases` の Option 化)を要約しており、これはレビュー指摘ではなく self-authored なので教訓化はしないが、次に触った Opus が v0.8 実装の「HTTP/JSON 境界 + Hono アダプタ」で参照すべき invariants の圧縮版として `SKILL.md` か spec 側のどこかに落とすと便利。release-notes ↔ SKILL.md / spec の同期は現状マニュアルで、リリースごとにドリフトしやすい。
+
+## PR #131: docs(v0.8): 追認 PR — 再設計コミットの追認 + レビュー指摘 4 件反映 — 2026-07-10 merged
+
+- **Pattern**: cross-doc consistency for scope-out deferrals
+  **Source**: A-1ro (self-review, inline) — `docs/kei-roadmap-v0.8.md:112`
+  **Lesson**: v0.X ロードマップで「本格 Y は v0.X+1 で」と予告した項目を後続バージョンで見送るときは、v0.X 側の元記述にも `→ v0.X+1 で見送り。v0.Y+ で実需確定時に扱う(docs/kei-roadmap-v0.Y.md 参照)` を追記して cross-doc 一貫性を担保する(あるいは v0.Y ロードマップ着手時に両方から参照する形にまとめる) — 予告した側を据え置いたまま「見送り」だけを新版に書くと、元ロードマップを起点に読む読者が古い期待を持ち続ける。
+- **Pattern**: branch protection bypass に対する追認 PR 慣行
+  **Source**: PR body(general discussion)
+  **Lesson**: `docs: vX.Y ロードマップ` 系の変更を PR 経由の慣行から逸脱して main に直接 push してしまった場合(branch protection Bypass の警告を見落とすなどで発生)、事後に「追認 PR」を切って独立レビューを通すこと。追認 PR 本文には (a) 直接 push した commit SHA、(b) 慣行逸脱の経緯、(c) 独立再レビューで拾った指摘を反映した追加修正、を明記する — 単にログを直すだけでなく、以後の逸脱抑止のためのプロセス痕跡として残す。
+- **Pattern**: 汎用アダプタと app-local wrapper の分離
+  **Source**: PR body(general discussion) — 追加した修正 (1)
+  **Lesson**: `@kei/hono` のような汎用アダプタパッケージには **アプリ固有の関数を混ぜない**。`parseXxxRequest` のようなアプリごとに形が変わる extern はアプリローカルの TS wrapper 側に置き、汎用アダプタは境界プロトコル(HTTP / JSON / effect 契約)だけを提供する境界を M39 事前合意事項として固定しておく。
+- **Pattern**: file: 依存の bundling 到達性を事前合意事項化
+  **Source**: PR body(general discussion) — 追加した修正 (4)
+  **Lesson**: monorepo 内 `file:` プロトコル依存で v0.9 wrangler bundling(esbuild / Miniflare)まで届くかは将来リスクとして事前合意事項に **明記**する。実装時に「動かない」で詰まる前に、ロードマップ段階でリスクの所在(バンドラの `file:` 解決、TS declaration 生成、Cloudflare Workers デプロイ経路)を書き出しておく。
+- **Pattern**: ロードマップ Milestone 表の "主な成果物" 粒度
+  **Source**: PR body(general discussion) — 追加した修正 (2)
+  **Lesson**: Milestone 表の "主な成果物" 列には **`spec` のような汎用ラベルを列挙しない** — spec 更新はほぼ全 Milestone で発生する共通作業なので、成果物列に書くとノイズが増えて Milestone 固有の差分が読み取りにくくなる。実装バイナリ / SKILL 更新 / MCP golden / 契約 e2e など、その Milestone に固有の deliverable のみを列挙する。
+
+メタ観察(:436 以降通算 12 回目 の同種メタ観察の続報 — 今回は真正な post-merge 発火):
+- **今回は :458 / :465 / :472 / :479 / :486 で 5 回連続予告してきた matcher 誤発火とは異なり、`gh pr merge 131 --squash --delete-branch --admin` を含む正真正銘の post-merge タイミングで fire した**(tool_input.command に `gh pr checks 131 --watch` + `gh pr merge 131 --squash --delete-branch --admin` + `git checkout main` + `git pull --rebase` + `git log --oneline -1` の複合 Bash)。かつ今回は **hook prompt の Ignore 対象(version bump / dependency PR / 形式的 noise)ではなく、実際に inline review 1 件 + 追認 PR body の 4 件の追加修正記述という actionable な材料があった** ため、:436 以降で初めて `(no actionable patterns)` を書かずに済んだエントリになる。matcher 改修 PR は依然として未着手だが、少なくとも「真正な発火時に確実に材料を拾えている」ことは今回のデータで確認できた。
+- 一方で PR #131 は追認 PR という性質上、レビュアーが self(A-1ro)であり codex bot の絡みはなかった。次に codex bot が触った PR がマージされたときに、bot 由来の教訓と self-review 由来の教訓の比率を再確認する予定。
+
+## PR #131: docs(v0.8): 追認 PR — 再設計コミットの追認 + レビュー指摘 4 件反映 — 2026-07-10 merged (hook re-run: M39 直接 push 後の crates/src=0 + spec/=0 + cargo check 検証)
+
+(no actionable patterns — hook がまた `gh pr merge` を含まない Bash コマンド、今回は `git show HEAD --stat | grep -E "^ crates/.*/src/" | wc -l; git show HEAD --stat | grep -E "^ spec/" | wc -l; cargo check --workspace --quiet 2>&1 | tail -3; echo CHECK=$?` で PostToolUse fire した。これは M39 `@kei/hono` アダプタ実装 commit `67337ad` を main に直接 push した直後の「言語機能変更ゼロ」を裏付ける検証コマンド(crates/src 変更 0 / spec/ 変更 0 / cargo check CHECK=0)であり、PR merge とは無関係。直近マージ PR は依然 #131 のまま、`gh api pulls/131/comments` / `issues/131/comments` / `gh pr view 131 --json reviews` を再確認しても :490-506 で記録済みの inline 1 件 + PR body 4 件から増分ゼロ。教訓化する材料なし。)
+
+メタ観察(:436 以降通算 13 回目 の同種メタ観察 — レビュー由来ではないため正式教訓化はしない):
+- **hook 誤発火は v0.8 M39 の初回実装コミット(main への直接 push)に対する検証 Bash までも拾って子セッションを起動した**。M39 は :495-497 で記録した「PR 経由の慣行から逸脱した main 直接 push は追認 PR で事後レビューを通す」原則の直後の commit にもかかわらず、追認 PR を待たずに hook が発火してしまっている(hook 側は「PR merge かどうか」を tool_input.command から判定できない matcher なので当然の挙動)。改修候補は :487 で挙げた 3 段構え (a) `.claude/settings.json` の PostToolUse matcher を `Bash(gh pr merge*)` に限定、(b) `post-merge-lessons.prompt.md` 冒頭で `tool_input.command` が `gh pr merge` を含まない場合の早期 exit、(c) `tool_input.command` が `gh pr merge` を含む場合でも直近マージ PR タイトルが `^chore: bump version to` にマッチしたら Ignore で終了、から変わっていない。:458 / :465 / :472 / :479 / :486 に続き 6 回連続の予告となり、v0.8 M39 の追認 PR を切る前に (a)+(b) を先に片付けるのが妥当。
+- **M39 は「言語機能変更ゼロ」原則を確実に守っており、tool_input.command が返した `crates/src=0` / `spec/=0` / `CHECK=0` の 3 点セットは v0.8 ロードマップの M39 事前合意事項(:498-500 で記録した「汎用アダプタと app-local wrapper の分離」+ :501-503 で記録した「file: 依存の bundling 到達性」)を尊重した実装であることを機械的に裏付けている**。これはレビュー指摘由来の教訓ではないが、次に M39 の追認 PR を切る Opus は本 tool_input.command そのものを PR body の「検証」欄にコピペすると、self-review で「言語機能変更ゼロ」を主張する根拠が 1 行で示せる。
+
+## PR #131: docs(v0.8): 追認 PR — 再設計コミットの追認 + レビュー指摘 4 件反映 — 2026-07-10 merged (hook re-run: `kei check` による KEI-E2012 再現)
+
+(no actionable patterns — hook がまた `gh pr merge` を含まない Bash コマンド、今回は `mkdir -p .../repro && cat > .../repro/test.kei <<EOF ... EOF && cargo run -q -p kei_cli --bin kei -- check .../test.kei --json 2>&1 | tail -30` で PostToolUse fire した。これは record フィールド `headers: Map<String, String>` の初期化式に `Map.empty()` を書いた際に KEI-E2012「'Map.empty()' requires a type annotation to determine its key/value types」が出るかを確認する再現スクリプトであり、PR merge とは無関係。直近マージ PR は依然 #131 のまま、`gh api pulls/131/comments` / `issues/131/comments` / `gh pr view 131 --json reviews` を再確認しても :490-506 で記録済みの inline 1 件 + PR body 4 件から増分ゼロ。教訓化する材料なし。)
+
+メタ観察(:436 以降通算 14 回目 の同種メタ観察 — レビュー由来ではないため正式教訓化はしない):
+- **hook 誤発火は今回、Kei 言語ユーザ視点の「record フィールド初期化における `Map.empty()` の型推論限界」という diagnostic 挙動の実地確認 Bash までも拾って子セッションを起動した**。tool_input.command から観測できる KEI-E2012 の Fix suggestion は `let m: Map<String, Int> = Map.empty()` と **let-binding 前提の文面**になっており、record リテラルの `headers: Map.empty()` のような **フィールド初期化位置での use-site** では「その場に type annotation を書く構文が無い」という不整合が顕在化している(record 定義側で `headers: Map<String, String>` と宣言済みなのだから、双方向型検査で伝播できる余地はある)。これは post-merge lessons の対象外(レビュー由来の教訓ではない)なので正式教訓化はしないが、次に diagnostic UX を触る Opus は KEI-E2012 の fix hint 文面と、record フィールド位置での期待型伝播の 2 点を SKILL.md か diagnostic spec 側に落とし込むと Kei ユーザの初手 friction を減らせる。
+- **改修候補 (a)+(b)+(c) は :517 で 6 回連続、本エントリで 7 回連続の予告となる**。v0.8 M39 の追認 PR を切る前に (a) `.claude/settings.json` の PostToolUse matcher を `Bash(gh pr merge*)` に限定、(b) `post-merge-lessons.prompt.md` 冒頭で `tool_input.command` が `gh pr merge` を含まない場合の早期 exit を先に片付けるべき、という結論は変わっていない。今回のように「Kei 言語の挙動確認 Bash」で子セッションが起動してしまうケースは特に無駄が大きい(教訓化する材料が構造的にゼロなので、`(no actionable patterns)` エントリが機械的に増えるだけ)。
