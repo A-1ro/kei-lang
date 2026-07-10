@@ -13,7 +13,7 @@
 //! golden の再生成: `UPDATE_GOLDEN=1 cargo test -p kei_cli --test cli`
 //! (golden の変更は人間レビュー必須 — ARCHITECTURE.md 不変条件 3)
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -630,7 +630,7 @@ fn build_golden_tree() {
     assert_eq!(run.code, 0, "build failed: stderr={:?}", run.stderr);
     assert_eq!(run.stdout, "", "build must not write stdout");
     assert!(
-        run.stderr.contains("wrote 5 module(s)"),
+        run.stderr.contains("wrote 8 module(s)"),
         "build summary missing: stderr={:?}",
         run.stderr
     );
@@ -766,37 +766,68 @@ fn npm(args: &[&str], cwd: &Path) {
     );
 }
 
-/// @kei/runtime をビルド(dist が無ければ install + build)。e2e と同じ前提。
-fn ensure_runtime_built(root: &Path) {
-    if root.join("runtime/dist/index.js").is_file() {
+/// npm install の共通フラグ。
+const NPM_INSTALL_ARGS: [&str; 3] = ["install", "--no-audit", "--no-fund"];
+
+/// `pkg_rel`(root からの相対パス)ごとに直列化用の Mutex を返す。複数の #[test] が
+/// 並行して同じ npm パッケージの install / build を走らせる競合を、呼び出し側が
+/// 別途ロック(旧: `app_project_lock()`)を握っているかに依存せず、このヘルパー自身で
+/// 防ぐ(M39 レビュー対応 finding [3][4])。
+fn npm_dist_lock(pkg_rel: &str) -> &'static Mutex<()> {
+    static REGISTRY: OnceLock<Mutex<HashMap<String, &'static Mutex<()>>>> = OnceLock::new();
+    let registry = REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = registry.lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(pkg_rel.to_string())
+        .or_insert_with(|| Box::leak(Box::new(Mutex::new(()))))
+}
+
+/// npm パッケージの dist をビルド済みにする汎用ヘルパー: `marker_rel`(通常 dist の
+/// エントリポイント、root からの相対パス)が既に存在すれば何もしない。無ければ
+/// `pkg_rel` 配下で `npm install --no-audit --no-fund` → `npm run build` を実行する。
+/// 呼び出しは `pkg_rel` 単位の Mutex で直列化されるので、呼び出し元が個別にロックを
+/// 持つ必要はない(旧 `ensure_runtime_built` / `ensure_kei_hono_built` の一般化)。
+fn ensure_npm_dist(root: &Path, pkg_rel: &str, marker_rel: &str) {
+    let _guard = npm_dist_lock(pkg_rel)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if root.join(marker_rel).is_file() {
         return;
     }
-    let runtime = root.join("runtime");
-    npm(&["install", "--no-audit", "--no-fund"], &runtime);
-    npm(&["run", "build"], &runtime);
+    let pkg = root.join(pkg_rel);
+    npm(&NPM_INSTALL_ARGS, &pkg);
+    npm(&["run", "build"], &pkg);
 }
 
 /// `tests/cli/projects/app` を共有する複数の #[test] が npm install / dist 削除を
 /// 並行実行しないよう直列化するロック。cargo test は既定でスレッド並列実行するため、
 /// 同じプロジェクトディレクトリを触るテストは互いにロックを取る必要がある
 /// (M36 レビュー対応で greeter_app を app へ統合したことで顕在化)。
+/// 共有 npm パッケージ(runtime / kei-hono)側の直列化は `npm_dist_lock` が個別に持つため、
+/// このロックは `tests/cli/projects/app` 自身の dist 削除・npm install のみを保護する
+/// (M39 レビュー対応で依存を分離)。
 fn app_project_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-/// npm プロジェクトを検証用に準備する: repo_root canonicalize、ensure_runtime_built、dist 削除、npm install。
-/// 呼び出し元は事前に `if !has_npm() { eprintln!(...); return; }` を書いてから呼ぶこと(has_npm チェックは
+/// npm プロジェクトを検証用に準備する: repo_root canonicalize、共有パッケージの
+/// ensure_npm_dist、dist 削除、npm install。呼び出し元は事前に
+/// `if !has_npm() { eprintln!(...); return; }` を書いてから呼ぶこと(has_npm チェックは
 /// このヘルパーに持ち込まない — 既存踏襲)。戻り値は (repo_root, project_dir)。
 fn setup_npm_project(rel_project: &str) -> (PathBuf, PathBuf) {
     let root = repo_root().canonicalize().expect("repo root");
-    ensure_runtime_built(&root);
+    ensure_npm_dist(&root, "runtime", "runtime/dist/index.js");
+    ensure_npm_dist(
+        &root,
+        "tests/cli/packages/kei-hono",
+        "tests/cli/packages/kei-hono/dist/index.js",
+    );
     let project = root.join(rel_project);
     let dist = project.join("dist");
     if dist.exists() {
         fs::remove_dir_all(&dist).expect("clean project dist");
     }
-    npm(&["install", "--no-audit", "--no-fund"], &project);
+    npm(&NPM_INSTALL_ARGS, &project);
     (root, project)
 }
 
@@ -856,7 +887,9 @@ fn kei_test_builds_then_runs_contracts() {
 /// namespace import が生成され、tsc --strict --noEmit を通り、file: 依存の実パッケージを
 /// 呼んだ結果(vitest)が正しいことまで確認する。M36 レビュー対応で `greeter_app` の
 /// 独立フィクスチャは廃止し、`tests/cli/projects/app` に統合された `greeter_hello.kei`
-/// を使う(npm ツールチェーンの二重化を避けるため)。
+/// を使う(npm ツールチェーンの二重化を避けるため)。M39 で追加した @kei/hono 経由の
+/// HTTP ハンドラ e2e(`tests/http/app.test.ts`)も `npm test` 経由でこの関数が
+/// カバーする(専用の Rust テスト関数は追加していない)。
 #[test]
 fn app_greeter_hello_build_and_test() {
     if !has_npm() {

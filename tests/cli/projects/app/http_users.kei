@@ -1,0 +1,43 @@
+module app.http_users
+
+import app.http_model { HttpRequest, HttpResponse, noHeaders }
+
+extern package "parse-app" as parseApp
+
+record UserRequest {
+  name: String
+}
+
+extern parseApp.parseUserRequest(text: String) -> Option<UserRequest>
+
+func acceptedResponse() -> HttpResponse {
+  return HttpResponse { status: 202, headers: noHeaders(), bodyText: "{\"status\":\"accepted\"}" }
+}
+
+func badRequestResponse() -> HttpResponse {
+  return HttpResponse { status: 400, headers: noHeaders(), bodyText: "{\"error\":\"invalid request\"}" }
+}
+
+func buildCreatedResponse(user: UserRequest) -> HttpResponse
+  requires user.name.length > 0
+{
+  return acceptedResponse()
+}
+
+func parseNonEmptyBody(text: String) -> HttpResponse {
+  if text.length > 0 {
+    return match parseApp.parseUserRequest(text) {
+      Some(user) => buildCreatedResponse(user)
+      None => badRequestResponse()
+    }
+  } else {
+    return badRequestResponse()
+  }
+}
+
+func handleCreateUser(req: HttpRequest) -> HttpResponse {
+  return match req.bodyText {
+    Some(text) => parseNonEmptyBody(text)
+    None => badRequestResponse()
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "parse-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "description": "Kei M39 e2e フィクスチャ: UserRequest の shape check を持つアプリローカル file: パッケージ。@kei/hono の汎用 parseAs() を使う薄い wrapper(汎用アダプタにアプリ固有関数を混ぜない設計原則のため @kei/hono 本体とは別パッケージにする)。",
+  "dependencies": { "@kei/hono": "file:../kei-hono" }
+}

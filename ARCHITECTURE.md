@@ -55,7 +55,7 @@ kei-lang/
 │   └── cli/                  # `kei` CLI統合テスト(実バイナリ起動でstdout/stderr/終了コード検証)
 │       ├── checks/           # {name}.kei + {name}.check.txt(散文) + {name}.check.json
 │       ├── fmt/              # {name}.input.kei (+ {name}.expected.kei / {name}.fmtcheck.txt / {name}.fmt.txt)
-│       ├── packages/         # e2e用ミニnpmパッケージfixture(file:依存の実疎通確認用, 例: greeter/)
+│       ├── packages/         # e2e用ミニnpmパッケージfixture(file:依存の実疎通確認用, 例: greeter/ / kei-hono/ / parse-app/)
 │       └── projects/         # `kei build`/`kei test`のプロジェクトfixture
 │           ├── app/          # .kei(extern package束縛のgreeter_hello.kei含む) + expected/(buildツリーのgolden) + package.json/tests/(kei test)
 │           └── broken/       # 検査エラーを含むall-or-nothing検証用(dist は git管理外)

@@ -11,11 +11,14 @@
   "devDependencies": {
     "@kei/runtime": "file:../../../../runtime",
     "@types/node": "^26.1.0",
+    "hono": "^4.9.0",
     "typescript": "^5.5.0",
     "vitest": "^4.1.10"
   },
   "dependencies": {
     "greeter": "file:../../packages/greeter",
-    "async-greeter": "file:../../packages/async-greeter"
+    "async-greeter": "file:../../packages/async-greeter",
+    "@kei/hono": "file:../../packages/kei-hono",
+    "parse-app": "file:../../packages/parse-app"
   }
 }
