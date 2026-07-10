@@ -630,7 +630,7 @@ fn build_golden_tree() {
     assert_eq!(run.code, 0, "build failed: stderr={:?}", run.stderr);
     assert_eq!(run.stdout, "", "build must not write stdout");
     assert!(
-        run.stderr.contains("wrote 5 module(s)"),
+        run.stderr.contains("wrote 8 module(s)"),
         "build summary missing: stderr={:?}",
         run.stderr
     );
@@ -776,6 +776,19 @@ fn ensure_runtime_built(root: &Path) {
     npm(&["run", "build"], &runtime);
 }
 
+/// @kei/hono をビルド(dist が無ければ install + build)。M39 e2e の前提。
+fn ensure_kei_hono_built(root: &Path) {
+    if root
+        .join("tests/cli/packages/kei-hono/dist/index.js")
+        .is_file()
+    {
+        return;
+    }
+    let kei_hono = root.join("tests/cli/packages/kei-hono");
+    npm(&["install", "--no-audit", "--no-fund"], &kei_hono);
+    npm(&["run", "build"], &kei_hono);
+}
+
 /// `tests/cli/projects/app` を共有する複数の #[test] が npm install / dist 削除を
 /// 並行実行しないよう直列化するロック。cargo test は既定でスレッド並列実行するため、
 /// 同じプロジェクトディレクトリを触るテストは互いにロックを取る必要がある
@@ -791,6 +804,7 @@ fn app_project_lock() -> &'static Mutex<()> {
 fn setup_npm_project(rel_project: &str) -> (PathBuf, PathBuf) {
     let root = repo_root().canonicalize().expect("repo root");
     ensure_runtime_built(&root);
+    ensure_kei_hono_built(&root);
     let project = root.join(rel_project);
     let dist = project.join("dist");
     if dist.exists() {
@@ -856,7 +870,9 @@ fn kei_test_builds_then_runs_contracts() {
 /// namespace import が生成され、tsc --strict --noEmit を通り、file: 依存の実パッケージを
 /// 呼んだ結果(vitest)が正しいことまで確認する。M36 レビュー対応で `greeter_app` の
 /// 独立フィクスチャは廃止し、`tests/cli/projects/app` に統合された `greeter_hello.kei`
-/// を使う(npm ツールチェーンの二重化を避けるため)。
+/// を使う(npm ツールチェーンの二重化を避けるため)。M39 で追加した @kei/hono 経由の
+/// HTTP ハンドラ e2e(`tests/http/app.test.ts`)も `npm test` 経由でこの関数が
+/// カバーする(専用の Rust テスト関数は追加していない)。
 #[test]
 fn app_greeter_hello_build_and_test() {
     if !has_npm() {

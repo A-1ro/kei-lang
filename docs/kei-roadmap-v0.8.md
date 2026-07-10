@@ -81,7 +81,7 @@ v0.8 は Milestone 1 個。言語機能変更なし、成果物はすべて runt
 
 | M | テーマ | 優先度 | 状態 | 主な成果物 |
 |---|---|---|---|---|
-| **M39** | @kei/hono アダプタ + HTTP/JSON 境界 + e2e + SKILL 節 | high 🤝 | ⬜ 未着手 | `tests/cli/packages/kei-hono/` / tests/cli/projects/app/ / skill(spec 更新なし) |
+| **M39** | @kei/hono アダプタ + HTTP/JSON 境界 + e2e + SKILL 節 | high 🤝 | ✅ 実装済み | `tests/cli/packages/kei-hono/` / tests/cli/projects/app/ / skill(spec 更新なし) |
 
 ## M39: @kei/hono アダプタ + HTTP 境界(🤝)
 
@@ -105,6 +105,14 @@ v0.8 は Milestone 1 個。言語機能変更なし、成果物はすべて runt
   `@kei/hono` の再エクスポート機構経由)で解決する。汎用アダプタにアプリ固有関数を混ぜない。
   実装時に「アプリローカル file: パッケージ」か「@kei/hono の module 拡張」のどちらを採るかは
   M39 着手時に確定して報告(🤝 事前合意の一部)。
+
+  **実装時に確定**: 選択肢 A(アプリローカル file: パッケージ)を採用した。既存の
+  `tests/cli/packages/greeter/` `tests/cli/packages/async-greeter/` と同じ場所に第三のミニ
+  パッケージ `tests/cli/packages/parse-app/` を新設し(`tests/cli/projects/app/` 配下には
+  入れ子にしない。file: 依存ミニパッケージを `tests/cli/packages/` に集約する既存規約
+  (`ARCHITECTURE.md`)に合わせるため)、`@kei/hono` の `parseAs<T>` を `UserRequest` の
+  shape check で特殊化する薄い wrapper とした。依存チェーンは
+  `app → parse-app → @kei/hono`(+ `@kei/runtime`)。
 - **文字列 stdlib との整合**: v0.5 M30(文字列 stdlib 段階1)のスコープ外に「slice / indexOf /
   split / trim 等の本格 String API は v0.8 の HTTP 境界設計と合わせて段階2で」と予告があった。
   本 v0.8 の設計では **パース処理をアダプタ層(TS 側 shapeCheck)に押し出したため、Kei 側で

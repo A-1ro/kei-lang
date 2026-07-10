@@ -1,0 +1,12 @@
+{
+  "file": "http_model.ts",
+  "mappings": ";;;;;AAEA;EACE;EACA;EACA;EACA;EACA;;;;;;;AAGF;EACE;EACA;EACA;;;;;;;AAGF;EACE",
+  "names": [],
+  "sources": [
+    "http_model.kei"
+  ],
+  "sourcesContent": [
+    "module app.http_model\n\nrecord HttpRequest {\n  method: String\n  path: String\n  headers: Map<String, String>\n  queryParams: Map<String, String>\n  bodyText: Option<String>\n}\n\nrecord HttpResponse {\n  status: Int\n  headers: Map<String, String>\n  bodyText: String\n}\n\nfunc noHeaders() -> Map<String, String> {\n  return Map.empty()\n}\n"
+  ],
+  "version": 3
+}

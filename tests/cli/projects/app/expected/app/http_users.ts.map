@@ -1,0 +1,12 @@
+{
+  "file": "http_users.ts",
+  "mappings": ";;;;AAEA;AAEA;;AAEA;EACE;;;;;;;AAKF;EACE;;;AAGF;EACE;;;;;;AAGF;EACW;IAAA;;;;;;;;;EAET;;;;;;AAGF;EAGE;IAAa;IACX;;MAAc;QAAM;QAClB;;UAAc;;QACd;UAAQ;;;;;IAEV;MAAQ",
+  "names": [],
+  "sources": [
+    "http_users.kei"
+  ],
+  "sourcesContent": [
+    "module app.http_users\n\nimport app.http_model { HttpRequest, HttpResponse, noHeaders }\n\nextern package \"parse-app\" as parseApp\n\nrecord UserRequest {\n  name: String\n}\n\nextern parseApp.parseUserRequest(text: String) -> Option<UserRequest>\n\nfunc acceptedResponse() -> HttpResponse {\n  return HttpResponse { status: 202, headers: noHeaders(), bodyText: \"{\\\"status\\\":\\\"accepted\\\"}\" }\n}\n\nfunc badRequestResponse() -> HttpResponse {\n  return HttpResponse { status: 400, headers: noHeaders(), bodyText: \"{\\\"error\\\":\\\"invalid request\\\"}\" }\n}\n\nfunc buildCreatedResponse(user: UserRequest) -> HttpResponse\n  requires user.name.length > 0\n{\n  return acceptedResponse()\n}\n\nfunc handleCreateUser(req: HttpRequest) -> HttpResponse\n  uses Async\n{\n  return match req.bodyText {\n    Some(text) => match parseApp.parseUserRequest(text) {\n      Some(user) => buildCreatedResponse(user)\n      None => badRequestResponse()\n    }\n    None => badRequestResponse()\n  }\n}\n"
+  ],
+  "version": 3
+}

@@ -1,0 +1,14 @@
+module app.http_health
+
+import app.http_model { HttpRequest, HttpResponse, noHeaders }
+
+func healthBody() -> String {
+  return "{\"status\":\"ok\"}"
+}
+
+func handleHealth(req: HttpRequest) -> HttpResponse
+  uses Async
+  ensures result.status == 200
+{
+  return HttpResponse { status: 200, headers: noHeaders(), bodyText: healthBody() }
+}
