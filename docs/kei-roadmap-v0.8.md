@@ -12,36 +12,53 @@ Hono の app.get/post に登録するだけで動くこと。**Kei は「API の
 TS 側は「app の組み立て + ルート登録 + Workers エントリポイント」を書く責務、と分担する。
 Cloudflare Workers 実デプロイ(wrangler)は v0.9 の領分。
 
+## v0.8 の性格 — 「言語機能変更ゼロ」の版
+
+**v0.8 は言語機能の追加・変更を行わない。** アダプタ層(`@kei/hono`)と e2e パターンだけを作る。
+理由:
+
+- Hono は `named` export(`import { Hono } from 'hono'`)なので、当初検討していた
+  「default export 対応」の言語機能追加は Hono の受け入れ基準達成には**不要**。
+- `@kei/hono` アダプタの TS 側で普通に `import { Hono } from 'hono'` すれば、Kei ソースは
+  既存の namespace import(v0.6 M35/M36 で入った `extern package "..." as ...`)経由で
+  `@kei/hono` を呼ぶだけで足りる。Kei ソース自体は Hono パッケージを直接参照しない。
+- v0.7 で async / extern async / 契約 async / スキップ可視化まで揃っており、**v1.0 受け入れ基準
+  の「言語としての機能」は既に完成している**。v0.8 はエコシステム側(アダプタ + パターン)
+  の版と位置づける。
+- named import / default export の言語追加は、Hono 以外の一般 npm パッケージ利用の実需が
+  確定してから独立 Milestone として v1.x で扱う(v1.0 の blocker ではない)。
+
 ## 設計原則(HANDOFF 準拠 — Sonnet に絶対に破らせない)
 
-1. **言語機能追加は最小限。アダプタ層(`@kei/hono`)で吸収する。**
+1. **言語機能追加は最小限、原則ゼロ。複雑さはアダプタ層(`@kei/hono`)で吸収する。**
    - Hono の API 表面(Context / Response / Request / ルーティング DSL / c.json / c.req.param)を
      Kei 型システムに直接引き込まない。**Kei には record として扱う HTTP モデル**(HttpRequest /
-     HttpResponse record)を `@kei/hono` から extern package 経由で提供し、境界の複雑さを
-     TS 側(アダプタ)に閉じ込める。
+     HttpResponse record)を `@kei/hono` から extern 経由で提供し、境界の複雑さを TS 側
+     (アダプタ)に閉じ込める。
    - Hono の Context 全体を Kei から触らせない。Kei ハンドラは
      `handler(req: HttpRequest) -> HttpResponse uses Async`(または `uses ..., Async`)の
      **純粋な関数型シグネチャ**で書く。TS 側の薄い wrapper が Hono の Context から
      HttpRequest を組み立てて Kei ハンドラを呼び、返った HttpResponse を Hono の response に写す。
 
-2. **JSON 境界は「unknown → Option<record>」で表現する。**
-   - `extern json.parseAs(text: String) -> Option<T> uses ...`(段階1)。実体は `@kei/hono`(または
-     新設 `@kei/json`)の runtime helper が JSON.parse + record 形状検査を行う。失敗は None。
-   - record → JSON 文字列は既存の record emit + `JSON.stringify` を extern で公開。
-   - **完全な型付き JSON デシリアライザは v0.8 スコープ外**。ハンドラは HttpRequest.jsonBody:
-     Option<Unknown> の unknown 部分を Kei 側では受けない — 実際には `extern hono.jsonBody<T>(req)
-     -> Option<T> uses Async` のような形で record 型を context に持たせて runtime で shape check
-     する形にする(段階1、詳細は M40 の 🤝 で確定)。
+2. **JSON 境界は「record 型ごとの専用 extern」で表現する。**
+   - Kei にはユーザー定義のジェネリック関数がない(組み込みの Option/Result/List/Map/Async 以外)。
+     JSON parse は record 型ごとに専用 extern を書く形にする:
+     `extern kh.parseUserRequest(text: String) -> Option<UserRequest>`。
+   - TS 側の `@kei/hono` に汎用の `parseAs<T>(text, shapeCheck)` を置き、Kei 側の record ごとの
+     extern がそれを呼び出す薄いラッパーになる(SKILL.md で定型を示す)。
+   - record → JSON 文字列は `JSON.stringify` を extern で公開(型 Object 相当は record が Kei で
+     readonly object に写るのでそのまま使える)。
 
-3. **default export と named import を段階的に解禁する。**
-   - v0.6 で先送りにした宿題(dogfood v0.6.0 で default export の実需を確認済み)。
-   - **v0.8 は namespace + default の 2 形態のみ**(named import は必要性が確定してから段階3で
-     🤝、v0.9 以降または恒久的先送り)。default は Hono の `import Hono from "hono"` に必要。
+3. **`@kei/hono` を新規 npm パッケージとして runtime とは別建てする。**
+   - `@kei/runtime`(v0.3.0)は Result/Option/契約違反例外の言語ランタイム。
+   - `@kei/hono` は Hono アダプタ(HttpRequest/HttpResponse type + Hono Context 変換 helper +
+     parseAs helper + Kei ハンドラを Hono に接続する wrapper)。
+   - 責務分離。**npm 公開はしない**(v1.0 以降で検討)。e2e は M36 と同じ `file:` 依存で扱う。
 
 4. **Cloudflare Workers 特有の型は Kei に露出させない。**
    - `env` / `KVNamespace` / `D1Database` / `ExecutionContext` などの Workers bindings 型は
-     TS 側の wrapper で受け、Kei ハンドラには扱いやすい record として渡す(または extern package
-     経由で opaque な型として)。**v0.8 では Kei は Workers ランタイム API を直接触らない**。
+     TS 側の wrapper で受け、Kei ハンドラには扱いやすい record として渡す。**v0.8 では Kei は
+     Workers ランタイム API を直接触らない**。
    - 実デプロイ(wrangler)経由の疎通は v0.9。
 
 5. **契約と async の意味論を変えない。**
@@ -55,89 +72,73 @@ Cloudflare Workers 実デプロイ(wrangler)は v0.9 の領分。
 
 ## Milestone 全体像
 
-| M | テーマ | 優先度 | 状態 | 主な改修クレート/成果物 |
+v0.8 は Milestone 1 個。言語機能変更なし、成果物はすべて runtime/tests/skill/spec 側。
+
+| M | テーマ | 優先度 | 状態 | 主な成果物 |
 |---|---|---|---|---|
-| **M39** | extern package 段階2(default export 対応) | high | ⬜ 未着手 | kei_syntax / kei_check / kei_emit / kei_fmt |
-| **M40** | @kei/hono アダプタ + HttpRequest/HttpResponse + JSON 境界 + e2e | high 🤝 | ⬜ 未着手 | runtime(または新 npm パッケージ)/ tests/e2e / spec / skill |
+| **M39** | @kei/hono アダプタ + HTTP/JSON 境界 + e2e + SKILL 節 | high 🤝 | ⬜ 未着手 | `tests/cli/packages/kei-hono/` / tests/cli/projects/app/ / spec / skill |
 
-## M39: extern package 段階2 — default export
-
-### 完了条件
-
-- 構文: `extern package "hono" default as Hono`(または `default as` を持つ形。パーサに negotiable)。
-  Hono 側の default export と 1:1 対応。namespace 版と同じ束縛名スコープ規則(extern 署名専用、
-  値/型位置での使用は KEI-E3007)。
-- emit: `import Hono from "hono";`(default import)を出力。既存の `import * as` と並存できる。
-- 型の観点: default export の関数呼び出し(`Hono()`)や class インスタンス生成(`new Hono()`)は
-  **段階1では extern 署名で明示的に宣言**する形にする(new はしない、コンストラクタは wrapper 側
-  = M40 の `@kei/hono` に隠す)。Kei ソースは Hono を直接インスタンス化しない。
-- spec: `spec/kei-spec-v0.2.md` §2.4 の extern package 節に default 形の記述を追記。namespace 版
-  との差分(default は「複数個 default 宣言は禁止」「サブパスと組み合わせ可」)を明記。
-- 拒否: `extern query` に default を組み合わせるのは既存 KEI-E3005 派生で拒否(query は純粋観測子、
-  default とは意味論が違う)。
-- golden(syntax + check + fmt + emit 単体)+ 既存 e2e で回帰なし。
-
-### スコープ外(v0.8 M39)
-
-- named import(`extern package "hono" as { serve } from "hono"`)— 実需が確定していないため
-  🤝 で段階3(v0.9+)へ。
-- default + namespace の同一 specifier での同時宣言 — 段階1では片方のみ許す(仕様確定するまで
-  診断で拒否)。
-
-## M40: @kei/hono アダプタ + HTTP 境界(🤝)
+## M39: @kei/hono アダプタ + HTTP 境界(🤝)
 
 ### 事前合意事項(🤝、着手前に確定)
 
-- **`@kei/hono` を新規 npm パッケージとして runtime とは別建てする**(名前は `@kei/hono` を第一候補、
-  ただし発行しない — file: 依存で e2e に留める。npm 公開は v1.0 以降)。
-  - runtime(`@kei/runtime`)は Result/Option/契約違反例外の言語ランタイム、`@kei/hono` は
-    Hono アダプタ、と責務分離。
 - **HttpRequest / HttpResponse record の最小フィールド**:
   - HttpRequest: `method: String`、`path: String`、`headers: Map<String, String>`、
     `queryParams: Map<String, String>`、`bodyText: Option<String>`。
   - HttpResponse: `status: Int`、`headers: Map<String, String>`、`bodyText: String`。
-  - JSON パースは別の extern(`extern jsonBody<T>` 相当は段階1で扱わない、段階2で 🤝)。
-    段階1は `bodyText` のみ扱い、Kei 側で `parseJsonAs` extern を呼ぶ形。
-- **JSON parse extern の型パラメータ問題**: Kei にジェネリック関数が無い(型パラメータは Option/Result/
-  List/Map の組み込みのみ)。段階1では **record 型ごとに専用 extern を書く**形にする
-  (`extern hono.parseUserRequest(text: String) -> Option<UserRequest>` 等)。TS 側の
-  `@kei/hono/parseAs<T>(text, shapeCheck)` を record ごとにラップする定型を SKILL.md で示す。
-  ジェネリック extern は v0.9+ の 🤝(検討スコープ外の可能性大)。
-- **e2e 構成**: `tests/cli/packages/kei-hono/`(file: 依存)+ ハンドラを Kei で書き、TS 側で
+  - **既知の制約**: `Map<K, V>` は単一値なので `Set-Cookie` 複数指定は素直に表現できない
+    (`bodyText` に "\n" 区切りで詰めるハックは NG)。v0.8 では **Set-Cookie 非対応**を明示する
+    (cookie 自体スコープ外リストに載っている)。v1.x で `Map<String, List<String>>` か
+    独立 `Headers` record を検討。
+- **JSON parse extern の型パラメータ問題**: 上記設計原則 2 のとおり、**record 型ごとの専用 extern
+  を書く**(Kei のジェネリック無しへの正しい対応)。SKILL.md に定型を示す。
+- **e2e 構成**: `tests/cli/packages/kei-hono/`(file: 依存)+ Kei ハンドラを Kei で書き、TS 側で
   Hono app に登録して `app.request(...)` で in-memory テスト。実 fetch/wrangler は v0.9。
 
 ### 完了条件
 
-- `tests/cli/packages/kei-hono/`(または類似位置)に @kei/hono のミニ実装(package.json、
-  index.ts、HttpRequest/HttpResponse type、Kei 側の record 対応 TS 型、Hono Context ↔ HttpRequest
-  変換 helper)を追加。
-- Kei 側の使用例: `tests/cli/projects/app/` 配下に「GET /health → 200 OK JSON、POST /users → 202」の
-  ハンドラ 2 本を Kei で書き、TS 側で Hono app に登録、`app.request(...)` の vitest 疎通確認を CI 固定。
-- **契約が生きた状態でハンドラが動く**: requires 違反(例: bodyText が空でない前提)が
-  KeiContractViolation として fire し、TS 側で捕捉して 400 に写す例を含める(Hono の onError で
-  中央処理する形を SKILL.md でも紹介)。
-- SKILL.md「HTTP ハンドラを書く(v0.8)」節を追加: HttpRequest/HttpResponse の record 使用、
-  parseXxxRequest extern の書き方、Hono との接続の全体像。
-- spec: HTTP モデル自体は spec 対象外(アダプタなので runtime/skill 領分)。ただし SKILL.md
-  更新に伴う MCP golden 再生成は必要。
-- ロードマップ M40 → ✅ で **v0.8 全 Milestone 完了、v1.0 blocker 3/3 解消**。
+- `tests/cli/packages/kei-hono/` に @kei/hono のミニ実装を追加:
+  - `package.json`(name: `@kei/hono`、`hono` を dependency に持つ)
+  - `index.ts`(HttpRequest/HttpResponse type、Hono Context ↔ HttpRequest 変換 helper、
+    `parseAs<T>(text, shapeCheck) -> Option<T>` 相当のヘルパー、Kei ハンドラを Hono ルートに
+    接続する `mount(app, method, path, handler)` 相当の wrapper)
+- Kei 側の使用例: `tests/cli/projects/app/` 配下(または新規サブディレクトリ)に、以下のハンドラを
+  Kei で書き、TS 側で Hono app に登録して vitest 疎通確認を CI 固定:
+  - **GET /health**: 常に 200 OK JSON。ハンドラは同期的な body 組み立て + async な wrapper。
+  - **POST /users**: body を UserRequest record にパースして 202、パース失敗は 400。
+    `parseUserRequest` extern が failing case を Option::None として返し、Kei 側 match で 400 に写す。
+- **契約が生きた状態でハンドラが動く例**: requires 違反(例: `bodyText.length > 0`)が
+  KeiContractViolation として fire し、TS 側で捕捉して 400 に写す例を含める(Hono の onError
+  で中央処理する形を SKILL.md で紹介)。
+- SKILL.md「HTTP ハンドラを書く(v0.8)」節を追加:
+  - HttpRequest/HttpResponse の record 使用
+  - `parseXxxRequest` extern の書き方(ジェネリック無しへの対応パターン)
+  - Kei ハンドラと Hono の接続の全体像
+  - 契約違反の 400 マッピング例
+  - Set-Cookie 非対応・v0.8 制限一覧
+- spec: HTTP モデル自体は spec 対象外(アダプタなので runtime/skill 領分)。**言語機能変更ゼロ**なので
+  spec 更新なし。ただし SKILL.md 更新に伴う MCP golden 再生成が必要。
+- ロードマップ M39 → ✅ で **v0.8 全 Milestone 完了、v1.0 blocker 3/3 解消**。
+- `cargo test --workspace` 全パス(新 e2e 含む)。
 
-### スコープ外(v0.8 M40)
+### スコープ外(v0.8 M39)
 
-- 実 wrangler deploy(v0.9)/ KV/D1 バインディング直接アクセス(TS 側で受けるまで)/
-  WebSocket / streaming response / cookie / cache API / multi-part form / file upload
+- 実 wrangler deploy(v0.9)
+- KV/D1 バインディング直接アクセス(TS 側で受けるまで、v0.9 で検討)
+- WebSocket / streaming response / Server-Sent Events
+- cookie(Set-Cookie を含む複数値ヘッダー全般)
+- cache API / multi-part form / file upload
+- named import / default export の言語機能追加(v1.x で実需確定後、独立 Milestone)
+- 動的な JSON(unknown → 任意 record への型なしパース)— record 別 extern パターンで代替
+- 汎用 JSON schema validation
 
 ## 後続 /goal ドラフト
 
 ```text
-/goal M39: extern package "<spec>" default as <name> 宣言を追加する。spec v0.2 §2.4 を先に更新し、
-syntax/check/fmt/emit の golden で固定する。namespace 版との相互排他・同時宣言禁止・query との
-非互換を診断で明示する。
-```
-
-```text
-/goal M40: @kei/hono をローカル file: パッケージとして追加し、HttpRequest/HttpResponse record と
-Hono Context 変換ヘルパーを提供する。tests/cli/projects/app/ に Kei ハンドラ 2 本(GET /health、
-POST /users)を書き、Hono app.request(...) の vitest で疎通確認。契約違反が 400 に写る例と
-SKILL.md「HTTP ハンドラを書く」節を追加。
+/goal M39: tests/cli/packages/kei-hono/ に @kei/hono の file: パッケージを追加し、
+HttpRequest/HttpResponse record と Hono Context 変換ヘルパー・parseAs helper・ハンドラ mount
+wrapper を提供する。tests/cli/projects/app/ 配下(または新規)に Kei ハンドラ 2 本
+(GET /health、POST /users)を書き、Hono の app.request(...) を叩く vitest で疎通確認。
+契約違反が 400 に写る例と、SKILL.md「HTTP ハンドラを書く(v0.8)」節を追加する。
+言語機能変更ゼロ(spec 更新なし)。
 ```
