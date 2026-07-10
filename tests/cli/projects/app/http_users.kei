@@ -24,14 +24,20 @@ func buildCreatedResponse(user: UserRequest) -> HttpResponse
   return acceptedResponse()
 }
 
-func handleCreateUser(req: HttpRequest) -> HttpResponse
-  uses Async
-{
-  return match req.bodyText {
-    Some(text) => match parseApp.parseUserRequest(text) {
+func parseNonEmptyBody(text: String) -> HttpResponse {
+  if text.length > 0 {
+    return match parseApp.parseUserRequest(text) {
       Some(user) => buildCreatedResponse(user)
       None => badRequestResponse()
     }
+  } else {
+    return badRequestResponse()
+  }
+}
+
+func handleCreateUser(req: HttpRequest) -> HttpResponse {
+  return match req.bodyText {
+    Some(text) => parseNonEmptyBody(text)
     None => badRequestResponse()
   }
 }

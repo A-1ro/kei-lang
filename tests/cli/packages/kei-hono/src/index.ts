@@ -27,7 +27,12 @@ export interface HttpResponse {
   readonly bodyText: string;
 }
 
-/** Hono の Context から Kei 側の HttpRequest を組み立てる。body は空文字列なら None。 */
+/**
+ * Hono の Context から Kei 側の HttpRequest を組み立てる。
+ * bodyText は常に Some(bodyText) を返す(GET のように body が無いリクエストは
+ * Content-Length: 0 で `Some("")` になる)。「body 無し」と「空文字列」を区別せず
+ * 畳み込むと境界層で情報が失われるため、判定は呼び出し側の Kei ハンドラに委ねる。
+ */
 export async function fromContext(c: Context): Promise<HttpRequest> {
   const bodyText = await c.req.text();
   return {
@@ -35,7 +40,7 @@ export async function fromContext(c: Context): Promise<HttpRequest> {
     path: c.req.path,
     headers: new Map(Object.entries(c.req.header())),
     queryParams: new Map(Object.entries(c.req.query())),
-    bodyText: bodyText.length > 0 ? Some(bodyText) : None(),
+    bodyText: Some(bodyText),
   };
 }
 
@@ -68,8 +73,16 @@ export function parseAs<T>(
 
 export type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 
+/** 値そのもの、または Promise で解決されるその値。 */
+export type Awaitable<T> = T | Promise<T>;
+
 /**
- * Kei ハンドラ(HttpRequest -> Promise<HttpResponse>)を Hono のルートとして登録する。
+ * Kei ハンドラ(HttpRequest -> Awaitable<HttpResponse>)を Hono のルートとして登録する。
+ * ハンドラの型は同期・非同期どちらも受け付ける — Kei 側で `uses Async` を宣言していない
+ * ハンドラは同期関数として生成されるため、ここで `Promise` を強制すると実際には非同期
+ * 呼び出しを含まないハンドラにまで `uses Async` を強いてしまい、Kei のエフェクトシステムが
+ * 「本当に非同期か」を表す意味が鈍る。呼び出しは `await handler(req)` のままなので、
+ * 同期値・Promise のどちらが返っても正しく動く。
  * 契約違反(KeiContractViolation)はここで捕捉せず、そのまま投げる。呼び出し側が
  * `app.onError` で中央処理する設計(SKILL.md 「HTTP ハンドラを書く」節を参照)。
  */
@@ -77,7 +90,7 @@ export function mount(
   app: Hono,
   method: HttpMethod,
   path: string,
-  handler: (req: HttpRequest) => Promise<HttpResponse>,
+  handler: (req: HttpRequest) => Awaitable<HttpResponse>,
 ): void {
   const routeHandler = async (c: Context): Promise<Response> => {
     const req = await fromContext(c);

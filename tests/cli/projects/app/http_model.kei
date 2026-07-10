@@ -14,6 +14,10 @@ record HttpResponse {
   bodyText: String
 }
 
+// record field 値への直接 Map.empty() 埋め込みは expected_ty が伝播せず KEI-E2012 になる
+// (issue #133、kei_check 側の既知ギャップ)。戻り値型を明示したこの関数を経由するのが
+// v0.8 時点の回避策。v1.x で解消され次第、record リテラル内で直接 Map.empty() と
+// 書けるようになる想定。
 func noHeaders() -> Map<String, String> {
   return Map.empty()
 }

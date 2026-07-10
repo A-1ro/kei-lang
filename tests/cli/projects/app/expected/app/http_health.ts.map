@@ -1,12 +1,12 @@
 {
   "file": "http_health.ts",
-  "mappings": ";;;;AAEA;;AAEA;EACE;;;;;;;AAGF;;IAIE;;EAFQ;IAAA",
+  "mappings": ";;;;AAEA;;AAEA;EACE;;;;;;AAGF;;IAGE;;EAFQ;IAAA",
   "names": [],
   "sources": [
     "http_health.kei"
   ],
   "sourcesContent": [
-    "module app.http_health\n\nimport app.http_model { HttpRequest, HttpResponse, noHeaders }\n\nfunc healthBody() -> String {\n  return \"{\\\"status\\\":\\\"ok\\\"}\"\n}\n\nfunc handleHealth(req: HttpRequest) -> HttpResponse\n  uses Async\n  ensures result.status == 200\n{\n  return HttpResponse { status: 200, headers: noHeaders(), bodyText: healthBody() }\n}\n"
+    "module app.http_health\n\nimport app.http_model { HttpRequest, HttpResponse, noHeaders }\n\nfunc healthBody() -> String {\n  return \"{\\\"status\\\":\\\"ok\\\"}\"\n}\n\nfunc handleHealth(req: HttpRequest) -> HttpResponse\n  ensures result.status == 200\n{\n  return HttpResponse { status: 200, headers: noHeaders(), bodyText: healthBody() }\n}\n"
   ],
   "version": 3
 }

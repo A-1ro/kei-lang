@@ -11,6 +11,10 @@ import { handleCreateUser } from "../../dist/app/http_users";
 
 describe("GET /health", () => {
   it("常に 200 と { status: \"ok\" } を返す", async () => {
+    // handleHealth は uses Async を宣言しない同期ハンドラ(kei_emit は Promise を
+    // 返さない plain function を生成する)。mount() の handler 型が
+    // Awaitable<HttpResponse> に緩和されたことで、この同期ハンドラも
+    // `await handler(req)` 経由でそのまま疎通することを確認する(M39 レビュー対応)。
     const res = await app.request(new Request("http://localhost/health"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: "ok" });
@@ -59,7 +63,10 @@ describe("POST /users", () => {
     expect(body.clause).toBe("requires");
   });
 
-  it("HTTP 層を経由せず直接呼び出しても KeiContractViolation が reject として伝播する", async () => {
+  it("HTTP 層を経由せず直接呼び出しても KeiContractViolation が同期的に伝播する", () => {
+    // handleCreateUser は uses Async を宣言していないため kei_emit は同期関数を生成する
+    // (mount() の handler 型が Awaitable<HttpResponse> に緩和されたことで、これは
+    // 契約違反 = reject ではなく同期 throw になる — M39 レビュー対応)。
     const req: HttpRequest = {
       method: "POST",
       path: "/users",
@@ -67,6 +74,6 @@ describe("POST /users", () => {
       queryParams: new Map(),
       bodyText: Some('{"name":""}'),
     };
-    await expect(handleCreateUser(req)).rejects.toThrow(KeiContractViolation);
+    expect(() => handleCreateUser(req)).toThrow(KeiContractViolation);
   });
 });

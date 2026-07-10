@@ -38,27 +38,32 @@ export function buildCreatedResponse(user: UserRequest): HttpResponse {
   return acceptedResponse();
 }
 
-/**
- * uses Async
- */
-export async function handleCreateUser(req: HttpRequest): Promise<HttpResponse> {
+export function parseNonEmptyBody(text: string): HttpResponse {
+  if (text.length > 0) {
+    return (() => {
+      const kei$m0 = parseApp.parseUserRequest(text);
+      if (kei$m0.ok) {
+        const user = kei$m0.value;
+        return buildCreatedResponse(user);
+      }
+      if (!kei$m0.ok) {
+        return badRequestResponse();
+      }
+      throw new Error("non-exhaustive match");
+    })();
+  } else {
+    return badRequestResponse();
+  }
+}
+
+export function handleCreateUser(req: HttpRequest): HttpResponse {
   return (() => {
-    const kei$m0 = req.bodyText;
-    if (kei$m0.ok) {
-      const text = kei$m0.value;
-      return (() => {
-        const kei$m1 = parseApp.parseUserRequest(text);
-        if (kei$m1.ok) {
-          const user = kei$m1.value;
-          return buildCreatedResponse(user);
-        }
-        if (!kei$m1.ok) {
-          return badRequestResponse();
-        }
-        throw new Error("non-exhaustive match");
-      })();
+    const kei$m1 = req.bodyText;
+    if (kei$m1.ok) {
+      const text = kei$m1.value;
+      return parseNonEmptyBody(text);
     }
-    if (!kei$m0.ok) {
+    if (!kei$m1.ok) {
       return badRequestResponse();
     }
     throw new Error("non-exhaustive match");

@@ -9,11 +9,10 @@ export function healthBody(): string {
 }
 
 /**
- * uses Async
  * ensures result.status == 200
  */
-export async function handleHealth(req: HttpRequest): Promise<HttpResponse> {
-  const kei$result = await (async (): Promise<HttpResponse> => {
+export function handleHealth(req: HttpRequest): HttpResponse {
+  const kei$result = ((): HttpResponse => {
     return HttpResponse({ status: 200, headers: noHeaders(), bodyText: healthBody() });
   })();
   if (!(kei$result.status === 200)) {
@@ -22,7 +21,7 @@ export async function handleHealth(req: HttpRequest): Promise<HttpResponse> {
       func: "handleHealth",
       condition: "result.status == 200",
       file: "http_health.kei",
-      line: 11,
+      line: 10,
       col: 11,
     });
   }
