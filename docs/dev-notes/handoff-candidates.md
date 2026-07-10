@@ -1062,3 +1062,49 @@ spread)で上記に記録済み(候補 3 件)のため、新規候補なし。M3
 
 (no design-decision candidates for this PR)
 
+## PR #131: docs(v0.8): 追認 PR — 再設計コミットの追認 + レビュー指摘 4 件反映 — 2026-07-10 merged
+
+### Candidate: 手続き逸脱(main への直接 push で branch protection Bypass)は「追認 PR」で正す
+**Why this matters for HANDOFF.md**: main が保護されていても Bypass 権限を持つ運用者が「レビュー後の直し」を直接 push すると、レビュー履歴と HEAD が乖離し、将来「なぜこの形になったか」を辿れなくなる。運用ルールとリカバリ手順の両方を明文化しないと再発する。
+**Draft entry** (lift verbatim if approved):
+> `docs: vX.Y ロードマップ` を含む「設計の記録」変更は例外なく PR 経由でマージする(たとえ Bypass 権限があっても)。もし何らかの事情で main へ直接 push してしまった場合(PR #130 マージ後の bcdb666 のケース)、**追認 PR** を切って再レビューを通す。追認 PR は (a) 経緯と Bypass 発生の説明、(b) 独立再レビューで拾った指摘の反映、(c) 内容承認宣言、の 3 点を含める。remote push 時の branch protection 警告を「気付かず続行」しないよう、`git push` 出力は必ず目視する。
+
+### Candidate: `@kei/hono` は汎用アダプタ、record 固有パーサはアプリローカル TS wrapper に置く
+**Why this matters for HANDOFF.md**: v0.8 M39 で最初に踏まれる設計判断。「アダプタパッケージに書けば楽」という誘惑に対し、汎用/アプリ固有の責務境界を先に固定しておかないと `@kei/hono` が個別アプリの型でカオス化する。Kei にジェネリクスがない制約が絡む非自明な設計。
+**Draft entry** (lift verbatim if approved):
+> `@kei/hono` は汎用アダプタとして `parseAs<T>(text, shapeCheck) -> Option<T>`(TS 側の generic ヘルパー)だけを提供する。`parseUserRequest` のような record 固有 extern は **アプリ側のローカル TS wrapper**(例: `tests/cli/projects/app/app-extern/parse.ts`)で shapeCheck を定義し、Kei 側の `extern kh.parseUserRequest` を **アプリローカル npm パッケージ経由**(または `@kei/hono` の再エクスポート機構経由)で解決する。汎用アダプタにアプリ固有関数を混ぜない。Kei にジェネリクスがないため record 型ごとに専用 extern を書く必要があり、そのコード生成の置き場所を最初に決めないと `@kei/hono` が個別アプリの型で汚染される。
+
+### Candidate: v0.8 で String API を追加しない判断(v0.5 M30 の予告との整合)
+**Why this matters for HANDOFF.md**: 過去 Milestone の予告と現在の実装方針が食い違うとき、「なぜ予告どおりにやらなかったか」を残さないと将来「文字列 stdlib はどこで止まっているのか」を再調査するコストが発生する。設計判断の連続性を保つメタ情報。
+**Draft entry** (lift verbatim if approved):
+> v0.5 M30(文字列 stdlib 段階1)のスコープ外予告に「slice / indexOf / split / trim 等の本格 String API は v0.8 の HTTP 境界設計と合わせて段階2で」とあるが、v0.8 では **パース処理をアダプタ層(TS 側 shapeCheck)に押し出したため、Kei 側で文字列を分解する必要がなく、String API の追加は不要** と判断した。v0.9 以降で実需が確定した時点で独立 Milestone として扱う。「v0.8 で拡張しない」判断の理由はコードには現れないため設計ドキュメントに残す。
+
+### Candidate: v0.9 冒頭で `file:` 依存が wrangler(esbuild)bundling を通るか最初に確認する
+**Why this matters for HANDOFF.md**: v0.8 は `file:` 依存で閉じる設計だが、v0.9 の実 Workers デプロイでこの経路が破綻する可能性があり、破綻時は「npm 公開の前倒し」か「Workers テンプレートへの直接コピー」への切替が必要になる。v0.9 開始時に見落とすと Milestone 途中で設計変更を強いられる landmine。
+**Draft entry** (lift verbatim if approved):
+> v0.8 の `@kei/hono` および `tests/cli/packages/kei-hono/` は **file: 依存のみでスコープを閉じる**。v0.9 の wrangler(esbuild ベース)bundling で `file:` 参照解決が通るかは技術的に妥当だが未検証。**v0.9 冒頭でこの経路の疎通確認を最初に行うこと**(v0.9 の /goal 契約書に反映すべき)。破綻した場合の切替候補は (a) npm 公開の前倒し、(b) Workers テンプレート内への直接コピー。v0.8 実装中に「npm 公開すれば楽」と気付いても、v0.9 の疎通確認まで意思決定を保留する。
+
+<!-- hook note 2026-07-10: PostToolUse hook が非 merge コマンド(feat/m39-kei-hono-adapter
+サブエージェント上の `ls tests/cli/projects/app/expected/app/` + 既存 expected 10 ファイルの
+byte-level `cmp` による不変性確認 — M40 で追加される `http_*` 6 ファイルの新規作成と、既存
+expected(async_greet / greeter_hello / math)が変わっていないことを golden 不変条件の下で
+検証)で発火。最新 merged PR は #131(v0.8 追認 PR、docs のみ)で上記に記録済み(候補 4 件)の
+ため、新規候補なし。M39/M40 の @kei/hono アダプタ + HTTP 境界実装は未マージ — merge 後の
+hook 実行時に候補抽出する。 -->
+
+<!-- hook note 2026-07-10 (2nd): PostToolUse hook が非 merge コマンド
+(`git show HEAD --stat | grep -E "^ crates/.*/src/" | wc -l` + 同 `spec/` + `cargo check --workspace`)
+で発火。M39/M40 の HEAD commit が crates/src と spec/ を変更していない(共に 0 件)ことと
+workspace の compile 疎通を確認する diff 不変性チェック。最新 merged PR は依然 #131 で
+既に候補記録済みのため、新規候補なし。M39/M40 実装本体はまだ未マージ。 -->
+
+<!-- hook note 2026-07-10 (3rd): PostToolUse hook が非 merge コマンド
+(scratchpad/repro/test.kei に `Map.empty()` を record field 初期化式で使う最小 repro を
+書き出し → `kei check --json` で診断出力を確認)で発火。KEI-E2012 の
+「'Map.empty()' requires a type annotation to determine its key/value types」が record
+field 位置(`R { headers: Map.empty() }`)でも発火し、fix 提案が `let m: Map<...> = ...` の
+みで record field 文脈に対応していない、という M39 実装中に踏んだ既知挙動の裏取り。最新
+merged PR は依然 #131 で既に候補記録済みのため、新規候補なし。Map.empty() の record field
+文脈での型推論・fix 提案改善は M39/M40 本流の外の別 PR で扱うべき論点で、その PR が merge
+された時に候補抽出する。 -->
+
