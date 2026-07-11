@@ -48,6 +48,7 @@ kei_check  ←─ kei_emit
 3. spec/ と examples/ は kei_mcp にビルド時埋め込み(仕様更新=MCP サーバー更新)
 4. `runtime/` は Rust ワークスペース外の独立 npm パッケージ
 5. 正規形を常に維持する。Rust コードは `cargo fmt`、`.kei`(examples/・golden)は正規形(kei_fmt)を保つ。`.kei` の整形は `kei fmt --write <file>`(または `--check` で検証)で行える
+6. **対応済み issue は都度クローズする。** PR 本文に `Closes #N` を入れて自動クローズさせるか、マージ後にレビュー担当が `gh issue close <N> --reason completed --comment "..."` する。既存 issue が別 Milestone の副次効果で解消されたケース(例: #98 が M29+M31 で解消)も、実機で再現確認したら閉じる。open のまま塩漬けにしない
 
 ## コマンド
 
