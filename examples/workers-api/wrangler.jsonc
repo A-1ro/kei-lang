@@ -1,0 +1,8 @@
+// Kei v0.9 M40 スパイク兼 M42 雛形。
+// エントリポイントは Kei 生成物ではなく TS の Workers エントリ(設計原則 4)。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kei-workers-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-15"
+}

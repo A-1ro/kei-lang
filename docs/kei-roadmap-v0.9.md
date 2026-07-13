@@ -157,6 +157,21 @@ v0.8 契約書「設計原則 3」が明記した先送りリスクの回収。*
 - minify / tree-shaking の最適化検証。bundle が動くことだけ確認する。
 - wrangler dev を使う**恒久**テスト(疎通確認はスパイクのみ。恒久化は M43 の pool-workers)。
 
+### 実施記録 (2026-07-13, PR feat/m40-wrangler-spike)
+
+**判定: ✅ 疎通 OK**。file: 依存 × wrangler bundling + `wrangler dev` の 3 段疎通すべて成功。M41 以降は file: 依存のまま進行してよい(npm 公開前倒しやテンプレート内コピーは不要)。
+
+- 環境: `wrangler 4.110.0` / Node v22.21.1 / npm 10.9.4 / macOS Darwin 25.5.0。
+- 検証用プロジェクト: `examples/workers-api/` (M42 の骨組みとしてそのまま再利用)。
+  - `.kei` ソース: `http_model.kei`(`HttpRequest` / `HttpResponse` record + `noHeaders`)、`http_health.kei`(`handleHealth`, `ensures result.status == 200`)。
+  - TS エントリ: `src/index.ts` (`export default app` の Hono app + `mount(app, "get", "/health", handleHealth)` + 契約違反の中央処理)。
+  - 設定: `wrangler.jsonc`(`main: src/index.ts`, `compatibility_date: 2026-01-15`)、`package.json`(`@kei/runtime` / `@kei/hono` を file: 参照 + `hono ^4.9.0` + `wrangler ^4.0.0`)。
+- 実行結果:
+  1. `npx wrangler deploy --dry-run --outdir dist-wrangler` → **exit 0**。`Total Upload: 66.15 KiB / gzip: 16.35 KiB`。
+  2. bundle 内シンボル確認: `grep -c handleHealth dist-wrangler/index.js` → 4、`grep -c "function mount\|mount("` → 7。Kei ハンドラと `@kei/hono` の `mount` が両方 bundle に含まれる。
+  3. `npx wrangler dev --port 8787 --local` を起動し `curl -s http://127.0.0.1:8787/health` → **HTTP 200** / body `{"status":"ok"}`。
+- 結論: 「v0.8 契約書が明記した先送りリスク」は解消。M41(pathParams + String stdlib + closure DI + 契約違反 500 統一)に着手可。
+
 ## M41: HTTP アダプタ実配線 — pathParams + String stdlib 部分拡張 + closure DI + 契約違反 500 統一(#136)
 
 v0.8.0 ドッグフード(`docs/dogfood/2026-07-10-v0.8.0-stock-api-hono.md`、8/10 の減点理由)で
