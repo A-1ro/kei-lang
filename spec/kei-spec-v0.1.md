@@ -148,6 +148,9 @@ func totalStockValue(products: List<Product>) -> Int
 - `s.toInt() -> Option<Int>`(メソッド、引数0)。`^-?[0-9]+$` に一致し、かつ安全整数範囲(`Number.isSafeInteger`)に収まる文字列だけ `Some(n)`。それ以外(空文字・符号のみ・小数点・桁あふれ等)は `None`。
   `toInt()` を含む式は `kei check --generative`(PBT 生成、spec-v0.2 §5)の bounded 評価器が Option 値を未サポートのため評価不能扱いとなり、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 で追跡)。
 - `n.toString() -> String`(`Int` のメソッド、引数0)。10進表記の文字列を返す。
+- `s.split(delimiter: String) -> List<String>`(メソッド、引数1、v0.9 / M41)。TS の `String.prototype.split` に写る。`delimiter` で分割した部分文字列の `List<String>` を返す。区切り文字列が空文字列の場合も許容し、その場合は JS 準拠で code point ごとに分割する。
+- `s.indexOf(needle: String) -> Option<Int>`(メソッド、引数1、v0.9 / M41)。`String.prototype.indexOf` を `Option` でラップしたもの。`needle` が見つかれば `Some(pos)`(UTF-16 code unit index)、見つからなければ `None` を返す。`-1` 番兵は採らない。
+  `indexOf()` を含む式は `toInt()` と同じ理由(bounded 評価器が `Option` 値を未サポート)で `kei check --generative` が評価不能扱いとし、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 と同じ挙動)。
 
 いずれも純粋で副作用を持たず、`requires` / `ensures` 内でも使える。
 

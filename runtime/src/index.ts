@@ -71,6 +71,12 @@ export function keiStringToInt(s: string): Option<number> {
     : None();
 }
 
+/** String.indexOf(needle): 見つかれば Some(pos)、見つからなければ None(-1 番兵は採らない。spec §2.6 / M41)。 */
+export function keiStringIndexOf(s: string, needle: string): Option<number> {
+  const i = s.indexOf(needle);
+  return i < 0 ? None() : Some(i);
+}
+
 // ---- Map<K, V> のランタイムヘルパー(spec v0.3-collections §7 / M33) ----
 //
 // Map<K, V> は ReadonlyMap<K, V> にトランスパイルされ、has / size は TS の同名 API に
