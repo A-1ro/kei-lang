@@ -46,10 +46,11 @@ describe("POST /users", () => {
     expect(await res.json()).toEqual({ error: "invalid request" });
   });
 
-  it("name が空文字列は契約違反(requires)経由で 400 を返す(app.onError の中央処理)", async () => {
+  it("name が空文字列は契約違反(requires)経由で 500 を返す(app.onError の中央処理)", async () => {
     // shape check は通る(name は string 型)ので parseUserRequest は Some を返すが、
     // buildCreatedResponse の `requires user.name.length > 0` が発火して
-    // KeiContractViolation が投げられ、app.onError が捕捉して 400 に写す。
+    // KeiContractViolation が投げられ、app.onError が捕捉して 500 に写す
+    // (契約違反 = サーバ不変条件の破れとして 500 に統一。M41)。
     // 上のテストとは別経路であることに注意(こちらは onError 経由)。
     const res = await app.request(
       new Request("http://localhost/users", {
@@ -57,7 +58,7 @@ describe("POST /users", () => {
         body: JSON.stringify({ name: "" }),
       }),
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe("contract violation");
     expect(body.clause).toBe("requires");
@@ -72,8 +73,33 @@ describe("POST /users", () => {
       path: "/users",
       headers: new Map(),
       queryParams: new Map(),
+      pathParams: new Map(),
       bodyText: Some('{"name":""}'),
     };
     expect(() => handleCreateUser(req)).toThrow(KeiContractViolation);
+  });
+});
+
+describe("GET /ensures-probe", () => {
+  it("ensures 違反は契約違反経由で 500 を返す(clause: \"ensures\")", async () => {
+    const res = await app.request(new Request("http://localhost/ensures-probe"));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("contract violation");
+    expect(body.clause).toBe("ensures");
+  });
+});
+
+describe("GET /stock/:sku", () => {
+  it("在庫があれば 200 と qty を返す", async () => {
+    const res = await app.request(new Request("http://localhost/stock/ABC-1"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ qty: 42 });
+  });
+
+  it("未知の sku は 404 を返す", async () => {
+    const res = await app.request(new Request("http://localhost/stock/UNKNOWN"));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not found" });
   });
 });

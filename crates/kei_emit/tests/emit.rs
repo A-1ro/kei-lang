@@ -485,6 +485,44 @@ fn string_to_int_emits_runtime_helper() {
 }
 
 #[test]
+fn string_split_stays_native_method() {
+    let out = emit(concat!(
+        "func parts(s: String) -> List<String> {\n",
+        "  return s.split(\",\")\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return s.split(\",\");"),
+        "s.split(...) stays a native String.prototype.split call: {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_index_of_emits_runtime_helper() {
+    let out = emit(concat!(
+        "func findAt(s: String, needle: String) -> Option<Int> {\n",
+        "  return s.indexOf(needle)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return keiStringIndexOf(s, needle);"),
+        "s.indexOf(needle) -> keiStringIndexOf(s, needle): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiStringIndexOf")
+            && out.ts.contains("from \"@kei/runtime\";")
+            && out
+                .ts
+                .lines()
+                .any(|l| l.starts_with("import") && l.contains("keiStringIndexOf")),
+        "keiStringIndexOf import: {}",
+        out.ts
+    );
+}
+
+#[test]
 fn string_length_stays_property() {
     let out = emit(concat!(
         "func nameLength(name: String) -> Int {\n",

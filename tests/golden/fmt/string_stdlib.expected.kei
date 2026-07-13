@@ -3,3 +3,18 @@ module fmt.string_stdlib
 func greet(name: String, suffix: String) -> String {
   return name + suffix
 }
+
+func csvFirst(row: String) -> String {
+  let parts = row.split(",")
+  return match parts.get(0) {
+    Some(p) => p
+    None => ""
+  }
+}
+
+func findAt(s: String, needle: String) -> Int {
+  return match s.indexOf(needle) {
+    Some(pos) => pos
+    None => -1
+  }
+}

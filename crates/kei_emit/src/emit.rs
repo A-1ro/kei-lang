@@ -271,6 +271,12 @@ impl<'a> RuntimeUses<'a> {
                     if is_runtime_method(callee.as_ref(), args, self.list_ops, "toInt", 0) {
                         self.names.insert("keiStringToInt");
                     }
+                    // String.indexOf(needle) は keiStringIndexOf ランタイムヘルパーへ写す
+                    // (M41 / #136)。split はそのまま String.prototype.split に写るので
+                    // ヘルパー不要。
+                    if is_runtime_method(callee.as_ref(), args, self.list_ops, "indexOf", 1) {
+                        self.names.insert("keiStringIndexOf");
+                    }
                     // Map<K, V>.get(k) は keiMapGet ランタイムヘルパーへ写る(M33)。
                     // `Map.empty()` は `new Map()` に構文的に直写るため import 不要。
                     if is_runtime_method(callee.as_ref(), args, self.map_ops, "get", 1) {
@@ -1228,6 +1234,19 @@ impl Emitter<'_> {
             if let ast::Expr::Field { base, .. } = callee {
                 self.out.frag("keiStringToInt(");
                 self.emit_expr(base, Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
+        // String.indexOf(needle) → keiStringIndexOf(s, needle)(M41 / #136。Option でラップ
+        // するためランタイムヘルパー方式。split は JS の String.prototype.split と同じ
+        // シグネチャなので下の汎用フォールバックにそのまま乗る)。
+        if is_runtime_method(callee, args, self.list_ops, "indexOf", 1) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiStringIndexOf(");
+                self.emit_expr(base, Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[0], Prec::Implication);
                 self.out.frag(")");
                 return;
             }

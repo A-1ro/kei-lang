@@ -896,6 +896,7 @@ record HttpRequest {
   path: String
   headers: Map<String, String>
   queryParams: Map<String, String>
+  pathParams: Map<String, String>
   bodyText: Option<String>
 }
 
@@ -1033,28 +1034,82 @@ mount(app, "get", "/health", handleHealth);
 mount(app, "post", "/users", handleCreateUser);
 ```
 
-### 契約違反の 400 マッピング(`app.onError`)
+### パスパラメータと closure DI(v0.9 / M41)
+
+`HttpRequest.pathParams: Map<String, String>` は Hono のルートパターン(`:sku` のような
+セグメント)を `c.req.param()` から橋渡ししたもの。Kei ハンドラ側は普通の `Map.get` として
+読む(`tests/cli/projects/app/http_stock.kei` 抜粋):
+
+```kei
+module app.http_stock
+
+import app.http_model { HttpRequest, HttpResponse, noHeaders }
+
+record StockDeps {
+  inventory: Map<String, Int>
+}
+
+func lookupStock(deps: StockDeps, sku: String) -> HttpResponse
+  requires sku.length > 0
+{
+  return match deps.inventory.get(sku) {
+    Some(qty) => stockResponse(qty)
+    None => notFoundResponse()
+  }
+}
+
+func handleStock(deps: StockDeps, req: HttpRequest) -> HttpResponse {
+  return match req.pathParams.get("sku") {
+    Some(sku) => lookupStock(deps, sku)
+    None => notFoundResponse()
+  }
+}
+```
+
+Kei に DI コンテナは無いので、依存(在庫データ・Workers bindings 等)は **Kei 関数の第1引数**
+として渡し、TS 側で closure による部分適用でルートに登録する。Workers の KV / D1 / 環境変数
+なども同じ形で `deps` に詰めて渡すのが定型(Workers 固有の型そのものは Kei に露出させない
+—「設計原則」節参照):
+
+```ts
+import { handleStock } from "../../dist/app/http_stock";
+
+const inventory = new Map<string, number>([
+  ["ABC-1", 42],
+  ["XYZ-9", 0],
+]);
+const stockDeps = { inventory };
+
+mount(app, "get", "/stock/:sku", (req) => handleStock(stockDeps, req));
+```
+
+### 契約違反の 500 マッピング(`app.onError`)
 
 `mount()` は `KeiContractViolation` を捕捉せずそのまま投げる。中央処理は呼び出し側が
-Hono の `app.onError` で行う設計:
+Hono の `app.onError` で行う設計。契約違反(`requires` / `ensures` どちらも)は
+「サーバ不変条件の破れ」として **500** に統一する(v0.9 / M41 — v0.8 時点の 400 マッピングは
+クライアント都合のエラーと混同するため修正した):
 
 ```ts
 app.onError((err, c) => {
   if (err instanceof KeiContractViolation) {
     return c.json(
       { error: "contract violation", clause: err.clause, condition: err.condition },
-      400,
+      500,
     );
   }
   throw err;
 });
 ```
 
-**JSON parse 失敗による 400 と契約違反による 400 は別経路**であることに注意する。前者は
-`parseUserRequest` が `None` を返し、Kei の `match` が業務ロジックとして `badRequestResponse()`
-を直接返す(例外は発生しない)。後者は `buildCreatedResponse` の `requires user.name.length > 0`
-が発火して `KeiContractViolation` が例外として投げられ、`app.onError` が捕捉して 400 に写す。
-どちらも HTTP 応答は 400 だが、経路も body の形も異なるので握り潰さずに書き分けること。
+**JSON parse 失敗による 400(ロジック)と契約違反による 500(契約)は別経路**であることに
+注意する。前者は `parseUserRequest` が `None` を返し、Kei の `match` が業務ロジックとして
+`badRequestResponse()` を直接返す(例外は発生しない、responsibility はクライアント入力)。
+後者は `buildCreatedResponse` の `requires user.name.length > 0` が発火して
+`KeiContractViolation` が例外として投げられ、`app.onError` が捕捉して 500 に写す
+(responsibility はサーバ側の不変条件)。責務分担: **400 はクライアント都合のロジック判定
+(JSON parse 失敗など)、500 はサーバ不変条件の破れ(契約違反)**。経路も body の形も異なるので
+握り潰さずに書き分けること。
 
 ### Set-Cookie 非対応・v0.8 のスコープ外
 

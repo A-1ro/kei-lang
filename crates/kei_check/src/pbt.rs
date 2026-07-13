@@ -995,8 +995,11 @@ fn eval_expr(
                     Value::Int(n) if name.name == "toString" => {
                         return Ok(Value::Str(n.to_string()));
                     }
-                    // Option 値を評価器は持たないため Unsupported に倒す(get と同じ扱い。M30 / #107)。
-                    Value::Str(_) if name.name == "toInt" => {
+                    // Option / List<String> 値を評価器は持たないため Unsupported に倒す
+                    // (get と同じ扱い。toInt: M30 / #107, split & indexOf: M41 / #136)。
+                    Value::Str(_)
+                        if matches!(name.name.as_str(), "toInt" | "split" | "indexOf") =>
+                    {
                         return Err(EvalError::Unsupported);
                     }
                     _ => {}

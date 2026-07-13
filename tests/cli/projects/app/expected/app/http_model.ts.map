@@ -1,12 +1,12 @@
 {
   "file": "http_model.ts",
-  "mappings": ";;;;;AAEA;EACE;EACA;EACA;EACA;EACA;;;;;;;AAGF;EACE;EACA;EACA;;;;;;;AAOF;EACE",
+  "mappings": ";;;;;AAEA;EACE;EACA;EACA;EACA;EACA;EACA;;;;;;;AAGF;EACE;EACA;EACA;;;;;;;AAOF;EACE",
   "names": [],
   "sources": [
     "http_model.kei"
   ],
   "sourcesContent": [
-    "module app.http_model\n\nrecord HttpRequest {\n  method: String\n  path: String\n  headers: Map<String, String>\n  queryParams: Map<String, String>\n  bodyText: Option<String>\n}\n\nrecord HttpResponse {\n  status: Int\n  headers: Map<String, String>\n  bodyText: String\n}\n\n// record field 値への直接 Map.empty() 埋め込みは expected_ty が伝播せず KEI-E2012 になる\n// (issue #133、kei_check 側の既知ギャップ)。戻り値型を明示したこの関数を経由するのが\n// v0.8 時点の回避策。v1.x で解消され次第、record リテラル内で直接 Map.empty() と\n// 書けるようになる想定。\nfunc noHeaders() -> Map<String, String> {\n  return Map.empty()\n}\n"
+    "module app.http_model\n\nrecord HttpRequest {\n  method: String\n  path: String\n  headers: Map<String, String>\n  queryParams: Map<String, String>\n  pathParams: Map<String, String>\n  bodyText: Option<String>\n}\n\nrecord HttpResponse {\n  status: Int\n  headers: Map<String, String>\n  bodyText: String\n}\n\n// record field 値への直接 Map.empty() 埋め込みは expected_ty が伝播せず KEI-E2012 になる\n// (issue #133、kei_check 側の既知ギャップ)。戻り値型を明示したこの関数を経由するのが\n// v0.8 時点の回避策。v1.x で解消され次第、record リテラル内で直接 Map.empty() と\n// 書けるようになる想定。\nfunc noHeaders() -> Map<String, String> {\n  return Map.empty()\n}\n"
   ],
   "version": 3
 }

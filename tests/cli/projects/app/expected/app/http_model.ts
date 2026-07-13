@@ -8,6 +8,7 @@ export type HttpRequest = {
   readonly path: string;
   readonly headers: ReadonlyMap<string, string>;
   readonly queryParams: ReadonlyMap<string, string>;
+  readonly pathParams: ReadonlyMap<string, string>;
   readonly bodyText: Option<string>;
 };
 

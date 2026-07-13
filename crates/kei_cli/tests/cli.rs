@@ -630,7 +630,7 @@ fn build_golden_tree() {
     assert_eq!(run.code, 0, "build failed: stderr={:?}", run.stderr);
     assert_eq!(run.stdout, "", "build must not write stdout");
     assert!(
-        run.stderr.contains("wrote 8 module(s)"),
+        run.stderr.contains("wrote 10 module(s)"),
         "build summary missing: stderr={:?}",
         run.stderr
     );

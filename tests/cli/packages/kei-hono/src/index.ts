@@ -18,6 +18,7 @@ export interface HttpRequest {
   readonly path: string;
   readonly headers: ReadonlyMap<string, string>;
   readonly queryParams: ReadonlyMap<string, string>;
+  readonly pathParams: ReadonlyMap<string, string>;
   readonly bodyText: Option<string>;
 }
 
@@ -40,6 +41,7 @@ export async function fromContext(c: Context): Promise<HttpRequest> {
     path: c.req.path,
     headers: new Map(Object.entries(c.req.header())),
     queryParams: new Map(Object.entries(c.req.query())),
+    pathParams: new Map(Object.entries(c.req.param())),
     bodyText: Some(bodyText),
   };
 }

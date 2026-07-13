@@ -1,0 +1,31 @@
+module app.http_stock
+
+import app.http_model { HttpRequest, HttpResponse, noHeaders }
+
+record StockDeps {
+  inventory: Map<String, Int>
+}
+
+func stockResponse(qty: Int) -> HttpResponse {
+  return HttpResponse { status: 200, headers: noHeaders(), bodyText: "{\"qty\":" + qty.toString() + "}" }
+}
+
+func notFoundResponse() -> HttpResponse {
+  return HttpResponse { status: 404, headers: noHeaders(), bodyText: "{\"error\":\"not found\"}" }
+}
+
+func lookupStock(deps: StockDeps, sku: String) -> HttpResponse
+  requires sku.length > 0
+{
+  return match deps.inventory.get(sku) {
+    Some(qty) => stockResponse(qty)
+    None => notFoundResponse()
+  }
+}
+
+func handleStock(deps: StockDeps, req: HttpRequest) -> HttpResponse {
+  return match req.pathParams.get("sku") {
+    Some(sku) => lookupStock(deps, sku)
+    None => notFoundResponse()
+  }
+}

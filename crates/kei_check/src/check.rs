@@ -178,7 +178,7 @@ const LIST_BUILTIN_METHODS: &[&str] = &[
 const MAP_BUILTIN_MEMBERS: &[&str] = &["get", "set", "has", "size"];
 
 /// String の未知メンバー診断の did-you-mean 候補(field_on / string_method で共有)。
-const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt"];
+const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt", "split", "indexOf"];
 
 /// Int の未知メンバー診断の did-you-mean 候補(field_on / int_method で共有)。
 const INT_BUILTIN_MEMBERS: &[&str] = &["toString"];
@@ -2218,6 +2218,16 @@ impl FnChecker<'_> {
                     );
                     Ty::Unknown
                 }
+                "split" | "indexOf" => {
+                    let m = name.name.clone();
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("'{m}' is a String method; call it as 's.{m}(...)'"),
+                        name.span,
+                        vec![direction(format!("Call the method: 's.{m}(...)'"))],
+                    );
+                    Ty::Unknown
+                }
                 _ => {
                     let members = STRING_BUILTIN_MEMBERS;
                     let fix = match suggestion(&name.name, members.iter().copied()) {
@@ -2834,6 +2844,28 @@ impl FnChecker<'_> {
                     self.infer(a);
                 }
                 Ty::Int
+            }
+            "split" => {
+                self.expect_arity("split", 1, args, span);
+                if let Some(a) = args.first() {
+                    let at = self.infer(a);
+                    self.check_assign(&Ty::Str, &at, a.span());
+                }
+                for a in args.iter().skip(1) {
+                    self.infer(a);
+                }
+                Ty::List(Box::new(Ty::Str))
+            }
+            "indexOf" => {
+                self.expect_arity("indexOf", 1, args, span);
+                if let Some(a) = args.first() {
+                    let at = self.infer(a);
+                    self.check_assign(&Ty::Str, &at, a.span());
+                }
+                for a in args.iter().skip(1) {
+                    self.infer(a);
+                }
+                Ty::Option(Box::new(Ty::Int))
             }
             other => {
                 let members = STRING_BUILTIN_MEMBERS;

@@ -1,0 +1,9 @@
+module app.http_ensures_probe
+
+import app.http_model { HttpRequest, HttpResponse, noHeaders }
+
+func brokenHandler(req: HttpRequest) -> HttpResponse
+  ensures result.status == 200
+{
+  return HttpResponse { status: 500, headers: noHeaders(), bodyText: "{}" }
+}
