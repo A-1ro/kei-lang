@@ -5,6 +5,7 @@ record HttpRequest {
   path: String
   headers: Map<String, String>
   queryParams: Map<String, String>
+  pathParams: Map<String, String>
   bodyText: Option<String>
 }
 
