@@ -1,0 +1,87 @@
+module workers_api.api
+
+// Kei v0.9 M42 Workers テンプレート: 在庫 API の全ハンドラを 1 モジュールにまとめた版。
+//
+// 責務分担(v0.9 設計原則 4):
+//   - Kei(このファイル): API のビジネスロジック(record・純粋関数・契約)。
+//   - TS(src/index.ts): Workers エントリポイント・Hono app 組み立て・mount()・
+//     契約違反の中央処理(app.onError → 500)・依存(在庫マスタ)の closure DI。
+//   - wrangler(wrangler.jsonc): bundling(esbuild)と workerd 起動。
+// ---- HTTP 境界 record ----------------------------------------------------
+// TS 側の @kei/hono アダプタが Hono の Context から埋めて渡す。
+// bindings(env/D1/KV) は Kei に露出させない — pathParams など平坦な値だけを持つ。
+record HttpRequest {
+  method: String
+  path: String
+  headers: Map<String, String>
+  queryParams: Map<String, String>
+  pathParams: Map<String, String>
+  bodyText: Option<String>
+}
+
+record HttpResponse {
+  status: Int
+  headers: Map<String, String>
+  bodyText: String
+}
+
+// record リテラル直下に Map.empty() を書くと expected_ty が伝播せず KEI-E2012 に
+// なる v0.8 時点の既知ギャップ(issue #133)の回避。戻り値型を明示したこの関数を経由する。
+func noHeaders() -> Map<String, String> {
+  return Map.empty()
+}
+
+// ---- GET /health --------------------------------------------------------
+// 契約なし・依存なしの最小ハンドラ。
+func healthBody() -> String {
+  return "{\"status\":\"ok\"}"
+}
+
+func handleHealth(req: HttpRequest) -> HttpResponse
+  ensures result.status == 200
+{
+  return HttpResponse { status: 200, headers: noHeaders(), bodyText: healthBody() }
+}
+
+// ---- GET /stock/:sku ----------------------------------------------------
+// 在庫マスタ(依存)。実プロジェクトでは TS 側で env(KV/D1/vars)から読み出して
+// この record に写してから渡す(bindings は Kei に露出させない — 設計原則 3)。
+record StockDeps {
+  inventory: Map<String, Int>
+}
+
+func stockResponse(qty: Int) -> HttpResponse {
+  return HttpResponse { status: 200, headers: noHeaders(), bodyText: "{\"qty\":" + qty.toString() + "}" }
+}
+
+func notFoundResponse() -> HttpResponse {
+  return HttpResponse { status: 404, headers: noHeaders(), bodyText: "{\"error\":\"not found\"}" }
+}
+
+// requires は「サーバ不変条件」— mount() 側で pathParams が埋まっていれば sku は非空のはず。
+// 破れたら 500 に写る(v0.9 M41: 契約違反 = サーバ異常)。
+func lookupStock(deps: StockDeps, sku: String) -> HttpResponse
+  requires sku.length > 0
+{
+  return match deps.inventory.get(sku) {
+    Some(qty) => stockResponse(qty)
+    None => notFoundResponse()
+  }
+}
+
+// closure DI 定型: deps は第1引数、req は第2引数。TS 側で
+// `mount(app, "get", "/stock/:sku", (req) => handleStock(deps, req))` と部分適用する。
+//
+// `requires req.pathParams.has("sku")` はサーバ不変条件(mount() が Hono の
+// `c.req.param()` から sku を必ず埋める)を明文化する。破れたら M41 の統一に従い
+// `app.onError` 経由で **500** に写る。None を静かに 404 に降格させると mount 実装の
+// バグ・ルート誤配線が「在庫なし」と区別のつかない 404 になり隠蔽されるためこの契約を置く。
+func handleStock(deps: StockDeps, req: HttpRequest) -> HttpResponse
+  requires req.pathParams.has("sku")
+{
+  // requires が保証するので None arm には実行時到達しない(パターン網羅要件のためのみ残す)。
+  return match req.pathParams.get("sku") {
+    Some(sku) => lookupStock(deps, sku)
+    None => notFoundResponse()
+  }
+}
