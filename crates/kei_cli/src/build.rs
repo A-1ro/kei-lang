@@ -44,10 +44,31 @@ pub fn run(dir: &Path, out_dir: Option<&Path>, source_map: bool) -> Result<u8, U
     }
 
     // 全ファイルを先に検査(all-or-nothing)。1 件でもエラーなら何も書かない。
-    // M20: `kei build <dir>` は `<dir>` を共通の project root とみなして
-    // resolver を 1 つ作り、全 emit 呼び出しで共有する(import 解決と
-    // List メソッド検出を `kei check` と整合させる)。
-    let resolver = crate::resolve::FsModuleResolver::new(dir.to_path_buf());
+    // M20: resolver を 1 つ作り、全 emit 呼び出しで共有する(import 解決と
+    // List/Map メソッド検出を `kei check` と整合させる)。
+    //
+    // root の決め方(M41 / #136 バグ修正): 以前は `<dir>` をそのまま project root と
+    // みなしていたが、`module a.b` 宣言のファイルが `<dir>/b.kei`(`<dir>` 自体が
+    // セグメント `a` を兼ねる、フラットなレイアウト)に置かれるプロジェクト
+    // (tests/cli/projects/app が典型例)では `<root>/a/b.kei` を探しに行って
+    // 解決失敗 → import が silent に opaque(`Ty::Unknown`)へ倒れ、Map<K,V> フィールドの
+    // `.get(...)` が `keiMapGet` でラップされず TS 側で `Option` と生の `T | undefined` が
+    // 混同される、というランタイム不整合を診断ゼロで見逃していた(`kei check <file>` は
+    // `derive_root` で正しい root を毎回計算していたため顕在化しなかった)。
+    // `kei check` と同じ `derive_root`(ファイルの `module` 宣言から逆算)を、検査対象の
+    // 先頭から解決できた最初のファイルに適用し、失敗時のみ従来の `<dir>` にフォールバックする。
+    let root = files
+        .iter()
+        .find_map(|file| {
+            let source = std::fs::read_to_string(file).ok()?;
+            let parsed = kei_syntax::parse_module(&source);
+            if !parsed.errors.is_empty() {
+                return None;
+            }
+            crate::resolve::derive_root(file, &parsed.module)
+        })
+        .unwrap_or_else(|| dir.to_path_buf());
+    let resolver = crate::resolve::FsModuleResolver::new(root);
     let mut outputs: Vec<EmitOutput> = Vec::new();
     let mut failures: Vec<(String, Vec<Diagnostic>)> = Vec::new();
     for file in &files {
