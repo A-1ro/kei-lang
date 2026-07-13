@@ -2208,7 +2208,17 @@ impl FnChecker<'_> {
             },
             Ty::Str => match name.name.as_str() {
                 "length" => Ty::Int,
-                "toInt" | "split" | "indexOf" => {
+                "toInt" => {
+                    let m = name.name.clone();
+                    self.push(
+                        codes::UNKNOWN_FIELD,
+                        format!("'{m}' is a String method; call it as 's.{m}()'"),
+                        name.span,
+                        vec![direction(format!("Call the method: 's.{m}()'"))],
+                    );
+                    Ty::Unknown
+                }
+                "split" | "indexOf" => {
                     let m = name.name.clone();
                     self.push(
                         codes::UNKNOWN_FIELD,
