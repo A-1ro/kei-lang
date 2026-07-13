@@ -1,0 +1,19 @@
+module workers_api.http_model
+
+record HttpRequest {
+  method: String
+  path: String
+  headers: Map<String, String>
+  queryParams: Map<String, String>
+  bodyText: Option<String>
+}
+
+record HttpResponse {
+  status: Int
+  headers: Map<String, String>
+  bodyText: String
+}
+
+func noHeaders() -> Map<String, String> {
+  return Map.empty()
+}

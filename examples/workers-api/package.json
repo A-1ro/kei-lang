@@ -1,0 +1,21 @@
+{
+  "name": "kei-examples-workers-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Kei v0.9 M40 スパイク兼 M42 雛形: Cloudflare Workers 上に Hono + @kei/hono で Kei ハンドラを載せる最小テンプレート。file: 依存 × wrangler(esbuild) bundling の疎通確認用。",
+  "scripts": {
+    "kei:build": "cargo run -q -p kei_cli --bin kei -- build . --out-dir dist",
+    "dry-run": "wrangler deploy --dry-run --outdir dist-wrangler",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@kei/runtime": "file:../../runtime",
+    "@kei/hono": "file:../../tests/cli/packages/kei-hono",
+    "hono": "^4.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
+  }
+}
