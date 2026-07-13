@@ -13,8 +13,13 @@
   "files": ["dist", "src"],
   "scripts": { "build": "tsc -p tsconfig.json" },
   "dependencies": {
-    "hono": "^4.9.0",
     "@kei/runtime": "file:../../../../runtime"
   },
-  "devDependencies": { "typescript": "^6.0.3" }
+  "peerDependencies": {
+    "hono": "^4.9.0"
+  },
+  "devDependencies": {
+    "hono": "^4.9.0",
+    "typescript": "^6.0.3"
+  }
 }

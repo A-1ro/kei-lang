@@ -1111,6 +1111,46 @@ app.onError((err, c) => {
 (JSON parse 失敗など)、500 はサーバ不変条件の破れ(契約違反)**。経路も body の形も異なるので
 握り潰さずに書き分けること。
 
+### Workers にデプロイする(v0.9 / M42)
+
+Kei で書いた API を Cloudflare Workers に載せる最小テンプレートが `examples/workers-api/` にある(在庫 API 題材: `GET /health` + `GET /stock/:sku`)。**初見の人がこのディレクトリをコピーして始められる**構成。
+
+**責務分担**(v0.9 設計原則 4):
+
+| 層 | 何を書くか | 場所 |
+|---|---|---|
+| Kei | API のビジネスロジック(ハンドラ関数・record・契約) | `workers_api/*.kei` → `dist/` |
+| TS | Workers エントリポイント / Hono app 組み立て / `mount()` / 依存注入 / 契約違反の中央処理 | `src/index.ts` |
+| wrangler | bundling(esbuild)と workerd 起動 | `wrangler.jsonc` |
+
+**bindings を Kei に露出させない**(設計原則 3): `env`(KVNamespace / D1Database / Secrets / vars)・`ExecutionContext` は TS 側の `fetch(request, env, ctx)` だけが触る。Kei ハンドラに渡すのは env から読み出した値を詰めた平坦な record(HttpRequest / deps record)のみ。KV/D1 の実接続を Kei から行いたい場合も v0.9 では extern 経由の TS wrapper で表現する(bindings 型を extern 署名に書かない)。
+
+**セットアップ**(リポジトリルートから):
+
+```bash
+# 1. @kei/runtime と @kei/hono の dist を作る(file: 依存の解決先)
+(cd runtime && npm install && npm run build)
+(cd tests/cli/packages/kei-hono && npm install && npm run build)
+
+# 2. Kei ソースを TS にトランスパイル
+cargo run -q -p kei_cli --bin kei -- build examples/workers-api --out-dir examples/workers-api/dist
+
+# 3. workers-api の依存を入れる
+(cd examples/workers-api && npm install)
+
+# 4. wrangler の bundling が通ることを確認
+(cd examples/workers-api && npx wrangler deploy --dry-run --outdir dist-wrangler)
+
+# 5. wrangler dev を起動して叩く
+(cd examples/workers-api && npx wrangler dev --port 8787 --local &)
+curl -s http://127.0.0.1:8787/health         # -> {"status":"ok"}
+curl -s http://127.0.0.1:8787/stock/ABC-1    # -> {"qty":42}
+```
+
+**実 Cloudflare へのデプロイ(`wrangler deploy` 本番)は v1.0 の領分**。v0.9 テンプレートはローカル(`wrangler dev` / workerd)まで。
+
+**恒久 e2e** は M43 の vitest-pool-workers 側で担う(このディレクトリ内では `wrangler dev` は手動確認専用)。
+
 ### Set-Cookie 非対応・v0.8 のスコープ外
 
 - `Map<K, V>` は単一値なので複数の `Set-Cookie` ヘッダーを素直に表現できない。**v0.8 では
