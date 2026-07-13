@@ -41,5 +41,7 @@ describe("契約違反 → 500(業務エラー 400 系とは別経路)", () => {
     expect(body.error).toBe("contract violation");
     expect(body.clause).toBe("ensures");
     expect(typeof body.condition).toBe("string");
+    // requires 側と対称: どの契約式が破れたかの情報が空文字列に退化していないことを守る。
+    expect(body.condition.length).toBeGreaterThan(0);
   });
 });

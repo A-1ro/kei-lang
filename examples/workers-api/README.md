@@ -81,7 +81,22 @@ curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8787/debug/violate
 # -> HTTP 500
 ```
 
-自プロジェクトに写すときはこの `/debug/violate` を残しておくと、`app.onError` の中央処理が実配線どおりに動いていることを常時セルフチェックできる(本番配備時は削除するか rate-limit 保護する)。恒久 e2e(vitest-pool-workers)は M43 で追加予定。
+自プロジェクトに写すときはこの `/debug/violate` を残しておくと、`app.onError` の中央処理が実配線どおりに動いていることを常時セルフチェックできる(本番配備時の扱いは下記チェックリスト参照)。恒久 e2e(vitest-pool-workers)は M43 で追加。
+
+## 本番デプロイ前チェックリスト(debug 経路の扱い)
+
+`/debug/violate` と `/debug/ensures-violate` は **契約違反 → 500 集約経路** を実配線で観測するための実演専用エンドポイント。素通しで本番に出ると「常時 500 を返す公開エンドポイント」として露出しうるため、以下の安全弁を設けてある:
+
+- `src/index.ts` の `/debug/*` ミドルウェアが **`env.ENABLE_DEBUG_ROUTES === "true"` のときだけ配線する**。未設定なら 404(Hono の `notFound`)を返す。
+- 本テンプレの `wrangler.jsonc` には `vars.ENABLE_DEBUG_ROUTES` を **意図的に書いていない**(＝本番デプロイでは自動的に無効)。
+- e2e 実行(`npm test`)では `vitest.config.ts` の `miniflare.bindings.ENABLE_DEBUG_ROUTES = "true"` が注入されるので、workerd 上でだけ有効になる。
+
+**本番デプロイ時にチェックすること**:
+
+- [ ] `wrangler.jsonc` の `vars` に `ENABLE_DEBUG_ROUTES` を追加していないか(未設定＝安全)
+- [ ] Cloudflare ダッシュボード側で `ENABLE_DEBUG_ROUTES` を設定していないか
+- [ ] デプロイ後に `curl -s -o /dev/null -w "%{http_code}\n" https://<your-worker>/debug/violate` が **404** を返すことを確認
+- [ ] 実プロダクションで契約違反実演が不要なら、`src/index.ts` の `/debug/*` ミドルウェア＋2 ハンドラごと削除する(ガードがある以上必須ではないが、コード量削減として)
 
 ## v0.9 時点での制限
 

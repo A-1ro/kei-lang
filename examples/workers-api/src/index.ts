@@ -29,11 +29,25 @@ const stockDeps = { inventory };
 
 mount(app, "get", "/stock/:sku", (req) => handleStock(stockDeps, req));
 
-// GET /debug/violate — 契約違反 → 500 集約経路の実演専用エンドポイント。
+// /debug/* は「契約違反 → 500 集約経路」を実配線で観測するためのテンプレ内実演導線。
+// 本番デプロイに紛れ込むと『常時 500 を返す公開エンドポイント』として露出しうるため、
+// **`ENABLE_DEBUG_ROUTES` 環境変数が "true" のときだけ配線する**(未設定＝配線なし＝404)。
+// e2e (vitest-pool-workers) 側は vitest.config.ts の `miniflare.bindings` で "true" を注入する。
+// 本番用 wrangler.jsonc の `vars` にはこの変数を書かない。README のチェックリスト参照。
+type DebugEnv = { ENABLE_DEBUG_ROUTES?: string };
+
+app.use("/debug/*", async (c, next) => {
+  const env = c.env as DebugEnv | undefined;
+  if (env?.ENABLE_DEBUG_ROUTES !== "true") {
+    return c.notFound();
+  }
+  await next();
+});
+
+// GET /debug/violate — requires 違反 → 500 集約経路の実演専用エンドポイント。
 // pathParams を空にした HttpRequest で handleStock を直接呼び、`requires
 // req.pathParams.has("sku")` を確実に破る。app.onError → 500 の中央処理が
 // 実配線どおりに動くかを、テンプレート単独(M43 の pool-workers e2e を待たず)で確かめる導線。
-// 本番配備時は削除するか rate-limit 保護する。
 app.get("/debug/violate", () => {
   const badReq = {
     method: "GET",
