@@ -1,7 +1,7 @@
 {
   "name": "kei",
-  "description": "Kei 言語を学習なしで正しく書くためのスキル。func/契約/エフェクト/型/失敗処理の最小十分セットと、kei check による検証ループを提供する(v0.8: @kei/hono アダプタ + HTTP/JSON 境界 e2e。言語機能変更ゼロの版だが、アダプタ + パターンで Hono API 記述が可能になった。v0.7 uses Async エフェクト + async 関数コア + 契約 async e2e + MCP スキップ可視化。v0.6 extern package は簡潔に維持)。",
-  "version": "0.8.0",
+  "description": "Kei 言語を学習なしで正しく書くためのスキル。func/契約/エフェクト/型/失敗処理の最小十分セットと、kei check による検証ループを提供する(v0.9: Workers テンプレート & デプロイ — examples/workers-api 在庫 API + wrangler dev/pool-workers e2e + pathParams + String split/indexOf + closure DI + 契約違反 500 統一。言語機能追加は最小(String stdlib 段階2 の部分拡張のみ)。v0.8 @kei/hono アダプタ + HTTP/JSON 境界 e2e。v0.7 uses Async エフェクト + async 関数コア。v0.6 extern package)。",
+  "version": "0.9.0",
   "author": {
     "name": "Eiichiro Iriguchi"
   },
