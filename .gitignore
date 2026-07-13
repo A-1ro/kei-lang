@@ -7,3 +7,4 @@ node_modules/
 /tests/cli/projects/*/dist/
 editors/.DS_Store
 .vscode/settings.json
+tmp/
