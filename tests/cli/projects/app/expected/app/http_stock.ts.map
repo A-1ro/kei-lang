@@ -1,0 +1,12 @@
+{
+  "file": "http_stock.ts",
+  "mappings": ";;;;AAEA;;AAEA;EACE;;;;;;;AAGF;EACE;;;AAGF;EACE;;;;;;AAGF;EACW;IAAA;;;;;;;;;EAET;IAAa;IACX;;MAAa;;IACb;MAAQ;;;;;;AAIZ;EACE;IAAa;IACX;;MAAa;;IACb;MAAQ",
+  "names": [],
+  "sources": [
+    "http_stock.kei"
+  ],
+  "sourcesContent": [
+    "module app.http_stock\n\nimport app.http_model { HttpRequest, HttpResponse, noHeaders }\n\nrecord StockDeps {\n  inventory: Map<String, Int>\n}\n\nfunc stockResponse(qty: Int) -> HttpResponse {\n  return HttpResponse { status: 200, headers: noHeaders(), bodyText: \"{\\\"qty\\\":\" + qty.toString() + \"}\" }\n}\n\nfunc notFoundResponse() -> HttpResponse {\n  return HttpResponse { status: 404, headers: noHeaders(), bodyText: \"{\\\"error\\\":\\\"not found\\\"}\" }\n}\n\nfunc lookupStock(deps: StockDeps, sku: String) -> HttpResponse\n  requires sku.length > 0\n{\n  return match deps.inventory.get(sku) {\n    Some(qty) => stockResponse(qty)\n    None => notFoundResponse()\n  }\n}\n\nfunc handleStock(deps: StockDeps, req: HttpRequest) -> HttpResponse {\n  return match req.pathParams.get(\"sku\") {\n    Some(sku) => lookupStock(deps, sku)\n    None => notFoundResponse()\n  }\n}\n"
+  ],
+  "version": 3
+}

@@ -1,0 +1,12 @@
+{
+  "file": "http_ensures_probe.ts",
+  "mappings": ";;;;AAEA;;;;;AAEA;;IAGE;;EAFQ;IAAA",
+  "names": [],
+  "sources": [
+    "http_ensures_probe.kei"
+  ],
+  "sourcesContent": [
+    "module app.http_ensures_probe\n\nimport app.http_model { HttpRequest, HttpResponse, noHeaders }\n\nfunc brokenHandler(req: HttpRequest) -> HttpResponse\n  ensures result.status == 200\n{\n  return HttpResponse { status: 500, headers: noHeaders(), bodyText: \"{}\" }\n}\n"
+  ],
+  "version": 3
+}
