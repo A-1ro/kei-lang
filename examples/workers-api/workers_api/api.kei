@@ -85,3 +85,13 @@ func handleStock(deps: StockDeps, req: HttpRequest) -> HttpResponse
     None => notFoundResponse()
   }
 }
+
+// ---- GET /debug/ensures-violate ----------------------------------------
+// M43 e2e 用: ensures 違反を必ず観測させる経路。ensures result.status == 200 を
+// 宣言しつつ 500 を返すため、契約実装により実行時に KeiContractViolation(ensures)
+// が投げられ、app.onError で 500 に写る。本番配備時は削除するか rate-limit 保護する。
+func brokenEnsuresHandler(req: HttpRequest) -> HttpResponse
+  ensures result.status == 200
+{
+  return HttpResponse { status: 500, headers: noHeaders(), bodyText: "{\"error\":\"unreachable\"}" }
+}

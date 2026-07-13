@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { mount } from "@kei/hono";
 import { KeiContractViolation, None } from "@kei/runtime";
 
-import { handleHealth, handleStock } from "../dist/workers_api/api";
+import { handleHealth, handleStock, brokenEnsuresHandler } from "../dist/workers_api/api";
 
 const app = new Hono();
 
@@ -47,6 +47,9 @@ app.get("/debug/violate", () => {
   // requires が破れているのでここには到達しない。到達したら 500 集約経路が壊れている合図。
   return new Response(res.bodyText, { status: res.status });
 });
+
+// GET /debug/ensures-violate — ensures 違反 → 500 集約経路の実演専用エンドポイント。
+mount(app, "get", "/debug/ensures-violate", brokenEnsuresHandler);
 
 // 契約違反 → 500 の中央処理。requires / ensures の区別はしない
 // (どちらも「サーバ不変条件が破れた」= サーバ異常 として 500)。

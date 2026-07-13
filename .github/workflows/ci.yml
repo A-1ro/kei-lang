@@ -39,3 +39,22 @@ jobs:
         with:
           node-version: 22
       - run: cargo test --workspace
+
+  workers-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install workers-api deps
+        working-directory: examples/workers-api
+        run: npm ci
+      - name: kei build (workers-api)
+        working-directory: examples/workers-api
+        run: cargo run -q -p kei_cli --bin kei -- build . --out-dir dist
+      - name: vitest-pool-workers e2e
+        working-directory: examples/workers-api
+        run: npm test

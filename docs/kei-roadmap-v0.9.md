@@ -331,6 +331,28 @@ v0.8.0 ドッグフード(`docs/dogfood/2026-07-10-v0.8.0-stock-api-hono.md`、8
 - 負荷・レイテンシ計測、Workers の制限(CPU 時間等)検証。
 - wrangler の secret / KV バインディング実配線(DI 経路の設計は M41、実接続は v1.x)。
 
+### 実施記録 (2026-07-13, PR feat/m43-pool-workers-e2e)
+
+**判定: ✅ 完了**。`@cloudflare/vitest-pool-workers` で workerd 実挙動の e2e を追加し、CI 必須ジョブとして常設した。
+
+- 環境: `@cloudflare/vitest-pool-workers 0.18.4` / `vitest 4.1.10` / Node v22.21.1 / npm 10.9.4 / macOS Darwin 25.5.0。
+- 追加した e2e(`examples/workers-api/test/e2e.spec.ts`、`SELF.fetch()` 経由):
+  1. `GET /health` → 200 `{ status: "ok" }`。
+  2. `GET /stock/:sku` 正常系(`ABC-1`)→ 200 `{ qty: 42 }`(closure DI した inventory の値が反映される)。
+  3. `GET /stock/UNKNOWN` → 404 `{ error: "not found" }`(業務ロジックの 404。契約違反ではない)。
+  4. `GET /debug/violate`(requires 違反)→ 500 `{ error: "contract violation", clause: "requires", condition: <非空文字列> }`。
+  5. `GET /debug/ensures-violate`(**新設**。ensures 違反を必ず起こす)→ 500 `{ error: "contract violation", clause: "ensures", condition: <非空文字列> }`。
+  - ensures 違反経路は `workers_api/api.kei` に `brokenEnsuresHandler`(`ensures result.status == 200` を宣言しつつ 500 を返す)を追加し、`src/index.ts` から `mount(app, "get", "/debug/ensures-violate", brokenEnsuresHandler)` で配線した。
+- **計画からの実装差分(バージョン drift による API 変更)**: 当初想定していた `defineWorkersConfig`(`@cloudflare/vitest-pool-workers/config` サブパス)は、実際にインストールされた `0.18.4`(vitest 4 系対応版)には存在しない(パッケージが `./config` エクスポートを廃止し、`cloudflareTest` プラグイン方式に移行済み — パッケージ同梱の `dist/codemods/vitest-v3-to-v4.mjs` が移行内容を裏付ける)。`examples/workers-api/vitest.config.ts` は `import { defineConfig } from "vitest/config"; import { cloudflareTest } from "@cloudflare/vitest-pool-workers";` の新 API で実装した。同様に `tsconfig.json` の `types` は `@cloudflare/vitest-pool-workers` 本体ではなく `@cloudflare/vitest-pool-workers/types` サブパス(`cloudflare:test` のアンビエント型定義の実体)を指定する必要があった。
+- 実行結果:
+  1. `npm install`(`examples/workers-api`)→ exit 0。`node_modules/hono` は単一実体(`@kei/hono` 側は PR #141 の `postbuild` により重複解消済みで確認は不要だった)。
+  2. `npm run kei:build` → exit 0(`kei build: wrote 1 module(s) to dist`)。
+  3. `npm run typecheck`(`tsc --noEmit`)→ exit 0(`cloudflare:test` 型解決を含め通過)。
+  4. `npm test`(`vitest run`)→ exit 0、**Test Files 1 passed (1)・Tests 5 passed (5)**。workerd(miniflare)がプロセス内で起動し、上記 5 ケース全てが実際の HTTP 応答で検証された。
+  5. `cargo fmt --all -- --check` → exit 0。`cargo clippy --workspace --all-targets -- -D warnings` → exit 0(警告ゼロ)。`cargo test --workspace` → exit 0、全 test result: ok(kei_mcp の embedded examples snapshot(`embedded_examples_match_disk` 等)は api.kei への関数追加後も再生成不要でそのまま green — `tests/golden/` への影響なし)。
+- `.github/workflows/ci.yml` に `workers-e2e` ジョブを追加(既存 `fmt` / `clippy` / `test` ジョブは無変更)。`continue-on-error` 等は付けず、push/PR で常に実行される必須ジョブとして配線。
+- 結論: v0.9 の受け入れ基準のうち M43(workerd 実挙動の CI 常設)を満たした。`tests/golden/` は無変更。v1.0 の残作業(実デプロイ・kei-dogfood 初見実証)へ進める状態。
+
 ## v1.0 受け入れ検証はスコープ外(明示)
 
 以下は **v0.9 に含めない**。v0.9 全 Milestone 完了後、v1.0 の契約書集を別途新設して扱う:
