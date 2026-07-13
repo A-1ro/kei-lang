@@ -9,7 +9,7 @@
 // (v0.9 M41 統一)。クライアント都合のエラーは Kei ハンドラ側のロジックで直接 4xx を返す。
 import { Hono } from "hono";
 import { mount } from "@kei/hono";
-import { KeiContractViolation } from "@kei/runtime";
+import { KeiContractViolation, None } from "@kei/runtime";
 
 import { handleHealth, handleStock } from "../dist/workers_api/api";
 
@@ -28,6 +28,25 @@ const inventory = new Map<string, number>([
 const stockDeps = { inventory };
 
 mount(app, "get", "/stock/:sku", (req) => handleStock(stockDeps, req));
+
+// GET /debug/violate — 契約違反 → 500 集約経路の実演専用エンドポイント。
+// pathParams を空にした HttpRequest で handleStock を直接呼び、`requires
+// req.pathParams.has("sku")` を確実に破る。app.onError → 500 の中央処理が
+// 実配線どおりに動くかを、テンプレート単独(M43 の pool-workers e2e を待たず)で確かめる導線。
+// 本番配備時は削除するか rate-limit 保護する。
+app.get("/debug/violate", () => {
+  const badReq = {
+    method: "GET",
+    path: "/debug/violate",
+    headers: new Map<string, string>(),
+    queryParams: new Map<string, string>(),
+    pathParams: new Map<string, string>(),
+    bodyText: None(),
+  };
+  const res = handleStock(stockDeps, badReq);
+  // requires が破れているのでここには到達しない。到達したら 500 集約経路が壊れている合図。
+  return new Response(res.bodyText, { status: res.status });
+});
 
 // 契約違反 → 500 の中央処理。requires / ensures の区別はしない
 // (どちらも「サーバ不変条件が破れた」= サーバ異常 として 500)。

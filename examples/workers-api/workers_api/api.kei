@@ -71,7 +71,15 @@ func lookupStock(deps: StockDeps, sku: String) -> HttpResponse
 
 // closure DI 定型: deps は第1引数、req は第2引数。TS 側で
 // `mount(app, "get", "/stock/:sku", (req) => handleStock(deps, req))` と部分適用する。
-func handleStock(deps: StockDeps, req: HttpRequest) -> HttpResponse {
+//
+// `requires req.pathParams.has("sku")` はサーバ不変条件(mount() が Hono の
+// `c.req.param()` から sku を必ず埋める)を明文化する。破れたら M41 の統一に従い
+// `app.onError` 経由で **500** に写る。None を静かに 404 に降格させると mount 実装の
+// バグ・ルート誤配線が「在庫なし」と区別のつかない 404 になり隠蔽されるためこの契約を置く。
+func handleStock(deps: StockDeps, req: HttpRequest) -> HttpResponse
+  requires req.pathParams.has("sku")
+{
+  // requires が保証するので None arm には実行時到達しない(パターン網羅要件のためのみ残す)。
   return match req.pathParams.get("sku") {
     Some(sku) => lookupStock(deps, sku)
     None => notFoundResponse()

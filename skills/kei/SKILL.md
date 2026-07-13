@@ -1125,27 +1125,7 @@ Kei で書いた API を Cloudflare Workers に載せる最小テンプレート
 
 **bindings を Kei に露出させない**(設計原則 3): `env`(KVNamespace / D1Database / Secrets / vars)・`ExecutionContext` は TS 側の `fetch(request, env, ctx)` だけが触る。Kei ハンドラに渡すのは env から読み出した値を詰めた平坦な record(HttpRequest / deps record)のみ。KV/D1 の実接続を Kei から行いたい場合も v0.9 では extern 経由の TS wrapper で表現する(bindings 型を extern 署名に書かない)。
 
-**セットアップ**(リポジトリルートから):
-
-```bash
-# 1. @kei/runtime と @kei/hono の dist を作る(file: 依存の解決先)
-(cd runtime && npm install && npm run build)
-(cd tests/cli/packages/kei-hono && npm install && npm run build)
-
-# 2. Kei ソースを TS にトランスパイル
-cargo run -q -p kei_cli --bin kei -- build examples/workers-api --out-dir examples/workers-api/dist
-
-# 3. workers-api の依存を入れる
-(cd examples/workers-api && npm install)
-
-# 4. wrangler の bundling が通ることを確認
-(cd examples/workers-api && npx wrangler deploy --dry-run --outdir dist-wrangler)
-
-# 5. wrangler dev を起動して叩く
-(cd examples/workers-api && npx wrangler dev --port 8787 --local &)
-curl -s http://127.0.0.1:8787/health         # -> {"status":"ok"}
-curl -s http://127.0.0.1:8787/stock/ABC-1    # -> {"qty":42}
-```
+**セットアップ手順・curl 例・契約違反 500 の実演**は [`examples/workers-api/README.md`](../../examples/workers-api/README.md) を参照(手順の二重管理を避けるため SKILL.md 側では詳細を持たない — README が single source)。
 
 **実 Cloudflare へのデプロイ(`wrangler deploy` 本番)は v1.0 の領分**。v0.9 テンプレートはローカル(`wrangler dev` / workerd)まで。
 

@@ -50,7 +50,7 @@ curl -s http://127.0.0.1:8787/stock/UNKNOWN   # -> {"error":"not found"} (404)
 - `package.json` — `@kei/runtime` / `@kei/hono` を `file:` 依存として参照。
 - `tsconfig.json` — `strict: true` + `types: ["@cloudflare/workers-types"]`。
 
-モジュール分割は CLAUDE.md 不変条件どおり「モジュールパスとディレクトリパスが 1:1」なので、`module workers_api.api` は `workers_api/api.kei` に置く。テンプレートを分割したい場合はサブモジュール(`workers_api/health.kei` / `workers_api/stock.kei` 等)を追加する形で拡張する。
+モジュール分割は CLAUDE.md 不変条件どおり「モジュールパスとディレクトリパスが 1:1」なので、`module workers_api.api` は `workers_api/api.kei` に置く。テンプレートを分割したい場合はサブモジュール(`workers_api/health.kei` / `workers_api/stock.kei` 等)を追加する形で拡張する。**ただし v0.9 現在は cross-module で `record.field.Map<K,V>.get()` が正しく `keiMapGet` 化されないコンパイラギャップ(issue #142)があり、`HttpRequest` を別モジュールに切り出すと生成 TS が実行時エラーになる**。#142 解消までは 1 モジュールに集約するのが安全。
 
 ## 依存注入 (closure DI) の定型
 
@@ -71,7 +71,17 @@ mount(app, "get", "/stock/:sku", (req) => handleStock(stockDeps, req));
 - **400** — クライアント都合のロジック判定(JSON parse 失敗など)。Kei ハンドラのロジックが直接返す。
 - **500** — サーバ不変条件の破れ(契約違反)。`app.onError` の中央処理が捕捉して写す。
 
-例: `curl -s http://127.0.0.1:8787/stock/` は Hono のルーティングで 404、`GET /stock/x` は `x.length > 0` なので 200/404、契約違反経路は本ディレクトリのハンドラでは通常発火しない(在庫が空でも 404 で正常返却)。契約違反の 500 動作確認は M43 の vitest-pool-workers e2e が担う。
+### 500 を実演する導線 — `GET /debug/violate`
+
+`handleStock` には `requires req.pathParams.has("sku")` を置いてある。通常経路(Hono の `/stock/:sku` ルーティング下)では sku は必ず埋まるので契約違反は発火しない。テンプレート単独で 500 集約経路を確かめられるように、TS エントリポイントに **`GET /debug/violate` を用意し、pathParams を空にした HttpRequest で `handleStock` を直接呼ぶ**。契約違反 → `KeiContractViolation` → `app.onError` → 500 を実機で観測できる。
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8787/debug/violate
+# -> {"error":"contract violation","clause":"requires","condition":"..."}
+# -> HTTP 500
+```
+
+自プロジェクトに写すときはこの `/debug/violate` を残しておくと、`app.onError` の中央処理が実配線どおりに動いていることを常時セルフチェックできる(本番配備時は削除するか rate-limit 保護する)。恒久 e2e(vitest-pool-workers)は M43 で追加予定。
 
 ## v0.9 時点での制限
 

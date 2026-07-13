@@ -163,7 +163,7 @@ v0.8 契約書「設計原則 3」が明記した先送りリスクの回収。*
 
 - 環境: `wrangler 4.110.0` / Node v22.21.1 / npm 10.9.4 / macOS Darwin 25.5.0。
 - 検証用プロジェクト: `examples/workers-api/` (M42 の骨組みとしてそのまま再利用)。
-  - `.kei` ソース: `http_model.kei`(`HttpRequest` / `HttpResponse` record + `noHeaders`)、`http_health.kei`(`handleHealth`, `ensures result.status == 200`)。
+  - `.kei` ソース: **M42 で単一ファイル `workers_api/api.kei` に集約**(M40 スパイク時は `http_model.kei`(`HttpRequest` / `HttpResponse` record + `noHeaders`)+ `http_health.kei`(`handleHealth`, `ensures result.status == 200`)の 2 ファイル構成だったが、cross-module Map field 型伝播ギャップ(issue #142)回避のため M42 で 1 モジュールに統合。分割再開は #142 解消後)。
   - TS エントリ: `src/index.ts` (`export default app` の Hono app + `mount(app, "get", "/health", handleHealth)` + 契約違反の中央処理)。
   - 設定: `wrangler.jsonc`(`main: src/index.ts`, `compatibility_date: 2026-01-15`)、`package.json`(`@kei/runtime` / `@kei/hono` を file: 参照 + `hono ^4.9.0` + `wrangler ^4.0.0`)。
 - 実行結果:
@@ -183,7 +183,7 @@ v0.8.0 ドッグフード(`docs/dogfood/2026-07-10-v0.8.0-stock-api-hono.md`、8
 
 - **(b)** HttpRequest に `pathParams: Map<String, String>` フィールドを追加する。`mount()` 側で
   Hono の `c.req.param()` から埋める(境界層で情報を保存する原則 — PR #132 レビューと同じ方向)。
-  既存の HttpRequest record 構築箇所(`http_model.kei` / golden / e2e の record リテラル)への
+  既存の HttpRequest record 構築箇所(`examples/workers-api/workers_api/api.kei` — M40 時点は `http_model.kei` / golden / e2e の record リテラル)への
   追従は破壊的変更として扱い、expected の変更は人間レビューに乗せる(不変条件 1)。
 - **(c)** String stdlib 段階2の**部分拡張**: `s.split(delimiter) -> List<String>` /
   `s.indexOf(needle) -> Option<Int>` を追加する(見つからない場合を `Option` で返し null 安全を
@@ -212,7 +212,7 @@ v0.8.0 ドッグフード(`docs/dogfood/2026-07-10-v0.8.0-stock-api-hono.md`、8
 
 ### 完了条件(機械検証可能)
 
-- **pathParams**: HttpRequest record(`@kei/hono` の interface と Kei 側 `http_model.kei`)に
+- **pathParams**: HttpRequest record(`@kei/hono` の interface と Kei 側 `examples/workers-api/workers_api/api.kei` — M40 時点は `http_model.kei`)に
   `pathParams: Map<String, String>` を追加し、`mount()` が Hono の `c.req.param()` から埋める。
   パスパラメータを使う Kei ハンドラ(`GET /stock/:sku` — ドッグフードの在庫 API 再現)の e2e を
   `tests/cli/projects/app/` に追加し、`app.request("/stock/ABC-1")` で sku が取れることを固定する。
