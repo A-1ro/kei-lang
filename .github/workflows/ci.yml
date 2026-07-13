@@ -49,6 +49,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
+      - name: Build @kei/runtime (dist/)
+        working-directory: runtime
+        run: npm install --no-audit --no-fund && npm run build
+      - name: Build @kei/hono (dist/)
+        working-directory: tests/cli/packages/kei-hono
+        run: npm install --no-audit --no-fund && npm run build
       - name: Install workers-api deps
         working-directory: examples/workers-api
         run: npm ci
