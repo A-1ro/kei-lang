@@ -13,9 +13,9 @@ Kei は「**AIが書き、人間が承認し、コンパイラが履行を保証
 - **実装**: Rust の Cargo ワークスペース。ランタイム(`@kei/runtime`)のみ TypeScript の npm パッケージ
 - **ツールチェイン**: `kei` CLI と Kei MCP Server を言語仕様と同格の一級市民として扱う
 
-> ✅ **ステータス: v0.1(M0〜M7)+ v0.2(M10〜M13)+ v0.3(M9・M14〜M18)実装完了。** 言語処理(パーサ〜トランスパイラ)と MCP サーバーが動作し、`kei` CLI バイナリ(`kei_cli`)は `check` / `fmt` / `build` / `test` が使えます。v0.2 で **`match` 式・`extern` 署名・契約の検証レベル報告・数量契約イディオム**、v0.3 で **`List<T>` コレクション(段階1)・エフェクト事後条件(`extern query` 観測子)・契約ベース PBT 生成(`kei check --generative`)・strict-extern・定数恒偽契約の静的検出・Agent Repair Protocol** を追加。v0.4 の刻みは [`docs/kei-roadmap-v0.4.md`](docs/kei-roadmap-v0.4.md)。`cargo test --workspace` は全件パス。仕様は `spec/kei-spec-v0.1.md` + `spec/kei-spec-v0.2.md` + `spec/kei-spec-v0.3-collections.md`(Draft)が正本です。
+> ✅ **ステータス: v0.1〜v0.9(M0〜M43)実装完了、v1.0 目前。** 言語処理(パーサ〜トランスパイラ)と MCP サーバーが動作し、`kei` CLI バイナリ(`kei_cli`)は `check` / `fmt` / `build` / `test` が使えます。v0.4 以降では **外部世界への import(v0.6)・async(v0.7)・HTTP/JSON 境界 + `@kei/hono` アダプタ(v0.8)・Workers テンプレート + wrangler 統合 e2e(v0.9)** を追加。`cargo test --workspace` は全件パス。仕様は `spec/` 配下、刻みは [`docs/kei-roadmap-v0.4.md`](docs/kei-roadmap-v0.4.md) 〜 [`docs/kei-roadmap-v0.9.md`](docs/kei-roadmap-v0.9.md) を参照。v1.0 残作業(実 Cloudflare デプロイ・kei-dogfood 初見実証・npm 公開)は [`docs/kei-roadmap-v0.5.md`](docs/kei-roadmap-v0.5.md) 冒頭の v1.0 戦略が正本です。
 >
-> 🧭 **射程(v0.3): 立場B を採択し `List` を段階導入した。** Kei は「1 エンティティ分の純粋コア DSL」から **システム記述言語** へ広がり、`List` を `Result` / `Option` と同格の第三の組み込みジェネリクスとして**段階1**で導入済み(反復・集計・絞り込みにも `uses` と契約が効く)。設計は [`spec/kei-spec-v0.3-collections.md`](spec/kei-spec-v0.3-collections.md)、刻みは [v0.3 ロードマップ](docs/kei-roadmap-v0.3.md)、親 issue は [#25](https://github.com/A-1ro/kei-lang/issues/25)。リテラル構文・量化契約(段階2)は後続。
+> 🧭 **射程(v0.3 決定、以降も継続採用): 立場B を採択し `List` を段階導入した。** Kei は「1 エンティティ分の純粋コア DSL」から **システム記述言語** へ広がり、`List` を `Result` / `Option` と同格の第三の組み込みジェネリクスとして**段階1**で導入済み(反復・集計・絞り込みにも `uses` と契約が効く)。設計は [`spec/kei-spec-v0.3-collections.md`](spec/kei-spec-v0.3-collections.md)、刻みは [v0.3 ロードマップ](docs/kei-roadmap-v0.3.md)、親 issue は [#25](https://github.com/A-1ro/kei-lang/issues/25)。リテラル構文・量化契約(段階2)は後続。
 
 ---
 
