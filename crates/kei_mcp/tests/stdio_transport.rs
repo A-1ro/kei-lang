@@ -15,8 +15,10 @@ fn server_starts_and_answers_over_stdio() {
         .expect("spawn kei-mcp");
 
     // 改行区切りで複数リクエストを送り、stdin を閉じてサーバーを終了させる。
+    // initialize は「サポート済みだが最新ではない版」を要求する。プロセス境界越しに
+    // バージョン交渉(要求版のエコーバック)まで確認するため。
     let requests = concat!(
-        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"stdio-test","version":"0.0.0"}}}"#,
         "\n",
         r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
         "\n",
@@ -44,7 +46,14 @@ fn server_starts_and_answers_over_stdio() {
     let init: serde_json::Value = serde_json::from_str(&lines[0]).expect("init response is JSON");
     assert_eq!(init["id"], 1);
     assert_eq!(init["result"]["serverInfo"]["name"], "kei-mcp");
+    // 要求した 2024-11-05 はサポート対象なので、そのまま返る。
     assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
+    // 固定値を返しているだけでないこと(= 実際に交渉していること)の担保。
+    assert_ne!(
+        init["result"]["protocolVersion"],
+        kei_mcp::server::DEFAULT_PROTOCOL_VERSION,
+        "requested version must be echoed back instead of the server default"
+    );
 
     let call: serde_json::Value = serde_json::from_str(&lines[1]).expect("call response is JSON");
     assert_eq!(call["id"], 2);

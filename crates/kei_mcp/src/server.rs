@@ -7,8 +7,32 @@ use serde_json::{json, Value};
 
 use crate::tools::{self, ToolOutcome};
 
-/// 対応する MCP プロトコルバージョン。
-pub const PROTOCOL_VERSION: &str = "2024-11-05";
+/// このサーバーが受け入れる MCP プロトコルバージョン(新しい順)。
+///
+/// MCP spec 2025-11-25 "Version Negotiation":
+/// > If the server supports the requested protocol version, it MUST respond with the
+/// > same version. Otherwise, the server MUST respond with another protocol version it
+/// > supports. This SHOULD be the latest version supported by the server.
+///
+/// この規則は [`negotiate_protocol_version`] が実装する。先頭要素が
+/// [`DEFAULT_PROTOCOL_VERSION`](自分がサポートする最新版)で、交渉が不成立のときに
+/// 名乗るバージョンになる。
+///
+/// **新しいリビジョンへの追従はこの配列の先頭に 1 行足すだけ**でよい。ただし
+/// 載せてよいのは実際に準拠しているバージョンだけ(名乗るバージョンに嘘をつかない)。
+/// 追加前に、そのリビジョンが「tools のみを stdio で提供するサーバー」に課す要件を
+/// 満たしているか確認する。
+///
+/// 2025-03-26 を意図的に外している: このリビジョンの stdio トランスポートは
+/// メッセージとして JSON-RPC batch(配列)を許すが、[`crate::run_stdio`] は
+/// 1 行 = 1 メッセージしか解釈しない。batch は 2025-06-18 で仕様から削除されたため、
+/// 2025-06-18 以降と(batch 導入前の)2024-11-05 には準拠できるが、
+/// 2025-03-26 には準拠できない。
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2024-11-05"];
+
+/// 交渉が成立しなかったときに名乗る既定バージョン(= サポートする最新版)。
+pub const DEFAULT_PROTOCOL_VERSION: &str = SUPPORTED_PROTOCOL_VERSIONS[0];
+
 /// サーバー名(serverInfo)。
 pub const SERVER_NAME: &str = "kei-mcp";
 /// サーバーバージョン(Cargo パッケージ版数)。
@@ -41,7 +65,7 @@ impl Server {
         let params = request.get("params").cloned().unwrap_or(Value::Null);
 
         let response = match method {
-            "initialize" => success(id, initialize_result()),
+            "initialize" => success(id, initialize_result(&params)),
             "ping" => success(id, json!({})),
             "tools/list" => success(id, tools_list_result()),
             "tools/call" => tools_call(id, &params),
@@ -97,9 +121,29 @@ fn tool_result(outcome: &ToolOutcome) -> Value {
     })
 }
 
-fn initialize_result() -> Value {
+/// initialize のバージョン交渉。要求版をサポートしていればそれをそのまま返し
+/// (spec の MUST)、していなければサポートする最新版 [`DEFAULT_PROTOCOL_VERSION`]
+/// を返す(spec の MUST + SHOULD)。
+///
+/// クライアントは `protocolVersion` を送ることが MUST だが、欠落・非文字列でも
+/// 接続を切らずに既定版を名乗る(交渉不成立と同じ扱い)。最終的に版が合わなければ
+/// 切断を選ぶのはクライアント側の責務("If the client does not support the version
+/// in the server's response, it SHOULD disconnect.")。
+fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|want| {
+            SUPPORTED_PROTOCOL_VERSIONS
+                .iter()
+                .copied()
+                .find(|&supported| supported == want)
+        })
+        .unwrap_or(DEFAULT_PROTOCOL_VERSION)
+}
+
+fn initialize_result(params: &Value) -> Value {
+    let requested = params.get("protocolVersion").and_then(Value::as_str);
     json!({
-        "protocolVersion": PROTOCOL_VERSION,
+        "protocolVersion": negotiate_protocol_version(requested),
         "capabilities": { "tools": {} },
         "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
     })
@@ -175,4 +219,84 @@ fn error(id: Option<Value>, code: i64, message: &str) -> Value {
         "id": id.unwrap_or(Value::Null),
         "error": { "code": code, "message": message },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 交渉不成立時に名乗るのは「サポートする最新版」でなければならない
+    /// (spec: "This SHOULD be the latest version supported by the server.")。
+    /// 配列は新しい順に並べる契約なので、既定版は先頭と一致する。
+    #[test]
+    fn default_version_is_the_first_supported_version() {
+        assert_eq!(
+            DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS[0],
+            "SUPPORTED_PROTOCOL_VERSIONS must be ordered newest-first"
+        );
+        let mut sorted = SUPPORTED_PROTOCOL_VERSIONS.to_vec();
+        sorted.sort_unstable();
+        sorted.reverse();
+        assert_eq!(
+            sorted, SUPPORTED_PROTOCOL_VERSIONS,
+            "SUPPORTED_PROTOCOL_VERSIONS must be ordered newest-first"
+        );
+    }
+
+    /// 要求版をサポートしていれば、同じ版をそのまま返す(spec の MUST)。
+    #[test]
+    fn negotiation_echoes_back_every_supported_version() {
+        for supported in SUPPORTED_PROTOCOL_VERSIONS {
+            assert_eq!(negotiate_protocol_version(Some(supported)), *supported);
+        }
+    }
+
+    /// 未サポート版を要求されたら、サポートする最新版にフォールバックする。
+    #[test]
+    fn negotiation_falls_back_when_version_unsupported() {
+        for requested in ["2025-03-26", "1.0.0", "", "2099-01-01"] {
+            assert_eq!(
+                negotiate_protocol_version(Some(requested)),
+                DEFAULT_PROTOCOL_VERSION,
+                "unsupported version {requested} must fall back to the default"
+            );
+        }
+    }
+
+    /// protocolVersion 欠落(仕様上は MUST 送信)でも切らずに既定版を名乗る。
+    #[test]
+    fn negotiation_falls_back_when_version_absent() {
+        assert_eq!(negotiate_protocol_version(None), DEFAULT_PROTOCOL_VERSION);
+    }
+
+    /// initialize 応答は params の protocolVersion を見て決まる。
+    /// 非文字列(型違い)は欠落と同じ扱い。
+    #[test]
+    fn initialize_result_negotiates_from_params() {
+        let echoed = initialize_result(&json!({ "protocolVersion": "2024-11-05" }));
+        assert_eq!(echoed["protocolVersion"], "2024-11-05");
+
+        let fallback = initialize_result(&json!({ "protocolVersion": "1.0.0" }));
+        assert_eq!(fallback["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+
+        let absent = initialize_result(&json!({}));
+        assert_eq!(absent["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+
+        let wrong_type = initialize_result(&json!({ "protocolVersion": 20251125 }));
+        assert_eq!(wrong_type["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+
+        // params を省いた initialize(Value::Null)でも落ちない。
+        let null_params = initialize_result(&Value::Null);
+        assert_eq!(null_params["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+    }
+
+    /// tools のみを提供するサーバーとして、tools capability の宣言は MUST。
+    #[test]
+    fn initialize_result_declares_tools_capability() {
+        let result = initialize_result(&json!({}));
+        assert!(
+            result["capabilities"]["tools"].is_object(),
+            "servers that support tools MUST declare the tools capability"
+        );
+    }
 }
