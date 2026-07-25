@@ -81,13 +81,17 @@ fn oversized_line_gets_invalid_request_and_ends_connection() {
     stdin
         .write_all(oversized.as_bytes())
         .expect("write oversized line");
-    stdin.write_all(b"\n").expect("write newline");
     // 上限超過の行の後にも正当なリクエストを続けて送るが、サーバーは接続を
     // 終了しているのでこれが処理されないこと(応答が1件のみ)を確認する。
-    stdin
-        .write_all(br#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
-        .expect("write trailing request");
-    stdin.write_all(b"\n").expect("write newline");
+    //
+    // サーバーは上限超過を検出した時点で応答を書いて終了するので、ここから先の
+    // 書き込みは相手側のパイプが閉じた後になり得る(BrokenPipe)。閉じているのは
+    // まさにこのテストが期待している状態なので、書き込みの失敗はテストの失敗に
+    // しない。検証したい契約は「後続が処理されず応答がちょうど1件」であって
+    // 「後続の書き込みが成功すること」ではない。
+    let _ = stdin.write_all(b"\n");
+    let _ = stdin.write_all(br#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#);
+    let _ = stdin.write_all(b"\n");
     drop(stdin);
 
     let stdout = child.stdout.take().expect("stdout");
@@ -104,6 +108,12 @@ fn oversized_line_gets_invalid_request_and_ends_connection() {
         "expected exactly one Invalid Request response and no further processing, got: {lines:?}"
     );
     let response: serde_json::Value = serde_json::from_str(&lines[0]).expect("response is JSON");
-    assert_eq!(response["id"], serde_json::Value::Null);
+    // `Value` の `Index` はキー欠落でも Null を返すので、キーの存在ごと固定する
+    // (spec は id を検出できないとき null を **含めて** 返すことを要求している)。
+    assert_eq!(
+        response.get("id"),
+        Some(&serde_json::Value::Null),
+        "id must be present and null: {response}"
+    );
     assert_eq!(response["error"]["code"], -32600);
 }
