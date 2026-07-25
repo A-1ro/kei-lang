@@ -117,3 +117,135 @@ fn oversized_line_gets_invalid_request_and_ends_connection() {
     );
     assert_eq!(response["error"]["code"], -32600);
 }
+
+// ---------------------------------------------------------------------------
+// 上限の境界。`MAX_LINE_BYTES` は「行末の区切りを除いた JSON 本体」のバイト数に
+// 対する上限なので、LF 終端・CRLF 終端・改行なし EOF のどれでも
+// 本体 MAX ちょうどは受理・MAX+1 は拒否、で一致していなければならない。
+// (区切り文字を含む長さで判定すると、行末の種類ごとに実効上限がずれる)
+// ---------------------------------------------------------------------------
+
+/// 指定バイト数ちょうどの JSON-RPC リクエスト本体(行末の区切りは含まない)を作る。
+/// `ping` は params を見ないので、パディングは応答内容に影響しない。
+fn ping_request_of_len(len: usize) -> Vec<u8> {
+    let prefix = br#"{"jsonrpc":"2.0","id":1,"method":"ping","params":{"pad":""#;
+    let suffix = br#""}}"#;
+    let pad = len
+        .checked_sub(prefix.len() + suffix.len())
+        .expect("requested length must fit the JSON envelope");
+    let mut body = Vec::with_capacity(len);
+    body.extend_from_slice(prefix);
+    body.resize(prefix.len() + pad, b'a');
+    body.extend_from_slice(suffix);
+    assert_eq!(body.len(), len, "payload must be exactly {len} bytes");
+    body
+}
+
+/// 本体 + 行末を実バイナリの stdin に流し込み、応答行を回収する。
+fn responses_for(body: &[u8], terminator: &[u8]) -> Vec<String> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kei-mcp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn kei-mcp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    // 上限超過のときサーバーは残りを読まずに終了するため、書き込みの途中で
+    // パイプが閉じ得る(BrokenPipe)。閉じている状態こそ期待どおりなので、
+    // 書き込みの失敗はテストの失敗にしない。検証したい契約は応答の内容。
+    let _ = stdin.write_all(body);
+    let _ = stdin.write_all(terminator);
+    drop(stdin);
+
+    let stdout = child.stdout.take().expect("stdout");
+    let lines: Vec<String> = BufReader::new(stdout)
+        .lines()
+        .map(|l| l.expect("read line"))
+        .collect();
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "server exited with {status}");
+    lines
+}
+
+/// 上限内として処理された(= ping の成功応答が返った)ことを確認する。
+fn assert_accepted(lines: &[String]) {
+    assert_eq!(
+        lines.len(),
+        1,
+        "expected exactly one response, got: {lines:?}"
+    );
+    let response: serde_json::Value = serde_json::from_str(&lines[0]).expect("response is JSON");
+    assert_eq!(
+        response.get("id"),
+        Some(&serde_json::Value::from(1)),
+        "id must be echoed back: {response}"
+    );
+    assert_eq!(
+        response.get("error"),
+        None,
+        "body at the limit must not be rejected: {response}"
+    );
+    assert_eq!(
+        response.get("result"),
+        Some(&serde_json::json!({})),
+        "ping result must be present and empty: {response}"
+    );
+}
+
+/// 上限超過として弾かれた(= Invalid Request が返った)ことを確認する。
+fn assert_rejected(lines: &[String]) {
+    assert_eq!(
+        lines.len(),
+        1,
+        "expected exactly one response, got: {lines:?}"
+    );
+    let response: serde_json::Value = serde_json::from_str(&lines[0]).expect("response is JSON");
+    assert_eq!(
+        response.get("id"),
+        Some(&serde_json::Value::Null),
+        "id must be present and null: {response}"
+    );
+    assert_eq!(
+        response.get("result"),
+        None,
+        "rejected request must not carry a result: {response}"
+    );
+    assert_eq!(response["error"]["code"], -32600);
+}
+
+#[test]
+fn body_at_limit_with_lf_is_accepted() {
+    let body = ping_request_of_len(kei_mcp::MAX_LINE_BYTES);
+    assert_accepted(&responses_for(&body, b"\n"));
+}
+
+#[test]
+fn body_over_limit_with_lf_is_rejected() {
+    let body = ping_request_of_len(kei_mcp::MAX_LINE_BYTES + 1);
+    assert_rejected(&responses_for(&body, b"\n"));
+}
+
+#[test]
+fn body_at_limit_with_crlf_is_accepted() {
+    let body = ping_request_of_len(kei_mcp::MAX_LINE_BYTES);
+    assert_accepted(&responses_for(&body, b"\r\n"));
+}
+
+#[test]
+fn body_over_limit_with_crlf_is_rejected() {
+    let body = ping_request_of_len(kei_mcp::MAX_LINE_BYTES + 1);
+    assert_rejected(&responses_for(&body, b"\r\n"));
+}
+
+#[test]
+fn body_at_limit_without_trailing_newline_is_accepted() {
+    let body = ping_request_of_len(kei_mcp::MAX_LINE_BYTES);
+    assert_accepted(&responses_for(&body, b""));
+}
+
+#[test]
+fn body_over_limit_without_trailing_newline_is_rejected() {
+    let body = ping_request_of_len(kei_mcp::MAX_LINE_BYTES + 1);
+    assert_rejected(&responses_for(&body, b""));
+}
