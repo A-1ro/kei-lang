@@ -14,14 +14,17 @@ use crate::tools::{self, ToolOutcome};
 /// > same version. Otherwise, the server MUST respond with another protocol version it
 /// > supports. This SHOULD be the latest version supported by the server.
 ///
-/// この規則は [`negotiate_protocol_version`] が実装する。先頭要素が
-/// [`DEFAULT_PROTOCOL_VERSION`](自分がサポートする最新版)で、交渉が不成立のときに
+/// この規則は `negotiate_protocol_version` が実装する。先頭要素が
+/// [`DEFAULT_PROTOCOL_VERSION`] = 自分がサポートする最新版で、交渉が不成立のときに
 /// 名乗るバージョンになる。
 ///
 /// **新しいリビジョンへの追従はこの配列の先頭に 1 行足すだけ**でよい。ただし
 /// 載せてよいのは実際に準拠しているバージョンだけ(名乗るバージョンに嘘をつかない)。
 /// 追加前に、そのリビジョンが「tools のみを stdio で提供するサーバー」に課す要件を
-/// 満たしているか確認する。
+/// 満たしているか確認する。既定版は golden にも焼き込まれているので、
+/// `UPDATE_GOLDEN=1 cargo test -p kei_mcp --test golden_mcp` で
+/// tests/mcp/initialize_version_*.response.json を再生成すること(不変条件 3 のとおり
+/// golden の差分は人間レビュー必須)。
 ///
 /// 2025-03-26 を意図的に外している: このリビジョンの stdio トランスポートは
 /// メッセージとして JSON-RPC batch(配列)を許すが、[`crate::run_stdio`] は
