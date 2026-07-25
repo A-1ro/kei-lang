@@ -53,6 +53,15 @@ impl Server {
     /// JSON-RPC リクエストを処理する。`id` を持つ通常リクエストは `Some(response)`、
     /// 通知(`id` なし)は `None` を返す。
     pub fn handle(&self, request: &Value) -> Option<Value> {
+        // 非オブジェクト(配列・文字列・数値・真偽値・null)は `Value::get("...")` が
+        // 常に None を返すため、以下の id 取得ロジックだけでは「id なし通知」と
+        // 区別できず無応答で握りつぶされてしまう。JSON-RPC 2.0 spec は
+        // "If there was an error in detecting the id... it MUST be Null" と定めており、
+        // 通知として無視するのではなく id: null で Invalid Request を返す。
+        if !request.is_object() {
+            return Some(error(None, -32600, "Invalid Request: not a JSON object"));
+        }
+
         let method = request.get("method").and_then(Value::as_str);
 
         // 通知(id なし)は応答しない。
@@ -301,5 +310,34 @@ mod tests {
             result["capabilities"]["tools"].is_object(),
             "servers that support tools MUST declare the tools capability"
         );
+    }
+
+    /// 非オブジェクトの JSON-RPC メッセージ(配列・文字列・数値・真偽値・null)は、
+    /// id なし通知と混同して無応答で捨てるのではなく、id: null で Invalid Request
+    /// を返す。
+    #[test]
+    fn non_object_message_returns_invalid_request() {
+        let server = Server::new();
+        for non_object in [
+            json!([1, 2, 3]),
+            json!("just a string"),
+            json!(42),
+            json!(true),
+            Value::Null,
+        ] {
+            let response = server
+                .handle(&non_object)
+                .unwrap_or_else(|| panic!("non-object message {non_object} must get a response"));
+            assert_eq!(response["id"], Value::Null);
+            assert_eq!(response["error"]["code"], -32600);
+        }
+    }
+
+    /// オブジェクトだが id を欠く正当な通知は、これまで通り無応答。
+    #[test]
+    fn object_notification_without_id_still_gets_no_response() {
+        let server = Server::new();
+        let notification = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
+        assert_eq!(server.handle(&notification), None);
     }
 }

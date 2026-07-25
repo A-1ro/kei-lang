@@ -24,6 +24,9 @@ fn server_starts_and_answers_over_stdio() {
         "\n",
         r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kei_fmt","arguments":{"source":"module demo\n\nfunc double(x: Int) -> Int {\n  return x + x\n}\n"}}}"#,
         "\n",
+        // 非オブジェクトメッセージ(配列)は無応答で捨てず Invalid Request を返す。
+        r#"[1,2,3]"#,
+        "\n",
     );
     child
         .stdin
@@ -40,8 +43,9 @@ fn server_starts_and_answers_over_stdio() {
     let status = child.wait().expect("wait");
     assert!(status.success(), "server exited with {status}");
 
-    // 通知には応答しないので、応答は initialize と tools/call の 2 行。
-    assert_eq!(lines.len(), 2, "expected 2 responses, got: {lines:?}");
+    // 通知には応答しないが、非オブジェクトメッセージには Invalid Request で応答する
+    // ので、応答は initialize / tools/call / 配列メッセージの 3 行。
+    assert_eq!(lines.len(), 3, "expected 3 responses, got: {lines:?}");
 
     let init: serde_json::Value = serde_json::from_str(&lines[0]).expect("init response is JSON");
     assert_eq!(init["id"], 1);
@@ -62,4 +66,9 @@ fn server_starts_and_answers_over_stdio() {
         .as_str()
         .expect("formatted text");
     assert!(text.contains("func double"), "fmt output: {text}");
+
+    let invalid: serde_json::Value =
+        serde_json::from_str(&lines[2]).expect("invalid-request response is JSON");
+    assert_eq!(invalid["id"], serde_json::Value::Null);
+    assert_eq!(invalid["error"]["code"], -32600);
 }
