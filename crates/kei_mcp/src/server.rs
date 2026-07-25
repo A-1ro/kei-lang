@@ -51,7 +51,9 @@ impl Server {
     }
 
     /// JSON-RPC リクエストを処理する。`id` を持つ通常リクエストは `Some(response)`、
-    /// 通知(`id` なし)は `None` を返す。
+    /// オブジェクトで `id` を持たない通知は `None` を返す。オブジェクト以外
+    /// (配列・文字列・数値・真偽値・null)は通知ではなく不正なリクエストなので、
+    /// `id: null` の Invalid Request(`-32600`)を `Some` で返す。
     pub fn handle(&self, request: &Value) -> Option<Value> {
         // 非オブジェクト(配列・文字列・数値・真偽値・null)は `Value::get("...")` が
         // 常に None を返すため、以下の id 取得ロジックだけでは「id なし通知」と
@@ -328,8 +330,20 @@ mod tests {
             let response = server
                 .handle(&non_object)
                 .unwrap_or_else(|| panic!("non-object message {non_object} must get a response"));
-            assert_eq!(response["id"], Value::Null);
+            assert_eq!(response["jsonrpc"], "2.0");
+            // `Value` の `Index` はキー欠落でも Null を返すため、`response["id"]` の
+            // 比較だけでは「id フィールドを出していない」応答も素通りしてしまう。
+            // spec が要求するのは null を **含めて** 返すことなので、キーの存在ごと固定する。
+            assert_eq!(
+                response.get("id"),
+                Some(&Value::Null),
+                "id must be present and null: {response}"
+            );
             assert_eq!(response["error"]["code"], -32600);
+            assert!(
+                response.get("result").is_none(),
+                "error response must not carry a result: {response}"
+            );
         }
     }
 

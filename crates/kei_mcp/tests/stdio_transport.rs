@@ -69,6 +69,12 @@ fn server_starts_and_answers_over_stdio() {
 
     let invalid: serde_json::Value =
         serde_json::from_str(&lines[2]).expect("invalid-request response is JSON");
-    assert_eq!(invalid["id"], serde_json::Value::Null);
+    // `Value` の `Index` はキー欠落でも Null を返すので、キーの存在ごと固定する
+    // (spec は id を検出できないとき null を **含めて** 返すことを要求している)。
+    assert_eq!(
+        invalid.get("id"),
+        Some(&serde_json::Value::Null),
+        "id must be present and null: {invalid}"
+    );
     assert_eq!(invalid["error"]["code"], -32600);
 }
