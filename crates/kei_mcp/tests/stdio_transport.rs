@@ -63,3 +63,47 @@ fn server_starts_and_answers_over_stdio() {
         .expect("formatted text");
     assert!(text.contains("func double"), "fmt output: {text}");
 }
+
+/// `MAX_LINE_BYTES` を超える1行を流し込まれても、無制限にバッファし続けて
+/// メモリを枯渇させたりせず、Invalid Request を返して接続を終える。
+#[test]
+fn oversized_line_gets_invalid_request_and_ends_connection() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kei-mcp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn kei-mcp");
+
+    // 上限超過はパース前(サイズ検査)で弾かれるので、有効な JSON である必要はない。
+    let oversized = "a".repeat(kei_mcp::MAX_LINE_BYTES + 1);
+    let mut stdin = child.stdin.take().expect("stdin");
+    stdin
+        .write_all(oversized.as_bytes())
+        .expect("write oversized line");
+    stdin.write_all(b"\n").expect("write newline");
+    // 上限超過の行の後にも正当なリクエストを続けて送るが、サーバーは接続を
+    // 終了しているのでこれが処理されないこと(応答が1件のみ)を確認する。
+    stdin
+        .write_all(br#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
+        .expect("write trailing request");
+    stdin.write_all(b"\n").expect("write newline");
+    drop(stdin);
+
+    let stdout = child.stdout.take().expect("stdout");
+    let lines: Vec<String> = BufReader::new(stdout)
+        .lines()
+        .map(|l| l.expect("read line"))
+        .collect();
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "server exited with {status}");
+
+    assert_eq!(
+        lines.len(),
+        1,
+        "expected exactly one Invalid Request response and no further processing, got: {lines:?}"
+    );
+    let response: serde_json::Value = serde_json::from_str(&lines[0]).expect("response is JSON");
+    assert_eq!(response["id"], serde_json::Value::Null);
+    assert_eq!(response["error"]["code"], -32600);
+}
