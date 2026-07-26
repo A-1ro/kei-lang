@@ -1,4 +1,4 @@
-//! kei_check の構造化 [`Diagnostic`] と LSP の型の境界変換。
+//! kei_check の構造化 [`kei_check::Diagnostic`] と LSP の型の境界変換。
 //!
 //! ARCHITECTURE.md: kei_lsp は言語処理ロジックを持たず、kei_check が出した
 //! Diagnostic を LSP の Diagnostic に写すだけのアダプタに徹する。検査・整形・
