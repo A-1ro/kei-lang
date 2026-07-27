@@ -3,13 +3,14 @@
 > 運用ルール: 各 Milestone は「人間が合意する契約」。完了条件は機械検証可能な形で書く。
 > 本ファイルは `docs/kei-roadmap-v0.5.md` の v1.0 逆算戦略を差し替えるもの。
 > v0.9.0 の後、**v1.0(実 `wrangler deploy`)を後ろ倒しし、その手前に v0.10 を挿入する**(オーナー決定)。
-> **本ファイルの各 Milestone は 🤝(人間との設計合意)を経てから着手する。** 🤝 論点は末尾「🤝 着手前合意事項」節に集約した。合意が付くまで実装に入らない。
+> **🤝(人間との設計合意)5 点はすべて合意済み(2026-07-27)。** 決定と経緯は末尾「🤝 着手前合意事項」節と各 Milestone の「✅ 合意済み」節を参照。
 > **着手前に本ファイルの「設計原則」節を熟読すること。**
 
 ## 更新履歴
 
 - 2026-07-27: 起草。v0.10 のテーマ・傘下 issue・受け入れ基準を確定。詳細 /goal は 🤝 合意後に追記。
-- 2026-07-27: **/goal 契約書化(M44〜M47)を起草。** 設計原則・Milestone 分解・完了条件・🤝 着手前合意事項(5 点)を追記。🤝 は未合意 — 合意後に各 Milestone の「🤝 合意事項」節を確定版に更新する。
+- 2026-07-27: **/goal 契約書化(M44〜M47)を起草。** 設計原則・Milestone 分解・完了条件・🤝 着手前合意事項(5 点)を追記。
+- 2026-07-27: **🤝 5 点すべて合意済み**(length は加法 — UTF-16 の `length` 温存 + `codePointCount()` 追加 / stdlib 段階2は high tier + `contains`(pad・repeat は v1.x 送り)/ 正規表現は定石例示 + extern 境界の併用(言語内エンジンなし)/ 並行結合子は `parallel` — 同種 List を並行実行し emit は `Promise.all` / 順序は String 先行 M44→M45→M46→M47)。各 Milestone の合意節・/goal 文を確定版に更新。
 
 ## なぜ v0.10 を挿入するか
 
@@ -60,44 +61,44 @@ v0.7〜v0.9 の原則(Async は色ではなくエフェクト / `await` 演算�
 
 3. **【v0.10 新規】code point イテレーションに新構文を足さない。** 「1 文字ずつ処理」の経路は、v0.9 M41 で spec 済みの **`s.split("")`(空デリミタは code point 単位で分割)→ `List<String>`** を土台にする。畳み込み(既存 `List` 段階1)と組み合わせれば Markdown を 1 文字ずつ舐める用途は表現できる。新しいイテレーション構文・for 文などは v0.10 では導入しない。
 
-4. **【v0.10 新規】正規表現は言語に入れない(候補・🤝 で確定)。** 正規表現は契約検証(`requires`/`ensures`)・pbt・決定性の観点で重く、Kei の「契約式は同期・純粋・静的に扱える」路線と相性が悪い。v0.10 は **String プリミティブ + code point イテレーションで「正規表現を使わずに書く定石」を spec / SKILL に例示**し、どうしても必要なパターンは **extern で TS 側の `RegExp` に出す境界**を明記する方針を候補とする(grapheme = extern と同じ発想)。最終的に「入れる/入れない」は 🤝(c)でオーナー判断。
+4. **【v0.10 新規】正規表現は言語に入れない(✅ 🤝(c) 合意済み)。** 正規表現は契約検証(`requires`/`ensures`)・pbt・決定性の観点で重く、Kei の「契約式は同期・純粋・静的に扱える」路線と相性が悪い。v0.10 は **String プリミティブ + code point イテレーションで「正規表現を使わずに書く定石」を spec / SKILL に例示**し、どうしても必要なパターンは **extern で TS 側の `RegExp` に出す境界**を明記する(grapheme = extern と同じ発想)。
 
-5. **【v0.10 新規】既存契約本文(golden / #107 の `length` 意味論)を壊さない。** `tests/golden/` は契約本文(不変条件 1)。`length` の意味を変えると既存 golden と実運用でベンダリング済みの TS の前提が同時に崩れる。v0.10 は **既存 `length`(UTF-16)を温存し、code point 用の新 API を追加**する加法的変更を既定候補とする(最終判断は 🤝(a))。expected の変更が避けられない場合は人間レビュー必須。
+5. **【v0.10 新規】既存契約本文(golden / #107 の `length` 意味論)を壊さない。** `tests/golden/` は契約本文(不変条件 1)。`length` の意味を変えると既存 golden と実運用でベンダリング済みの TS の前提が同時に崩れる。v0.10 は **既存 `length`(UTF-16)を温存し、code point 用の新 API を追加**する加法的変更とする(✅ 🤝(a) 合意済み)。expected の変更が避けられない場合は人間レビュー必須。
 
 6. **【v0.10 新規】並行 async は「最小の並行結合子」に閉じる。契約と effect の相互作用を増やさない。**
-   - 並行の対象は **独立した副作用(複数 I/O)の同時実行**のみ。導入するのは並行結合子 1 つ(形は 🤝(d))で、emit は `await Promise.all([...])` に落とす。
+   - 並行の対象は **独立した副作用(複数 I/O)の同時実行**のみ。導入するのは並行結合子 1 つ(✅ 🤝(d) 合意済み: 同種リスト結合子 `parallel`)で、emit は `await Promise.all([...])` に落とす。
    - **契約の意味論は増やさない**: 各 async 関数の `requires` は自分の入口で、`ensures` は自分の resolve 後に(v0.7 の既存挙動そのまま)評価される。**並行結合子そのものは契約を持たない**。「並行実行時の事後条件」という新しい契約意味論を v0.10 では作らない。
    - 失敗時は **fail-fast**(いずれかが reject/throw したら全体が伝播。`Promise.all` 準拠)。race / キャンセル / タイムアウト / 構造化並行スコープ / 異種型タプル結合は **v0.10 スコープ外**(v1.x 以降で実需確認後)。
    - `uses Async` の推移伝播は既存機構そのまま。並行結合子を使う関数も `uses Async` を宣言する。
 
 ## Milestone 全体像と順序
 
-M 番号は v0.9(M40〜M43)からの連番。**全 Milestone が 🤝 合意待ち**(末尾「🤝 着手前合意事項」節)。
+M 番号は v0.9(M40〜M43)からの連番。**🤝 5 点合意済み(2026-07-27)— 全 Milestone 着手可**。
 
 | M | テーマ | issue | 優先度 | 状態 | 主な改修クレート |
 |---|---|---|---|---|---|
-| **M44** | String の code point 意味論(`codePointCount` + code point イテレーション + grapheme 境界明文化) | #159 | high | 🤝 合意待ち・未着手 | kei_check / kei_emit / pbt / spec / skill / examples |
-| **M45** | String stdlib 段階2(substring / replace / 大小文字 / trim / 前後方一致 等)+ 正規表現の態度明示 | #160 | high | 🤝 合意待ち・未着手 | kei_check / kei_emit / pbt / spec / skill |
-| **M46** | 純ロジック等価テスト実証(Markdown 除去 / slug / タグ正規化 / MIME・キーバリデーションの代表 4 関数)| #160 | high(テーマ合否ゲート) | 🤝 合意待ち・未着手 | examples / tests(等価テスト)/ CI / kei_mcp(埋め込み) |
-| **M47** | 並行 async — 最小の並行結合子(独立 I/O の同時実行) | #161 | medium | 🤝 合意待ち・未着手 | kei_syntax / kei_check / kei_emit / spec / skill / tests |
+| **M44** | String の code point 意味論(`codePointCount` + code point イテレーション + grapheme 境界明文化) | #159 | high | ✅ 合意済み・未着手 | kei_check / kei_emit / pbt / spec / skill / examples |
+| **M45** | String stdlib 段階2(substring / replace / 大小文字 / trim / 前後方一致 等)+ 正規表現の態度明示 | #160 | high | ✅ 合意済み・未着手 | kei_check / kei_emit / pbt / spec / skill |
+| **M46** | 純ロジック等価テスト実証(Markdown 除去 / slug / タグ正規化 / MIME・キーバリデーションの代表 4 関数)| #160 | high(テーマ合否ゲート) | ✅ 合意済み・未着手 | examples / tests(等価テスト)/ CI / kei_mcp(埋め込み) |
+| **M47** | 並行 async — 最小の並行結合子(独立 I/O の同時実行) | #161 | medium | ✅ 合意済み・未着手 | kei_syntax / kei_check / kei_emit / spec / skill / tests |
 
 順序の論拠:
 
 - **M44 → M45 → M46 が String の本丸。** M46(等価テスト実証)は v0.10 テーマの**合否ゲート**で、M44(code point 意味論)と M45(stdlib)の両方の完了に依存する。この 3 本を先に閉じてテーマ受け入れを確定させる。
 - **M44 は M45 の前。** M45 の `substring` などは「範囲を code point 単位で規定」(#160 の high tier)するため、M44 の code point 意味論(単位の定義・emit の runtime helper 方針)を先に固める。
-- **M47(並行 async)は最後・独立トラック。** テーマ本丸(String)からは外れ(#161 も明記)、effect × 契約という別レイヤに触れる。テーマ受け入れ(M46)をブロックしないよう最後に置く。String 系(M44〜M46)と実装が独立なので並走も可能だが、既定は String 完了後に着手する(🤝(e))。
+- **M47(並行 async)は最後・独立トラック。** テーマ本丸(String)からは外れ(#161 も明記)、effect × 契約という別レイヤに触れる。テーマ受け入れ(M46)をブロックしないよう最後に置く。String 系(M44〜M46)と実装が独立なので並走も技術的には可能だが、String 完了後に着手する(✅ 🤝(e) 合意済み — String 先行)。
 
 ## M44: String の code point 意味論(#159)
 
 実運用統合で「文字数カウント本体を Kei 化できなかった」直接の障害物(`length` の UTF-16 意味論)の解消。**v0.10 の最初の言語変更**。
 
-### 🤝 着手前合意事項(未合意)
+### ✅ 合意済み(2026-07-27)
 
-- **🤝(a) `length` の意味論**(breaking / additive / 新 String 型)。末尾 🤝 節参照。**この決定で本 Milestone の API 形(新 API を足すのか `length` を切り替えるのか)が変わる**ため、着手前に必ず確定する。
+- **🤝(a) `length` の意味論 — 加法を採用**: 既存 `s.length`(UTF-16 code unit 長)は**温存**し、`s.codePointCount() -> Int`(`😀` = 1)を**追加**する。spec / SKILL で「文字数判定は `codePointCount` を使う」を推奨として明示する。経緯・不採用案は末尾 🤝(a) 参照。
 
 ### 完了条件(機械検証可能)
 
-- 🤝(a)で合意した API(既定候補: `s.codePointCount() -> Int` を**追加**し、既存 `length`(UTF-16)は温存)を `spec/kei-spec-v0.1.md` §2.6 の String 組み込み一覧に spec-first で追記する。
+- 合意した API(`s.codePointCount() -> Int` を**追加**。既存 `length`(UTF-16)は温存)を `spec/kei-spec-v0.1.md` §2.6 の String 組み込み一覧に spec-first で追記する。
 - 新 API が `😀`(サロゲートペア)・合字を含む文字列で **code point 数を返す** golden test(check / emit)が通る(`"a😀b".codePointCount() == 3`)。
 - emit は code point を尊重する TS 機構(`Array.from(s).length` / `String.fromCodePoint` / `for...of`)に落とし、サロゲートを壊さない(runtime helper 経由。`crates/kei_emit/src/emit.rs` の runtime-method 登録に追加)。
 - **code point イテレーション**は新構文を足さず、既存 `s.split("")`(空デリミタ = code point 単位。v0.9 M41 で spec 済み)+ `List` 畳み込みで表現する。1 文字ずつ処理する例が `examples/` に入り、**JS 参照実装(`Array.from(s)`)との等価テストが通る**。
@@ -109,7 +110,7 @@ M 番号は v0.9(M40〜M43)からの連番。**全 Milestone が 🤝 合意待�
 ### golden / test 設計方針
 
 - 新 API は通常の言語機能と同じ扱い: spec → golden(check / fmt / emit)→ pbt 追従 → e2e(等価テスト)の順で固定する。
-- `length` を温存する加法路線(🤝(a)の既定候補)なら既存 golden は無変更。`length` を切り替える breaking 路線を選んだ場合は、既存 expected の変更を人間レビューに乗せる(不変条件 1)。
+- `length` を温存する加法路線(✅ 合意済み)なので既存 golden は無変更のはず。万一 expected の変更が必要になったら人間レビューに乗せる(不変条件 1)。
 - grapheme は**約束しない**ので golden を持たない。spec / SKILL の文章と、extern 誘導のコード例(fmt --check クリーン)で境界を示す。
 
 ### スコープ外(M44)
@@ -122,22 +123,22 @@ M 番号は v0.9(M40〜M43)からの連番。**全 Milestone が 🤝 合意待�
 
 実アプリの「面白い純ロジック」を Kei で書くための String API 拡充。#159 の code point 意味論と対になる両輪。
 
-### 🤝 着手前合意事項(未合意)
+### ✅ 合意済み(2026-07-27)
 
-- **🤝(b) stdlib 段階2 の API 範囲**(high tier のみ / high + `contains` / high + medium)。末尾 🤝 節参照。
-- **🤝(c) 正規表現の態度**(言語に入れない + 定石例示 / extern 境界明記 / 小型エンジン内蔵)。末尾 🤝 節参照。
+- **🤝(b) stdlib 段階2 の API 範囲 — high tier + `contains` を採用**(`repeat` / `padStart` / `padEnd` の medium tier は v1.x 送り)。経緯は末尾 🤝(b) 参照。
+- **🤝(c) 正規表現の態度 — 定石例示 + extern 境界の併用を採用**(言語内エンジンは入れない)。経緯は末尾 🤝(c) 参照。
 
 ### 完了条件(機械検証可能)
 
-- 🤝(b)で合意した API を `spec/kei-spec-v0.1.md` §2.6 に spec-first で追記する。**high tier 既定候補**:
+- 合意した API(high tier + `contains`)を `spec/kei-spec-v0.1.md` §2.6 に spec-first で追記する:
   - `s.substring(start: Int, end: Int) -> String`(範囲は **code point 単位**で規定。#159 / M44 と整合。runtime helper で実装)
   - `s.replace(from: String, to: String) -> String` / `s.replaceAll(from: String, to: String) -> String`
   - `s.toLowerCase() -> String` / `s.toUpperCase() -> String`
   - `s.trim() -> String`
   - `s.startsWith(prefix: String) -> Bool` / `s.endsWith(suffix: String) -> Bool`
-  - (🤝(b)で合意すれば)`s.contains(sub: String) -> Bool`(`indexOf(...) != None` の可読化)
+  - `s.contains(sub: String) -> Bool`(`indexOf(...) != None` の可読化)
 - 各 API を check(`STRING_BUILTIN_MEMBERS` への追加 + `string_method` の arity/型付け)/ emit(TS `String.prototype.*` へ写す。`substring` は code point 尊重 runtime helper)/ fmt(識別子扱いで変更不要見込み)/ pbt に実装し、syntax / check / fmt / emit の golden で固定する。
-- **正規表現の態度**(🤝(c)の決定)を spec に **1 節**として明文化する。既定候補「言語に入れない」なら、slug 生成・タグ正規化を**正規表現を使わずに書く定石**(小文字化 → 許可外 code point を畳み込みで除去/置換)を spec / SKILL に例示し、どうしても必要なら extern で TS `RegExp` に出す境界を書く。
+- **正規表現の態度**(✅ 合意済み: 言語に入れない)を spec に **1 節**として明文化する。slug 生成・タグ正規化を**正規表現を使わずに書く定石**(小文字化 → 許可外 code point を畳み込みで除去/置換)を spec / SKILL に例示し、どうしても必要なパターンは extern で TS `RegExp` に出す境界を書く。
 - 契約式内でも新 API を使用可(純粋)。
 - `skills/kei/SKILL.md` の String 節を更新(段階2 API 一覧 + 正規表現の方針)。MCP golden 再生成を含む。
 - `cargo fmt --check` / `clippy -D warnings` / `cargo test --workspace` 全パス。
@@ -147,21 +148,21 @@ M 番号は v0.9(M40〜M43)からの連番。**全 Milestone が 🤝 合意待�
 
 - 段階2 API は M41 の `split` / `indexOf` と同格: spec → golden(check/fmt/emit)→ pbt 追従 → e2e。
 - `substring` の code point 単位規定は、UTF-16 index との差が出る入力(絵文字を含む)を golden / pbt に必ず含める(#159 との整合の回帰防止)。
-- 正規表現は**言語機能として実装しない**方針(🤝(c)既定候補)なら golden を持たない。方針文と定石コード例(fmt --check クリーン)で担保する。
+- 正規表現は**言語機能として実装しない**(✅ 合意済み)ので golden を持たない。方針文と定石コード例(fmt --check クリーン)で担保する。
 
 ### スコープ外(M45)
 
-- 🤝(b)で送りにした medium tier(`repeat` / `padStart` / `padEnd`)— v1.x で実需確認後。
-- 正規表現エンジンの言語内実装(🤝(c)で「入れない」を選んだ場合)。
+- medium tier(`repeat` / `padStart` / `padEnd`)— ✅ 🤝(b) で v1.x 送り確定(実需確認後)。
+- 正規表現エンジンの言語内実装 — ✅ 🤝(c) で不採用確定。
 - ロケール依存の大小文字変換・照合。
 
 ## M46: 純ロジック等価テスト実証 — テーマ合否ゲート(#160)
 
 v0.10 テーマ「純ロジックは全部 Kei で書ける」の**合否そのもの**。M44 / M45 の成果で、代表 4 関数が JS 参照と等価に振る舞うことを CI で示す。
 
-### 🤝 着手前合意事項(未合意)
+### ✅ 合意済み(2026-07-27)
 
-- 本 Milestone 固有の 🤝 はない(M44 / M45 の 🤝 が確定していれば着手できる)。ただし 4 関数の**仕様(入出力の正確な定義)**は、実装前に短く合意しておくと手戻りが少ない(例: slug の許可文字集合、Markdown 除去の対象記法)。実装エージェントは 4 関数の JS 参照仕様を PR 冒頭に明記してからコードを書く。
+- 本 Milestone 固有の 🤝 はない(M44 / M45 の 🤝 が確定済みなので着手可)。ただし 4 関数の**仕様(入出力の正確な定義)**は実装前の明示が必要(例: slug の許可文字集合、Markdown 除去の対象記法)。実装エージェントは 4 関数の JS 参照仕様を PR 冒頭に明記してからコードを書く。
 
 ### 完了条件(機械検証可能)
 
@@ -186,20 +187,20 @@ v0.10 テーマ「純ロジックは全部 Kei で書ける」の**合否その�
 ### スコープ外(M46)
 
 - HTTP / Workers 境界への組み込み(v0.9 で完了・実デプロイは v1.0)。
-- 正規表現前提の実装(🤝(c)の方針に従う)。
+- 正規表現前提の実装(✅ 🤝(c) の方針 — 言語に入れない — に従う)。
 - 4 関数以外のアプリ全体の Kei 化。
 
 ## M47: 並行 async — 最小の並行結合子(#161)
 
 v0.7 で入った `uses Async` は逐次のみ。独立 I/O(複数 KV/D1 読み取り・複数 fetch)を並行実行する手段を最小形で足す。**テーマ本丸(String)からは外れる独立トラック**(オーナー決定で v0.10 に正式編入)。
 
-### 🤝 着手前合意事項(未合意)
+### ✅ 合意済み(2026-07-27)
 
-- **🤝(d) 並行結合子の形**(`parallel(List)` 同種リスト結合子 / `join(a, b, ...)` 異種タプル結合子 / 構造化並行ブロック)。末尾 🤝 節参照。**言語構文が変わる**ため、着手前に必ず確定する。
+- **🤝(d) 並行結合子の形 — 同種リスト結合子 `parallel` を採用**: `parallel(xs) -> List<T>`(同じ型 `T` を返す独立 async を並行実行し `List<T>` で受ける。emit は `await Promise.all([...])`)。異種タプル結合子・構造化並行ブロックは不採用(経緯は末尾 🤝(d) 参照)。
 
 ### 完了条件(機械検証可能)
 
-- 🤝(d)で合意した並行結合子(既定候補: **同種リスト結合子** `parallel(xs) -> List<T>`。`xs` は `uses Async` を伴う要素の並行実行を表す)を実装する。
+- 合意した並行結合子(**同種リスト結合子** `parallel(xs) -> List<T>`。`xs` は `uses Async` を伴う要素の並行実行を表す)を実装する。
   - **check**: 結合子を使う関数は `uses Async` を宣言していること(既存推移伝播機構。宣言漏れは KEI-E3001)。結合子自体は契約を持たない(設計原則 6)。契約式内での結合子使用は既存の純粋性診断(KEI-E4001 + KEI-E3001)で拒否。
   - **emit**: `await Promise.all([...])` に落とす(要素の各 async 呼び出しは並行に開始され、全 resolve を待つ)。fail-fast(`Promise.all` 準拠)。
   - **spec**: `spec/kei-spec-v0.1.md` §5(非同期の扱い)に、並行の**意味論(独立実行・実行順非依存・失敗時 fail-fast・ensures との相互作用 = 各要素の ensures はそのまま、結合子は契約を持たない)**を明文化する。v0.7 の「sequential のみ」注記を「v0.10 で最小の並行結合子を追加」に更新する。
@@ -221,74 +222,57 @@ v0.7 で入った `uses Async` は逐次のみ。独立 I/O(複数 KV/D1 読み�
 - race(`Promise.race` 相当)・最初に成功したものを取る合流。
 - キャンセル / タイムアウト / `AbortController`。
 - 構造化並行スコープ(nursery / task group)。
-- 異種型タプル結合(🤝(d)で同種リストを選んだ場合)。
+- 異種型タプル結合 — ✅ 🤝(d) で不採用確定(需要が強ければ v1.x で再検討)。
 - 並行実行時の新しい契約意味論(「並行事後条件」等)。
 
-## 🤝 着手前合意事項(オーナー判断が必要 — 未合意)
+## 🤝 着手前合意事項(✅ 全 5 点合意済み 2026-07-27)
 
-以下 5 点は、各 Milestone の実装に入る**前に**オーナーの決定が必要な設計合意事項。合意が付いたら、本節と各 Milestone の「🤝 合意事項」節を確定版(✅ 合意済み)に更新してから着手する。
+以下 5 点は着手前にオーナー判断を仰いだ設計合意事項。**2026-07-27 にすべて決定済み**。各項は決定と、検討したが採らなかった案の理由(経緯)を残す。
 
-### 🤝(a) `String.length` の意味論をどうするか(M44)
+### 🤝(a) `String.length` の意味論 — ✅ 加法を採用
 
-現状 `s.length` は UTF-16 code unit 長(v0.5 M30 / #107。spec §2.6)。実世界のテキストロジックが期待するのは code point(人間が数える文字数)寄りで、絵文字(`😀` = 2 code unit)でズレる。
+**決定: 既存 `s.length`(UTF-16 code unit 長。v0.5 M30 / #107)を温存し、`s.codePointCount() -> Int`(`😀` = 1)を追加する。** spec / SKILL で「文字数判定は `codePointCount` を使う」を推奨として明示する。
 
-- **選択肢 1(加法・既定推奨)**: 既存 `length`(UTF-16)を**温存**し、`s.codePointCount() -> Int`(`😀` = 1)を**追加**する。spec / SKILL で「文字数判定は `codePointCount` を使う」を推奨として明示。
-- **選択肢 2(破壊的)**: `length` の意味を **code point に切り替え**、従来の UTF-16 長を `s.utf16Length()` 等に退避する。
-- **選択肢 3(新 String 型)**: code point 単位を保証する別の String 型を導入し、既存 `String` と使い分ける。
+経緯(不採用案): `length` を code point に切り替える破壊的変更は、`tests/golden/`(契約本文・不変条件 1)と実運用でベンダリング済みの TS の前提を同時に壊し、「Kei の `length` = JS の `String.prototype.length`」という spec 明記の対応関係も崩すため不採用。code point 保証の新 String 型は型と stdlib が二重化しコスト過大で不採用。実統合で必要だったのは「code point 数を数える手段」であり加法で過不足なく満たせる。**残る懸念**: 「素朴に `length` を使うと絵文字でズレる」罠は、spec / SKILL の推奨明示と lint 的な誘導(将来検討)で緩和する。
 
-**推奨: 選択肢 1(加法)。** 理由: (1) `length` の意味変更は `tests/golden/`(契約本文・不変条件 1)と、実運用でベンダリング済みの TS(`length` を UTF-16 前提で使っている)の両方を同時に壊す。(2) Kei の `length` は「JS の `String.prototype.length` と同一」と spec に明記されており、TS へ落とす言語としてこの対応関係を崩すと相互運用の直感が濁る。(3) 実統合で本当に必要だったのは「code point 数を数える手段」であり、それは加法で過不足なく満たせる。選択肢 3 は型が二重化し stdlib も二重化するのでコストが見合わない。**懸念**: 加法だと「素朴に `length` を使うと絵文字でズレる」罠が残る — これは spec / SKILL の推奨明示と、lint 的な誘導(将来検討)で緩和する。
+### 🤝(b) String stdlib 段階2 の API 範囲 — ✅ high tier + `contains` を採用
 
-### 🤝(b) String stdlib 段階2 の API 範囲をどこまで入れるか(M45)
+**決定: `substring` / `replace` / `replaceAll` / `toLowerCase` / `toUpperCase` / `trim` / `startsWith` / `endsWith` + `s.contains(sub) -> Bool`。** medium tier(`repeat` / `padStart` / `padEnd`)は v1.x 送り(実需確認後)。
 
-#160 は high / medium の 2 tier を提案。実装量と「4 関数の等価テスト(M46)に必要な最小」のバランスが論点。
+経緯: 受け入れ基準は「代表 4 関数の等価テスト(M46)」で、high tier がほぼ直結する。`contains` は `indexOf(...) != None` の薄い糖衣だが可読性の効果が高く実装コストがほぼゼロ。pad/repeat は 4 関数に不要で、「言語変更は最小限」に従い送り。**分岐**: M46 の実装中に本範囲で足りないと判明したら、勝手に足さず M45 に差し戻して人間判断を仰ぐ。
 
-- **選択肢 1(high tier のみ)**: `substring` / `replace` / `replaceAll` / `toLowerCase` / `toUpperCase` / `trim` / `startsWith` / `endsWith`。
-- **選択肢 2(high + `contains`・推奨)**: 上記 + `s.contains(sub) -> Bool`(`indexOf` の可読化。実装は極小)。
-- **選択肢 3(high + medium)**: さらに `repeat` / `padStart` / `padEnd` を追加。
+### 🤝(c) 正規表現に対する v0.10 の態度 — ✅ 定石例示 + extern 境界の併用を採用
 
-**推奨: 選択肢 2。** 理由: 受け入れ基準は「代表 4 関数の等価テスト(M46)」であり、必要十分な API を入れるのが原則。high tier は 4 関数(Markdown 除去・slug・タグ正規化・バリデーション)にほぼ直結する。`contains` は `indexOf(...) != None` の薄い糖衣だが可読性の効果が高く実装コストがほぼゼロなので入れる価値がある。`repeat` / `padStart` / `padEnd` は 4 関数の実装に不要で、実需が出てから v1.x で足すのが「言語変更は最小限」に沿う。**分岐**: M46 の実装中に high tier で足りないと判明したら、勝手に足さず M45 に差し戻して本 🤝 を再確認する。
+**決定: 正規表現エンジンは言語に入れない。** String プリミティブ + code point イテレーションで「正規表現なしで書く定石」を spec / SKILL に例示し、どうしても必要なパターンは extern で TS 側 `RegExp` に出す境界を spec に明記する。
 
-### 🤝(c) 正規表現に対する v0.10 の態度(M45)
+経緯: grapheme = extern(設計原則 1)と同じ「境界を曖昧にしない」思想に一貫させた。小型エンジン内蔵案は、正規表現が契約式で使えると `requires`/`ensures` の静的扱い・pbt・決定性がすべて重くなり、v0.10 の String に閉じたスコープを大きく超えるため不採用。**運用注記**: 代替定石だけで 4 関数(特に slug)が実務的な読みやすさで書けない場合は、extern 誘導を主経路として spec に強めに書く。
 
-slug 生成・バリデーションは正規表現が最短だが、正規表現は契約検証・pbt・決定性の観点で重い。
+### 🤝(d) 並行 async の結合子の形 — ✅ 同種リスト結合子 `parallel` を採用
 
-- **選択肢 1(言語に入れない + 定石例示・推奨の一部)**: 正規表現を言語機能にせず、String プリミティブ + code point イテレーションで「正規表現なしで書く定石」を spec / SKILL に例示する。
-- **選択肢 2(extern 境界を明記・推奨の一部)**: 言語には入れないが、どうしても必要なパターンは extern で TS 側 `RegExp` に出す境界を spec に明記する。
-- **選択肢 3(小型正規表現エンジンを内蔵)**: 決定性のある部分集合(POSIX 相当など)を言語 stdlib に持つ。
+**決定: `parallel(xs) -> List<T>`。** 同じ型 `T` を返す複数の独立 async を並行実行し `List<T>` で受ける。emit は `await Promise.all([...])`(fail-fast も `Promise.all` 準拠)。
 
-**推奨: 選択肢 1 + 2 の併用。** 理由: 「言語には入れない(1)、代替定石を示す(1)、逃げ道として extern 境界を明記する(2)」が、grapheme = extern(設計原則 1)と同じ「境界を曖昧にしない」思想に一貫する。選択肢 3(内蔵エンジン)は、正規表現を契約式で使えると `requires`/`ensures` の静的扱い・pbt・決定性がすべて重くなり、v0.10 の String に閉じたスコープを大きく超える。**要決定点**: 「代替定石だけで 4 関数(特に slug)が実務的な読みやすさで書けるか」— 書けなければ選択肢 2 の extern 誘導を主経路として spec に強めに書く。
+経緯: 既存 `List<T>` に載るので新しい型(タプル)を導入せずに済み、emit が `Promise.all` に一対一で落ちて意味論が明快。異種タプル結合子(`join(a, b) -> (A, B)`)はタプル型という言語コアの拡張を要し「最小形」を超えるため不採用。構造化並行ブロック(`parallel { ... }`)は「どの呼び出しを並行と見なすか」の解析と `await` 自動挿入(v0.7)との相互作用が複雑になるため不採用。**制約の明示**: 型の違う 2 本(例: KV から String・D1 から record)を 1 回で並行にしたい需要が強ければ、異種タプル結合を v1.x で再検討する、と spec に注記する。
 
-### 🤝(d) 並行 async の結合子の形(M47)
+### 🤝(e) Milestone の順序 — ✅ String 先行を採用
 
-`uses Async` は逐次のみ。並行結合子を最小形で入れる(オーナー決定で v0.10 編入済み)が、**形**が未決。Kei は `await` 演算子を持たず `Promise<T>` を型に露出しない(v0.7 設計原則)ため、並行の表現方法が論点。
+**決定: M44 → M45 → M46(テーマ受け入れ確定)→ M47(async)。**
 
-- **選択肢 1(同種リスト結合子・推奨)**: `parallel(xs) -> List<T>`。同じ型 `T` を返す複数の独立 async を並行実行し `List<T>` で受ける。emit は `await Promise.all([...])`。
-- **選択肢 2(異種タプル結合子)**: `join(a, b) -> (A, B)` のように型の違う複数 async を並行実行しタプルで受ける。タプル型の言語サポートが必要。
-- **選択肢 3(構造化並行ブロック)**: `parallel { let a = f(); let b = g() }` のようなブロック構文で、ブロック内の独立呼び出しを並行化する。
-
-**推奨: 選択肢 1(同種リスト結合子)。** 理由: (1) Kei に既にある `List<T>` に載るので**新しい型(タプル)を導入せずに済む** — 選択肢 2 はタプル型という言語コアの拡張を要し「最小形」を超える。(2) emit が `await Promise.all(xs)` に一対一で落ち、意味論が明快(fail-fast も `Promise.all` そのまま)。(3) 選択肢 3 のブロック構文は「どの呼び出しを並行と見なすか」の解析と `await` 自動挿入(v0.7)との相互作用が複雑になり、最小形にそぐわない。**制約の明示**: 選択肢 1 は「同じ型の独立 I/O をまとめて読む」用途に最適で、型の違う 2 本(例: KV から String・D1 から record)を 1 回で並行にしたい場合は表現しづらい — その需要が強ければ選択肢 2 を v1.x で再検討する、と spec に注記する。
-
-### 🤝(e) Milestone の順序 — String 先行か async 先行か(全体)
-
-- **選択肢 1(String 先行・推奨)**: M44 → M45 → M46(テーマ受け入れ確定)→ M47(async)。
-- **選択肢 2(async 先行 / 並走)**: M47 を先に、または String 系と並走で進める。
-
-**推奨: 選択肢 1(String 先行)。** 理由: v0.10 のテーマは「純ロジック(String)は全部 Kei で書ける」で、合否ゲートは M46。テーマの受け入れを最短で確定させるには String 3 本を先に閉じるのが素直。並行 async(#161)は「テーマ本丸から外れる」と issue 自身が認めており、effect × 契約という別レイヤに触れるため、テーマ確定をブロックしない最後に置く。**補足(低ストレス論点)**: M47 は String 系と実装が独立なので、リソースがあれば並走しても技術的な衝突はない。順序に強い制約はなく、「テーマ受け入れ(M46)を async の遅延で止めない」ことだけ担保できればよい。
+経緯: v0.10 のテーマは「純ロジック(String)は全部 Kei で書ける」で、合否ゲートは M46。テーマの受け入れを最短で確定させるため String 3 本を先に閉じる。並行 async(#161)は「テーマ本丸から外れる」と issue 自身が認めており、effect × 契約という別レイヤに触れるため最後に置く。M47 は String 系と実装が独立なので並走しても技術的衝突はないが、「テーマ受け入れ(M46)を async の遅延で止めない」を担保する。
 
 ## スコープ外(v1.0 以降)
 
 - 実 `wrangler deploy`(本番デプロイ)と初見エージェントによる受け入れ実証 — v1.0。
 - grapheme(書記素クラスタ)segmentation の言語内実装 — v0.10 は code point 単位までを約束し、grapheme は extern(TS 側 `Intl.Segmenter` 等)へ誘導する境界を spec に書くに留める。
-- 正規表現エンジンの言語内実装(🤝(c)で「入れない」を選んだ場合)。
+- 正規表現エンジンの言語内実装(✅ 🤝(c) で不採用確定)。
 - 並行 async の race / キャンセル / タイムアウト / 構造化並行スコープ / 異種型タプル結合(M47 スコープ外)。
-- String stdlib medium tier(`repeat` / `padStart` / `padEnd`。🤝(b)次第)。
+- String stdlib medium tier(`repeat` / `padStart` / `padEnd`。✅ 🤝(b) で v1.x 送り確定)。
 
-## 後続 /goal ドラフト(🤝 合意後に確定)
+## 後続 /goal ドラフト(✅ 合意反映済み)
 
-以下は 🤝 合意後に着手する /goal の叩き台。**🤝(a)〜(e)の決定を反映してから実行する**(現時点は既定推奨案で書いてある)。
+🤝(a)〜(e)の決定(2026-07-27)を反映済み。M44 から順に実行する。
 
 ```text
-/goal M44: String の code point 意味論を追加する。🤝(a) の決定(既定: length は温存し
+/goal M44: String の code point 意味論を追加する。🤝(a) 合意(length は温存し
 codePointCount() を追加)に従い、(1) spec §2.6 に新 API を spec-first で追記、
 (2) "a😀b".codePointCount() == 3 の golden(check/emit)、(3) emit は Array.from/
 String.fromCodePoint で code point 尊重(runtime helper)、(4) code point イテレーションは
@@ -299,11 +283,11 @@ String.fromCodePoint で code point 尊重(runtime helper)、(4) code point イ�
 ```
 
 ```text
-/goal M45: String stdlib 段階2 を追加する。🤝(b) の範囲(既定: high + contains)を spec §2.6 に
+/goal M45: String stdlib 段階2 を追加する。🤝(b) 合意の範囲(high + contains)を spec §2.6 に
 spec-first で追記し、substring(code point 単位・runtime helper)/ replace / replaceAll /
 toLowerCase / toUpperCase / trim / startsWith / endsWith / contains を check(STRING_BUILTIN_MEMBERS
-+ string_method)/ emit / pbt / golden(check/fmt/emit)で固定する。🤝(c) の正規表現の態度
-(既定: 言語に入れない + 定石例示 + extern 境界明記)を spec に 1 節書く。SKILL の String 節を
++ string_method)/ emit / pbt / golden(check/fmt/emit)で固定する。🤝(c) 合意の正規表現の態度
+(言語に入れない + 定石例示 + extern 境界明記)を spec に 1 節書く。SKILL の String 節を
 更新して MCP golden 再生成。cargo fmt/clippy/test を通す(#160 のクローズは M46)。
 ```
 
@@ -317,7 +301,7 @@ kei build → tsc --strict → vitest の流儀に乗せ、.github/workflows/ci.
 ```
 
 ```text
-/goal M47: 並行 async の最小結合子を追加する。🤝(d) の形(既定: parallel(xs) -> List<T>)を
+/goal M47: 並行 async の最小結合子を追加する。🤝(d) 合意の形(parallel(xs) -> List<T>)を
 check(uses Async 伝播・結合子は契約を持たない・契約式内は既存純粋性診断で拒否)/ emit
 (await Promise.all([...])・fail-fast)/ golden(syntax/check/fmt/emit)で実装する。spec §5 に
 並行の意味論(独立実行・順序非依存・fail-fast・ensures は各要素のまま)を明文化し「sequential のみ」
