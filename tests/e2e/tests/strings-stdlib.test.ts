@@ -117,6 +117,30 @@ describe("strings/stdlib — String stdlib 段階2(M45)", () => {
     }
   });
 
+  it("replaceAll の空 from は code point 境界に挿入する(サロゲートを割らない)", () => {
+    // 深層レビュー反映(M45): native の s.replaceAll("", to) は UTF-16 code unit 境界に
+    // 挿入するため、絵文字で孤立サロゲートを作る。Kei は code point 境界に是正している。
+    expect(replaceEvery("a😀b", "", "_")).toBe("_a_😀_b_");
+    expect(replaceEvery("😀", "", "_")).toBe("_😀_");
+    expect(replaceEvery("", "", "_")).toBe("_");
+    // 参考: native はサロゲートを割る。
+    expect("😀".replaceAll("", "_")).toBe("_\uD83D_\uDE00_");
+    expect(replaceEvery("😀", "", "_")).not.toBe("😀".replaceAll("", "_"));
+    // JS 参照(code point 版): 先頭・各 code point の間・末尾に挿入。
+    const refEmptyReplaceAll = (s: string, to: string): string => {
+      const cps = Array.from(s);
+      return cps.length === 0 ? to : to + cps.join(to) + to;
+    };
+    for (const s of all) {
+      expect(replaceEvery(s, "", "_")).toBe(refEmptyReplaceAll(s, "_"));
+    }
+    // 対照: 非空 from は従来どおり native replaceAll と一致する(helper 委譲の回帰確認)。
+    expect(replaceEvery("a😀a", "a", "_")).toBe("_😀_");
+    expect(replaceEvery("a😀a", "a", "_")).toBe("a😀a".replaceAll("a", "_"));
+    // replace("", to) は位置 0 に 1 回挿入するだけでサロゲートを割れない(native のまま)。
+    expect(replaceFirst("😀", "", "_")).toBe("_😀");
+  });
+
   it("toLowerCase / toUpperCase は native と一致する", () => {
     expect(lower("Hello World")).toBe("hello world");
     expect(upper("Hello World")).toBe("HELLO WORLD");

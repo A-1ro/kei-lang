@@ -103,6 +103,25 @@ export function keiStringSplit(s: string, delimiter: string): string[] {
 }
 
 /**
+ * String.replaceAll(from, to): 非空 `from` は native `String.prototype.replaceAll`、
+ * **空 `from` は code point 境界ごとの挿入**にする(M45 / #160 深層レビュー反映)。
+ * native の `s.replaceAll("", to)` は UTF-16 code unit 境界に挿入するため、
+ * `"😀".replaceAll("", "_")` が `"_\uD83D_\uDE00_"` と孤立サロゲートを作ってしまう。
+ * Kei は code point 意味論(kei-spec-v0.10-strings §1)を守り、先頭・各 code point の間・
+ * 末尾に `to` を挿入する(`"a😀b"` → `"_a_😀_b_"`。空文字列 s は `to` 1 個 —
+ * native の `"".replaceAll("", "_") === "_"` と同じ形)。空 `from` のとき `to` は
+ * **字面どおり**挿入する(マッチが無いので `$` パターンは解釈しない)。
+ * 非空 `from` の native 経路は従来どおり `$` パターンを解釈する(spec §2.3)。
+ */
+export function keiStringReplaceAll(s: string, from: string, to: string): string {
+  if (from !== "") {
+    return s.replaceAll(from, to);
+  }
+  const cps = Array.from(s);
+  return cps.length === 0 ? to : to + cps.join(to) + to;
+}
+
+/**
  * String.substring(start, end): 範囲は **code point 単位**で規定する(M45 / #160。
  * #159 / M44 の code point 意味論と整合)。native の `String.prototype.substring` は
  * UTF-16 code unit index で、絵文字(サロゲートペア)を含むと境界を割ってしまうため、

@@ -289,11 +289,18 @@ impl<'a> RuntimeUses<'a> {
                     }
                     // String.substring(start, end) は keiStringSubstring へ写す(M45 / #160。
                     // 範囲は code point 単位。native の String.prototype.substring は UTF-16 index で
-                    // サロゲートを壊すため helper 経由)。replace / replaceAll / toLowerCase /
-                    // toUpperCase / trim / startsWith / endsWith / contains は TS 標準 String に
-                    // 素直に写るので helper 不要(contains は List と共通の .includes フォールバック)。
+                    // サロゲートを壊すため helper 経由)。replace / toLowerCase / toUpperCase /
+                    // trim / startsWith / endsWith / contains は TS 標準 String に素直に写るので
+                    // helper 不要(contains は List と共通の .includes フォールバック)。
                     if is_runtime_method(callee.as_ref(), args, self.list_ops, "substring", 2) {
                         self.names.insert("keiStringSubstring");
+                    }
+                    // String.replaceAll(from, to) は keiStringReplaceAll へ写す(M45 / #160
+                    // 深層レビュー反映。native の s.replaceAll("", to) は UTF-16 code unit 境界に
+                    // 挿入してサロゲートを割るため、空 from を code point 境界挿入に是正する。
+                    // 非空 from はヘルパー内で native replaceAll に委譲)。
+                    if is_runtime_method(callee.as_ref(), args, self.list_ops, "replaceAll", 2) {
+                        self.names.insert("keiStringReplaceAll");
                     }
                     // Map<K, V>.get(k) は keiMapGet ランタイムヘルパーへ写る(M33)。
                     // `Map.empty()` は `new Map()` に構文的に直写るため import 不要。
@@ -1298,6 +1305,22 @@ impl Emitter<'_> {
         if is_runtime_method(callee, args, self.list_ops, "substring", 2) {
             if let ast::Expr::Field { base, .. } = callee {
                 self.out.frag("keiStringSubstring(");
+                self.emit_expr(base, Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[0], Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[1], Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
+        // String.replaceAll(from, to) → keiStringReplaceAll(s, from, to)(M45 / #160
+        // 深層レビュー反映。native の s.replaceAll("", to) は UTF-16 code unit 境界に挿入して
+        // サロゲートを割る(`"😀".replaceAll("", "_")` → `"_\uD83D_\uDE00_"`)ため、空 from を
+        // code point 境界挿入に是正する。非空 from はヘルパー内で native replaceAll に委譲)。
+        if is_runtime_method(callee, args, self.list_ops, "replaceAll", 2) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiStringReplaceAll(");
                 self.emit_expr(base, Prec::Implication);
                 self.out.frag(", ");
                 self.emit_expr(&args[0], Prec::Implication);

@@ -578,12 +578,41 @@ fn string_substring_emits_runtime_helper() {
 }
 
 #[test]
+fn string_replace_all_emits_runtime_helper() {
+    // M45 / #160 深層レビュー反映: replaceAll は keiStringReplaceAll ヘルパー経由。
+    // native の s.replaceAll("", to) が UTF-16 code unit 境界に挿入してサロゲートを割るため、
+    // 空 from を code point 境界挿入に是正する(非空 from はヘルパー内で native に委譲)。
+    let out = emit(concat!(
+        "func rewrite(s: String, from: String, to: String) -> String {\n",
+        "  return s.replaceAll(from, to)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return keiStringReplaceAll(s, from, to);"),
+        "s.replaceAll(from, to) -> keiStringReplaceAll(s, from, to): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiStringReplaceAll")
+            && out.ts.contains("from \"@kei/runtime\";")
+            && out
+                .ts
+                .lines()
+                .any(|l| l.starts_with("import") && l.contains("keiStringReplaceAll")),
+        "keiStringReplaceAll import: {}",
+        out.ts
+    );
+}
+
+#[test]
 fn string_stage2_methods_stay_native() {
-    // M45 / #160: replace / replaceAll / toLowerCase / toUpperCase / trim / startsWith /
-    // endsWith は TS 標準 String.prototype.* にそのまま写る(ヘルパー不要・import なし)。
+    // M45 / #160: replace / toLowerCase / toUpperCase / trim / startsWith / endsWith は
+    // TS 標準 String.prototype.* にそのまま写る(ヘルパー不要・import なし)。
+    // replaceAll は深層レビュー反映で keiStringReplaceAll 経由に変わった(下の
+    // string_replace_all_emits_runtime_helper を参照)。
     let out = emit(concat!(
         "func norm(s: String) -> String {\n",
-        "  return s.replace(\"a\", \"b\").replaceAll(\"c\", \"d\").trim().toLowerCase().toUpperCase()\n",
+        "  return s.replace(\"a\", \"b\").trim().toLowerCase().toUpperCase()\n",
         "}\n",
         "func flags(s: String) -> Bool {\n",
         "  return s.startsWith(\"a\")\n",
@@ -593,10 +622,9 @@ fn string_stage2_methods_stay_native() {
         "}\n",
     ));
     assert!(
-        out.ts.contains(
-            "return s.replace(\"a\", \"b\").replaceAll(\"c\", \"d\").trim().toLowerCase().toUpperCase();"
-        ),
-        "replace/replaceAll/trim/toLowerCase/toUpperCase stay native: {}",
+        out.ts
+            .contains("return s.replace(\"a\", \"b\").trim().toLowerCase().toUpperCase();"),
+        "replace/trim/toLowerCase/toUpperCase stay native: {}",
         out.ts
     );
     assert!(

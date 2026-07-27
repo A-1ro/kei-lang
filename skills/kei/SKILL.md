@@ -118,7 +118,7 @@ enum FetchError {
   - **grapheme(書記素クラスタ・🇯🇵 や 👨‍👩‍👧 の ZWJ 連結)や正規化(NFC/NFD)は言語内で扱わない。** 「見た目 1 文字」単位の数え上げ・正規化比較が要るときは extern で TS の `Intl.Segmenter` / `String.prototype.normalize` に出す(`spec/kei-spec-v0.10-strings.md` §3 に定石)。
 - **文字列 stdlib 段階2(v0.10 / M45)**(`spec/kei-spec-v0.10-strings.md` §2.3 / 実例 `examples/strings/stdlib.kei`)。すべて純粋で契約式内でも使える:
   - `s.substring(start, end) -> String`。**範囲は code point 単位**(UTF-16 index ではない。#159 と整合)。`Array.prototype.slice` の index 意味論(負値は末尾から・範囲外はクランプ・`start >= end` は `""`)。`"a😀b".substring(1, 2) == "😀"`(絵文字を割らない)。UTF-16 単位で切りたい特殊ケースは extern。
-  - `s.replace(from, to) -> String`(最初の 1 箇所)/ `s.replaceAll(from, to) -> String`(全箇所)。置換文字列は JS の `$` パターンを解釈するので字面の `$` は `$$`。
+  - `s.replace(from, to) -> String`(最初の 1 箇所)/ `s.replaceAll(from, to) -> String`(全箇所)。置換文字列は JS の `$` パターンを解釈するので字面の `$` は `$$`(非空 `from` の場合)。**`replaceAll("", to)` は code point 境界ごとの挿入**(`"a😀b".replaceAll("", "_") == "_a_😀_b_"`。native はサロゲートを割るため helper で是正・`to` は字面挿入)。
   - `s.toLowerCase() -> String` / `s.toUpperCase() -> String`(**ロケール非依存**。トルコ語 `i`/`İ` 等は扱わない)。`s.trim() -> String`(前後空白除去)。
   - `s.startsWith(prefix) -> Bool` / `s.endsWith(suffix) -> Bool` / `s.contains(sub) -> Bool`(`indexOf != None` の可読化)。
   - **`--generative`**: `substring` / `startsWith` / `endsWith` / `contains` は bounded 評価器で評価される(`[generative]` 昇格可)。`replace` / `replaceAll` / 大小文字 / `trim` は JS/Rust 差を避けるため評価対象外(`[runtime]` のまま)。

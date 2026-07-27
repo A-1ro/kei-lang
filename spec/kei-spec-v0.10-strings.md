@@ -14,7 +14,8 @@
   (境界値 + `codePointCount` の bounded 評価)/ golden / examples に入った。
 - **M45 実装完了(v0.10)。** String stdlib 段階2(`substring` / `replace` / `replaceAll` /
   `toLowerCase` / `toUpperCase` / `trim` / `startsWith` / `endsWith` / `contains`)を追加(§2.3)。
-  `substring` は範囲を **code point 単位**で規定(runtime helper `keiStringSubstring`)、他は TS 標準
+  `substring` は範囲を **code point 単位**で規定(runtime helper `keiStringSubstring`)、`replaceAll` は
+  空 `from` を code point 境界挿入に是正(runtime helper `keiStringReplaceAll`)、他は TS 標準
   String に素直に写る。あわせて**正規表現の態度**を明文化(§5。言語に入れず定石例示 + extern 境界)。
 - M46(純ロジック等価テスト実証)・M47(並行 async)は後続。
 
@@ -95,7 +96,7 @@ Kei で書くための API 拡充。範囲は #160 🤝(b) 合意の **high tier
 |---|---|---|---|
 | `substring` | `(start: Int, end: Int) -> String` | **code point 単位**の半開区間(下記) | `keiStringSubstring`(helper) |
 | `replace` | `(from: String, to: String) -> String` | 最初の 1 箇所を置換 | `String.prototype.replace` |
-| `replaceAll` | `(from: String, to: String) -> String` | 全箇所を置換 | `String.prototype.replaceAll` |
+| `replaceAll` | `(from: String, to: String) -> String` | 全箇所を置換(空 `from` は code point 境界挿入・下記) | `keiStringReplaceAll`(helper) |
 | `toLowerCase` | `() -> String` | ロケール非依存の小文字化 | `String.prototype.toLowerCase` |
 | `toUpperCase` | `() -> String` | ロケール非依存の大文字化 | `String.prototype.toUpperCase` |
 | `trim` | `() -> String` | 前後空白の除去 | `String.prototype.trim` |
@@ -134,11 +135,28 @@ Kei で書くための API 拡充。範囲は #160 🤝(b) 合意の **high tier
 使わない。ロケール依存の畳み込み(トルコ語の `i` ↔ `İ`・ギリシャ語末尾シグマ等)は **v0.10 スコープ外**で、
 必要なら extern(§3 と同じ発想)。純ロジックを決定的・ロケール非依存に保つための選択。
 
-#### `replace` / `replaceAll` の置換パターン注記
+#### `replace` / `replaceAll` の置換パターン注記と空 `from` の意味論
 
 第 1 引数は文字列(部分文字列一致)で、`replace` は最初の 1 箇所・`replaceAll` は全箇所を置換する。
 置換文字列(第 2 引数)は JS の置換パターン(`$&` = マッチ全体、`$$` = 字面の `$` 等)を解釈する
-ことに注意する。`$` を字面で入れたいときは `$$` と書く。
+ことに注意する。`$` を字面で入れたいときは `$$` と書く(非空 `from` の場合)。
+
+**空 `from`(`""`)の `replaceAll` は code point 境界ごとの挿入**とする(M45 深層レビュー反映):
+
+```text
+"a😀b".replaceAll("", "_")   // "_a_😀_b_"   (先頭・各 code point の間・末尾に挿入)
+"".replaceAll("", "_")        // "_"          (native の "".replaceAll("", "_") と同じ形)
+```
+
+- native の `s.replaceAll("", to)` は **UTF-16 code unit 境界**に挿入するため、
+  `"😀".replaceAll("", "_")` が `"_\uD83D_\uDE00_"` と**孤立サロゲートを作ってしまい**、§1 の
+  「code point 単位まで保証」に反する。emit は `keiStringReplaceAll` ヘルパー経由とし、空 `from` のみ
+  code point 境界(`Array.from`)への挿入に是正する。非空 `from` はヘルパー内で native
+  `String.prototype.replaceAll` に委譲するので振る舞いは従来どおり。
+- 空 `from` のとき `to` は**字面どおり**挿入する(マッチが存在しないため `$` パターンは解釈しない。
+  native は空マッチにも `$$` 等を適用するが、Kei は挿入の意味論として字面挿入を規定する)。
+- `replace("", to)` は**位置 0 に 1 回挿入するだけ**(`"😀".replace("", "_") == "_😀"`)で
+  サロゲートを割れないため、native `String.prototype.replace` のままでよい(helper 不要)。
 
 #### 契約と generative
 
