@@ -230,9 +230,10 @@ func slugify(s: String) -> String {
   return s.toLowerCase().split("").fold("", (acc, c) => acc + slugChar(c))
 }
 
-// 前方 / 後方一致・部分文字列は startsWith / endsWith / contains で直接書ける。
+// 前方 / 後方一致・部分文字列は startsWith / endsWith / contains で直接書ける
+// (選択は || で合成する。演算子は v0.1 §「演算子」参照)。
 func isImageKey(key: String) -> Bool {
-  return key.endsWith(".png") == key.endsWith(".jpg")  // 例。実際は || 相当を match で
+  return key.endsWith(".png") || key.endsWith(".jpg")
 }
 ```
 
