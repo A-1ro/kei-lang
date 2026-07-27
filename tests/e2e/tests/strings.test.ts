@@ -116,4 +116,24 @@ describe("strings/codepoints — code point 意味論(M44)", () => {
     expect(isWithinLimit("😀😀😀", 3)).toBe(true);
     expect(isWithinLimit("😀😀😀", 2)).toBe(false);
   });
+
+  // 境界値: 孤立サロゲートと ZWJ 列。PBT(kei check --generative)は Rust String =
+  // Unicode scalar value のため孤立サロゲートを生成できないので、この境界は
+  // runtime e2e 層で固定する。ZWJ 列は「1 grapheme = 複数 code point」の代表。
+  it("孤立サロゲート・ZWJ 列も Array.from 意味論と一致する", () => {
+    const boundary: string[] = [
+      "\uD800", // lone high surrogate
+      "\uDC00", // lone low surrogate
+      "a\uD800b", // 文中の孤立サロゲート
+      "\uD800\uD800", // 連続する孤立 high surrogate
+      "👨‍👩‍👧‍👦", // family emoji(ZWJ 列。7 code point / 1 grapheme)
+      "👍‍👍", // ZWJ を挟んだ 2 絵文字
+    ];
+    for (const s of boundary) {
+      expect(codePoints(s)).toEqual(refCodePoints(s));
+      expect(codePointCount(s)).toBe(refCodePointCount(s));
+    }
+    // ZWJ 列は grapheme では 1 でも code point では 7(絵文字 4 + ZWJ 3)。
+    expect(codePointCount("👨‍👩‍👧‍👦")).toBe(7);
+  });
 });
