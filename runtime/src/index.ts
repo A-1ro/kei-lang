@@ -102,6 +102,18 @@ export function keiStringSplit(s: string, delimiter: string): string[] {
   return delimiter === "" ? Array.from(s) : s.split(delimiter);
 }
 
+/**
+ * String.substring(start, end): 範囲は **code point 単位**で規定する(M45 / #160。
+ * #159 / M44 の code point 意味論と整合)。native の `String.prototype.substring` は
+ * UTF-16 code unit index で、絵文字(サロゲートペア)を含むと境界を割ってしまうため、
+ * code point 配列(`Array.from`)を JS `Array.prototype.slice` の index 意味論で切る:
+ * 負の index は末尾から、範囲外は端にクランプ、resolve 後の start >= end は "" を返す。
+ * spec §2.6 / kei-spec-v0.10-strings §2.3 / M45。
+ */
+export function keiStringSubstring(s: string, start: number, end: number): string {
+  return Array.from(s).slice(start, end).join("");
+}
+
 // ---- Map<K, V> のランタイムヘルパー(spec v0.3-collections §7 / M33) ----
 //
 // Map<K, V> は ReadonlyMap<K, V> にトランスパイルされ、has / size は TS の同名 API に

@@ -153,6 +153,17 @@ func totalStockValue(products: List<Product>) -> Int
 - `s.indexOf(needle: String) -> Option<Int>`(メソッド、引数1、v0.9 / M41)。`String.prototype.indexOf` を `Option` でラップしたもの。`needle` が見つかれば `Some(pos)`(UTF-16 code unit index)、見つからなければ `None` を返す。`-1` 番兵は採らない。
   `indexOf()` を含む式は `toInt()` と同じ理由(bounded 評価器が `Option` 値を未サポート)で `kei check --generative` が評価不能扱いとし、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 と同じ挙動)。
 
+String stdlib 段階2(v0.10 / M45。実アプリの純ロジックを Kei で書くための拡充。詳細は `kei-spec-v0.10-strings.md` §2.3):
+
+- `s.substring(start: Int, end: Int) -> String`(メソッド、引数2、v0.10 / M45)。**範囲は code point 単位**で規定する(#159 / M44 の code point 意味論と整合。UTF-16 code unit index ではない)。`start`〜`end` の半開区間を、code point 列を JS `Array.prototype.slice(start, end)` の index 意味論で切り出す(負の index は末尾から、範囲外は端にクランプ、resolve 後の `start >= end` は `""`)。`"a😀b".substring(1, 2) == "😀"`(native の `String.prototype.substring` は UTF-16 index で `"\uD83D"` になりサロゲートを割るため、emit は `keiStringSubstring` ヘルパー経由で code point を尊重する)。純粋で `--generative` の bounded 評価器も評価できる。
+- `s.replace(from: String, to: String) -> String` / `s.replaceAll(from: String, to: String) -> String`(メソッド、引数2、v0.10 / M45)。部分文字列 `from` を `to` に置換する。`replace` は**最初の 1 箇所**、`replaceAll` は**全箇所**。emit は TS の `String.prototype.replace` / `replaceAll` にそのまま写る(第 1 引数は文字列=部分文字列一致。置換文字列 `to` は JS の置換パターン(`$&` などの `$` シーケンス)を解釈するので、`$` を字面で入れたいときは `$$` にする)。`--generative` では bounded 評価器が JS と Rust の空パターン置換の差を避けるため評価対象外(`[runtime]` のまま)。
+- `s.toLowerCase() -> String` / `s.toUpperCase() -> String`(メソッド、引数0、v0.10 / M45)。**ロケール非依存**の Unicode 大小文字変換(TS の `String.prototype.toLowerCase` / `toUpperCase`。`toLocale*Case` ではない)。ロケール依存の畳み込み(トルコ語の `i`/`İ` 等)は言語内で扱わない — 必要なら extern。`--generative` では case マッピングの JS/Rust 差を避けるため評価対象外(`[runtime]` のまま)。
+- `s.trim() -> String`(メソッド、引数0、v0.10 / M45)。前後の空白(JS の WhiteSpace + LineTerminator 集合)を除去する。`String.prototype.trim` にそのまま写る。`--generative` では空白集合の JS/Rust 差を避けるため評価対象外(`[runtime]` のまま)。
+- `s.startsWith(prefix: String) -> Bool` / `s.endsWith(suffix: String) -> Bool`(メソッド、引数1、v0.10 / M45)。前方一致 / 後方一致。`String.prototype.startsWith` / `endsWith` にそのまま写る。純粋で `--generative` の bounded 評価器も評価できる。
+- `s.contains(sub: String) -> Bool`(メソッド、引数1、v0.10 / M45)。部分文字列包含(`indexOf(sub) != None` の可読化)。emit は `String.prototype.includes`(`List.contains` と同じフォールバック)。純粋で `--generative` の bounded 評価器も評価できる。
+
+**正規表現は言語に入れない**(v0.10 / M45。#160 🤝(c))。slug 生成・タグ正規化などは上記 String プリミティブ + `s.split("")`(code point イテレーション)+ `List` 畳み込みの定石で書く。どうしても正規表現が要るパターンは extern で TS 側 `RegExp` に出す(境界。詳細と定石は `kei-spec-v0.10-strings.md` §5)。
+
 いずれも純粋で副作用を持たず、`requires` / `ensures` 内でも使える。
 
 ## 3. エフェクトシステム(v0.1の範囲)

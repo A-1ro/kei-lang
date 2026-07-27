@@ -287,6 +287,14 @@ impl<'a> RuntimeUses<'a> {
                     if is_runtime_method(callee.as_ref(), args, self.list_ops, "split", 1) {
                         self.names.insert("keiStringSplit");
                     }
+                    // String.substring(start, end) は keiStringSubstring へ写す(M45 / #160。
+                    // 範囲は code point 単位。native の String.prototype.substring は UTF-16 index で
+                    // サロゲートを壊すため helper 経由)。replace / replaceAll / toLowerCase /
+                    // toUpperCase / trim / startsWith / endsWith / contains は TS 標準 String に
+                    // 素直に写るので helper 不要(contains は List と共通の .includes フォールバック)。
+                    if is_runtime_method(callee.as_ref(), args, self.list_ops, "substring", 2) {
+                        self.names.insert("keiStringSubstring");
+                    }
                     // Map<K, V>.get(k) は keiMapGet ランタイムヘルパーへ写る(M33)。
                     // `Map.empty()` は `new Map()` に構文的に直写るため import 不要。
                     if is_runtime_method(callee.as_ref(), args, self.map_ops, "get", 1) {
@@ -1279,6 +1287,22 @@ impl Emitter<'_> {
                 self.emit_expr(base, Prec::Implication);
                 self.out.frag(", ");
                 self.emit_expr(&args[0], Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
+        // String.substring(start, end) → keiStringSubstring(s, start, end)(M45 / #160。
+        // 範囲を code point 単位で規定するためランタイムヘルパー経由。native の
+        // String.prototype.substring は UTF-16 code unit index で、絵文字を含むと
+        // サロゲートを割ってしまう。#159 / M44 の code point 意味論との整合を emit で守る)。
+        if is_runtime_method(callee, args, self.list_ops, "substring", 2) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiStringSubstring(");
+                self.emit_expr(base, Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[0], Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[1], Prec::Implication);
                 self.out.frag(")");
                 return;
             }
