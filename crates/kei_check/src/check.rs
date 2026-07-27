@@ -178,7 +178,7 @@ const LIST_BUILTIN_METHODS: &[&str] = &[
 const MAP_BUILTIN_MEMBERS: &[&str] = &["get", "set", "has", "size"];
 
 /// String の未知メンバー診断の did-you-mean 候補(field_on / string_method で共有)。
-const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt", "split", "indexOf"];
+const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt", "split", "indexOf", "codePointCount"];
 
 /// Int の未知メンバー診断の did-you-mean 候補(field_on / int_method で共有)。
 const INT_BUILTIN_MEMBERS: &[&str] = &["toString"];
@@ -2208,7 +2208,7 @@ impl FnChecker<'_> {
             },
             Ty::Str => match name.name.as_str() {
                 "length" => Ty::Int,
-                "toInt" => {
+                "toInt" | "codePointCount" => {
                     let m = name.name.clone();
                     self.push(
                         codes::UNKNOWN_FIELD,
@@ -2832,6 +2832,14 @@ impl FnChecker<'_> {
                     self.infer(a);
                 }
                 Ty::Option(Box::new(Ty::Int))
+            }
+            "codePointCount" => {
+                // Unicode code point 数(`😀` = 1)。UTF-16 の `length` とは別 API(加法。M44 / #159)。
+                self.expect_arity(&method.name, 0, args, span);
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Int
             }
             "length" => {
                 self.push(

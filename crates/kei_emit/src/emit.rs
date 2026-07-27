@@ -272,10 +272,20 @@ impl<'a> RuntimeUses<'a> {
                         self.names.insert("keiStringToInt");
                     }
                     // String.indexOf(needle) は keiStringIndexOf ランタイムヘルパーへ写す
-                    // (M41 / #136)。split はそのまま String.prototype.split に写るので
-                    // ヘルパー不要。
+                    // (M41 / #136)。
                     if is_runtime_method(callee.as_ref(), args, self.list_ops, "indexOf", 1) {
                         self.names.insert("keiStringIndexOf");
+                    }
+                    // String.codePointCount() は keiStringCodePointCount へ写す(M44 / #159。
+                    // code point 数を数える。UTF-16 の length とは別)。
+                    if is_runtime_method(callee.as_ref(), args, self.list_ops, "codePointCount", 0)
+                    {
+                        self.names.insert("keiStringCodePointCount");
+                    }
+                    // String.split(delimiter) は keiStringSplit へ写す(M44 / #159。空デリミタを
+                    // code point 単位で分割するため。native の s.split("") はサロゲートを壊す)。
+                    if is_runtime_method(callee.as_ref(), args, self.list_ops, "split", 1) {
+                        self.names.insert("keiStringSplit");
                     }
                     // Map<K, V>.get(k) は keiMapGet ランタイムヘルパーへ写る(M33)。
                     // `Map.empty()` は `new Map()` に構文的に直写るため import 不要。
@@ -1239,11 +1249,33 @@ impl Emitter<'_> {
             }
         }
         // String.indexOf(needle) → keiStringIndexOf(s, needle)(M41 / #136。Option でラップ
-        // するためランタイムヘルパー方式。split は JS の String.prototype.split と同じ
-        // シグネチャなので下の汎用フォールバックにそのまま乗る)。
+        // するためランタイムヘルパー方式)。
         if is_runtime_method(callee, args, self.list_ops, "indexOf", 1) {
             if let ast::Expr::Field { base, .. } = callee {
                 self.out.frag("keiStringIndexOf(");
+                self.emit_expr(base, Prec::Implication);
+                self.out.frag(", ");
+                self.emit_expr(&args[0], Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
+        // String.codePointCount() → keiStringCodePointCount(s)(M44 / #159。code point 数。
+        // UTF-16 の length と壊さず両立させるためランタイムヘルパー経由)。
+        if is_runtime_method(callee, args, self.list_ops, "codePointCount", 0) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiStringCodePointCount(");
+                self.emit_expr(base, Prec::Implication);
+                self.out.frag(")");
+                return;
+            }
+        }
+        // String.split(delimiter) → keiStringSplit(s, delimiter)(M44 / #159。空デリミタは
+        // code point 単位で分割する。native の s.split("") はサロゲートペアを UTF-16 code unit
+        // に割ってしまうため、code point イテレーション(spec 設計原則)をヘルパーで守る)。
+        if is_runtime_method(callee, args, self.list_ops, "split", 1) {
+            if let ast::Expr::Field { base, .. } = callee {
+                self.out.frag("keiStringSplit(");
                 self.emit_expr(base, Prec::Implication);
                 self.out.frag(", ");
                 self.emit_expr(&args[0], Prec::Implication);

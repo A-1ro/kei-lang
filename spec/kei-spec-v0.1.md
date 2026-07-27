@@ -144,11 +144,12 @@ func totalStockValue(products: List<Product>) -> Int
 
 - `String + String -> String`(連結)。混在(`Int + String` 等)は型不一致(`KEI-E2001`)で拒否する。
   tagged String(`type X = String tagged "X"`)同士、または tagged String と素の String の連結も `+` では不可(`KEI-E2001`)。基底 String で連結してからコンストラクタで再構築すること。
-- `s.length -> Int`(プロパティ)。UTF-16 code unit 長(V8 の `String.prototype.length` と同一。サロゲートペアは 2 として数える)。
+- `s.length -> Int`(プロパティ)。UTF-16 code unit 長(V8 の `String.prototype.length` と同一。サロゲートペアは 2 として数える)。**文字数を「人間の感覚どおり」に数えたいときは下記 `codePointCount()` を使う**(`length` は絵文字で 2 以上になる。v0.10 / M44 の指針。詳細は `kei-spec-v0.10-strings.md`)。
+- `s.codePointCount() -> Int`(メソッド、引数0、v0.10 / M44)。Unicode **code point** 数を返す(`"a😀b".codePointCount() == 3`。`"a😀b".length == 4`)。`length`(UTF-16 code unit)とは別の加法 API で、`length` の意味は変えない(#159)。emit は `keiStringCodePointCount` へ写し、サロゲートペアを壊さない(意味論は `Array.from(s).length` と同一 = string iterator の code point 単位反復。実装は中間配列を確保しないカウントループ)。純粋なので `requires` / `ensures` 内でも使え、`kei check --generative` の bounded 評価器も評価できる(`s.chars().count()`。`length` との差はサロゲート境界値で PBT に現れる)。code point より細かい **grapheme(書記素クラスタ)や正規化(NFC/NFD)は言語内で扱わない** — 境界は `kei-spec-v0.10-strings.md` を参照。
 - `s.toInt() -> Option<Int>`(メソッド、引数0)。`^-?[0-9]+$` に一致し、かつ安全整数範囲(`Number.isSafeInteger`)に収まる文字列だけ `Some(n)`。それ以外(空文字・符号のみ・小数点・桁あふれ等)は `None`。
   `toInt()` を含む式は `kei check --generative`(PBT 生成、spec-v0.2 §5)の bounded 評価器が Option 値を未サポートのため評価不能扱いとなり、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 で追跡)。
 - `n.toString() -> String`(`Int` のメソッド、引数0)。10進表記の文字列を返す。
-- `s.split(delimiter: String) -> List<String>`(メソッド、引数1、v0.9 / M41)。TS の `String.prototype.split` に写る。`delimiter` で分割した部分文字列の `List<String>` を返す。区切り文字列が空文字列の場合も許容し、その場合は JS 準拠で code point ごとに分割する。
+- `s.split(delimiter: String) -> List<String>`(メソッド、引数1、v0.9 / M41。空デリミタの意味論を v0.10 / M44 で明確化)。`delimiter` で分割した部分文字列の `List<String>` を返す。**区切り文字列が空文字列 `""` の場合は code point 単位で分割する**(`"a😀b".split("") == ["a", "😀", "b"]`)。emit は `keiStringSplit` ヘルパー経由で、非空デリミタは native `String.prototype.split` に委譲し、空デリミタのみ `Array.from(s)`(code point 単位)に落とす。**注意: native の `s.split("")` はサロゲートペアを UTF-16 code unit に割ってしまう**(`["a", "\uD83D", "\uDE00", "b"]`)ため、Kei は空デリミタ split をヘルパーで code point 尊重にしている(M44 で修正。「1 文字ずつ処理」の正規経路 — `kei-spec-v0.10-strings.md` 参照)。
 - `s.indexOf(needle: String) -> Option<Int>`(メソッド、引数1、v0.9 / M41)。`String.prototype.indexOf` を `Option` でラップしたもの。`needle` が見つかれば `Some(pos)`(UTF-16 code unit index)、見つからなければ `None` を返す。`-1` 番兵は採らない。
   `indexOf()` を含む式は `toInt()` と同じ理由(bounded 評価器が `Option` 値を未サポート)で `kei check --generative` が評価不能扱いとし、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 と同じ挙動)。
 

@@ -77,6 +77,31 @@ export function keiStringIndexOf(s: string, needle: string): Option<number> {
   return i < 0 ? None() : Some(i);
 }
 
+/**
+ * String.codePointCount(): Unicode code point 数(`😀` = 1)。
+ * `s.length`(UTF-16 code unit 長。サロゲートペアは 2)とは異なる。
+ * 意味論は `Array.from(s).length` と同一(string iterator = code point 単位の反復)。
+ * 実装は中間配列を確保しないカウントループ(PR #166 深層レビュー反映。
+ * spec §2.6 / kei-spec-v0.10-strings / M44)。
+ */
+export function keiStringCodePointCount(s: string): number {
+  let n = 0;
+  for (const _ of s) {
+    n++;
+  }
+  return n;
+}
+
+/**
+ * String.split(delimiter): 非空デリミタは native `String.prototype.split`、
+ * **空デリミタは code point 単位**で分割する(`Array.from`。native の `s.split("")` は
+ * サロゲートペアを UTF-16 code unit に割ってしまうため、ここで code point を尊重する)。
+ * spec §2.6 / kei-spec-v0.10-strings / M44。
+ */
+export function keiStringSplit(s: string, delimiter: string): string[] {
+  return delimiter === "" ? Array.from(s) : s.split(delimiter);
+}
+
 // ---- Map<K, V> のランタイムヘルパー(spec v0.3-collections §7 / M33) ----
 //
 // Map<K, V> は ReadonlyMap<K, V> にトランスパイルされ、has / size は TS の同名 API に
