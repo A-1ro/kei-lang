@@ -80,10 +80,16 @@ export function keiStringIndexOf(s: string, needle: string): Option<number> {
 /**
  * String.codePointCount(): Unicode code point 数(`😀` = 1)。
  * `s.length`(UTF-16 code unit 長。サロゲートペアは 2)とは異なる。
- * `Array.from` は文字列を code point 単位で反復する(spec §2.6 / kei-spec-v0.10-strings / M44)。
+ * 意味論は `Array.from(s).length` と同一(string iterator = code point 単位の反復)。
+ * 実装は中間配列を確保しないカウントループ(PR #166 深層レビュー反映。
+ * spec §2.6 / kei-spec-v0.10-strings / M44)。
  */
 export function keiStringCodePointCount(s: string): number {
-  return Array.from(s).length;
+  let n = 0;
+  for (const _ of s) {
+    n++;
+  }
+  return n;
 }
 
 /**

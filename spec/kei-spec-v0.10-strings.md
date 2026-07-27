@@ -52,8 +52,10 @@ Unicode code point 数を返す純粋メソッド(引数 0)。
 
 - **加法変更**: `length`(UTF-16)は意味を変えない。文字数上限バリデーション等で「人間の感覚どおり」に
   数えたいときは `codePointCount()` を使う、を推奨とする(#159 🤝(a))。
-- emit: `keiStringCodePointCount(s)`(runtime helper。内部は `Array.from(s).length`)。native の
-  `s.length` に落とすとサロゲートで壊れるため helper 経由。
+- emit: `keiStringCodePointCount(s)`(runtime helper)。**意味論は `Array.from(s).length` と同一**
+  (string iterator = code point 単位の反復)。実装は中間配列を確保しないカウントループ
+  (`for...of` で code point を数える。等価性は e2e の JS 参照 `Array.from(s).length` との
+  一致テストで固定)。native の `s.length` に落とすとサロゲートで壊れるため helper 経由。
 - 契約: 純粋なので `requires` / `ensures` 内で使える。`kei check --generative` の bounded 評価器は
   `s.chars().count()` で評価でき、`length`(UTF-16)との差はサロゲート境界値
   (`str_domain` の `😀` / `🇯🇵`)で PBT に現れる。例: `ensures result <= s.length` は generative で充足を示せる。
