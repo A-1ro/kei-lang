@@ -530,15 +530,25 @@ fn int_domain(deep: bool) -> Vec<Value> {
 }
 
 fn str_domain(deep: bool) -> Vec<Value> {
+    // M44 / #159: サロゲートペア(`😀` = code point 1・UTF-16 code unit 2)を境界値に含め、
+    // `s.length`(UTF-16)と `s.codePointCount()`(code point)の差を PBT で踏めるようにする。
+    // 旗絵文字(`🇯🇵` = 地域指示子 2 つ = code point 2・code unit 4)も足し、単一サロゲート以外の
+    // ずれ幅も観測できるようにする(grapheme 単位ではないことの回帰確認)。
     if deep {
         // PR #76 review: 深い領域でも **空文字** は境界として残す
         // (`requires items.all(nonEmpty)` のような契約が踏まれるように)。
-        vec![Value::Str(String::new()), Value::Str("a".to_string())]
+        vec![
+            Value::Str(String::new()),
+            Value::Str("a".to_string()),
+            Value::Str("😀".to_string()),
+        ]
     } else {
         vec![
             Value::Str(String::new()),
             Value::Str("a".to_string()),
             Value::Str("abc".to_string()),
+            Value::Str("a😀b".to_string()),
+            Value::Str("🇯🇵".to_string()),
         ]
     }
 }
@@ -994,6 +1004,12 @@ fn eval_expr(
                     }
                     Value::Int(n) if name.name == "toString" => {
                         return Ok(Value::Str(n.to_string()));
+                    }
+                    // codePointCount() は Int を返す純粋メソッドなので評価器で計算できる
+                    // (M44 / #159)。`s.chars()` は Unicode スカラ値=code point 単位で反復し、
+                    // `length`(UTF-16 code unit 長)との差がサロゲート境界値で観測できる。
+                    Value::Str(s) if name.name == "codePointCount" && args.is_empty() => {
+                        return Ok(Value::Int(s.chars().count() as i64));
                     }
                     // Option / List<String> 値を評価器は持たないため Unsupported に倒す
                     // (get と同じ扱い。toInt: M30 / #107, split & indexOf: M41 / #136)。

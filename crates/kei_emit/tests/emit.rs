@@ -485,15 +485,68 @@ fn string_to_int_emits_runtime_helper() {
 }
 
 #[test]
-fn string_split_stays_native_method() {
+fn string_split_emits_runtime_helper() {
+    // M44 / #159: split は keiStringSplit ランタイムヘルパー経由に変わった。
+    // 空デリミタ split("") を code point 単位に落とすため(native s.split("") は
+    // サロゲートペアを UTF-16 code unit に割る)。非空デリミタはヘルパー内で native
+    // split に委譲するので実行時の振る舞いは不変。
     let out = emit(concat!(
         "func parts(s: String) -> List<String> {\n",
         "  return s.split(\",\")\n",
         "}\n",
     ));
     assert!(
-        out.ts.contains("return s.split(\",\");"),
-        "s.split(...) stays a native String.prototype.split call: {}",
+        out.ts.contains("return keiStringSplit(s, \",\");"),
+        "s.split(delim) -> keiStringSplit(s, delim): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiStringSplit")
+            && out.ts.contains("from \"@kei/runtime\";")
+            && out
+                .ts
+                .lines()
+                .any(|l| l.starts_with("import") && l.contains("keiStringSplit")),
+        "keiStringSplit import: {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_split_empty_delimiter_emits_helper() {
+    // 空デリミタでも同じヘルパーに乗る(ヘルパー内で Array.from へ分岐して code point 単位)。
+    let out = emit(concat!(
+        "func chars(s: String) -> List<String> {\n",
+        "  return s.split(\"\")\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return keiStringSplit(s, \"\");"),
+        "s.split(\"\") -> keiStringSplit(s, \"\"): {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_code_point_count_emits_runtime_helper() {
+    let out = emit(concat!(
+        "func count(s: String) -> Int {\n",
+        "  return s.codePointCount()\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return keiStringCodePointCount(s);"),
+        "s.codePointCount() -> keiStringCodePointCount(s): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiStringCodePointCount")
+            && out.ts.contains("from \"@kei/runtime\";")
+            && out
+                .ts
+                .lines()
+                .any(|l| l.starts_with("import") && l.contains("keiStringCodePointCount")),
+        "keiStringCodePointCount import: {}",
         out.ts
     );
 }
