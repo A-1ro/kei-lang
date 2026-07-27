@@ -552,6 +552,120 @@ fn string_code_point_count_emits_runtime_helper() {
 }
 
 #[test]
+fn string_substring_emits_runtime_helper() {
+    // M45 / #160: substring は範囲を code point 単位で規定するため keiStringSubstring
+    // ヘルパー経由(native の String.prototype.substring は UTF-16 index でサロゲートを壊す)。
+    let out = emit(concat!(
+        "func slice(s: String, a: Int, b: Int) -> String {\n",
+        "  return s.substring(a, b)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return keiStringSubstring(s, a, b);"),
+        "s.substring(a, b) -> keiStringSubstring(s, a, b): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiStringSubstring")
+            && out.ts.contains("from \"@kei/runtime\";")
+            && out
+                .ts
+                .lines()
+                .any(|l| l.starts_with("import") && l.contains("keiStringSubstring")),
+        "keiStringSubstring import: {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_replace_all_emits_runtime_helper() {
+    // M45 / #160 深層レビュー反映: replaceAll は keiStringReplaceAll ヘルパー経由。
+    // native の s.replaceAll("", to) が UTF-16 code unit 境界に挿入してサロゲートを割るため、
+    // 空 from を code point 境界挿入に是正する(非空 from はヘルパー内で native に委譲)。
+    let out = emit(concat!(
+        "func rewrite(s: String, from: String, to: String) -> String {\n",
+        "  return s.replaceAll(from, to)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return keiStringReplaceAll(s, from, to);"),
+        "s.replaceAll(from, to) -> keiStringReplaceAll(s, from, to): {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("keiStringReplaceAll")
+            && out.ts.contains("from \"@kei/runtime\";")
+            && out
+                .ts
+                .lines()
+                .any(|l| l.starts_with("import") && l.contains("keiStringReplaceAll")),
+        "keiStringReplaceAll import: {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_stage2_methods_stay_native() {
+    // M45 / #160: replace / toLowerCase / toUpperCase / trim / startsWith / endsWith は
+    // TS 標準 String.prototype.* にそのまま写る(ヘルパー不要・import なし)。
+    // replaceAll は深層レビュー反映で keiStringReplaceAll 経由に変わった(下の
+    // string_replace_all_emits_runtime_helper を参照)。
+    let out = emit(concat!(
+        "func norm(s: String) -> String {\n",
+        "  return s.replace(\"a\", \"b\").trim().toLowerCase().toUpperCase()\n",
+        "}\n",
+        "func flags(s: String) -> Bool {\n",
+        "  return s.startsWith(\"a\")\n",
+        "}\n",
+        "func flags2(s: String) -> Bool {\n",
+        "  return s.endsWith(\"b\")\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts
+            .contains("return s.replace(\"a\", \"b\").trim().toLowerCase().toUpperCase();"),
+        "replace/trim/toLowerCase/toUpperCase stay native: {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("return s.startsWith(\"a\");"),
+        "startsWith stays native: {}",
+        out.ts
+    );
+    assert!(
+        out.ts.contains("return s.endsWith(\"b\");"),
+        "endsWith stays native: {}",
+        out.ts
+    );
+    assert!(
+        !out.ts.contains("from \"@kei/runtime\""),
+        "stage-2 native methods need no runtime import: {}",
+        out.ts
+    );
+}
+
+#[test]
+fn string_contains_emits_includes() {
+    // M45 / #160: String.contains(sub) は List.contains と共通の .includes フォールバックに
+    // 乗る(部分文字列包含。`indexOf(...) != None` の可読化)。
+    let out = emit(concat!(
+        "func has(s: String, sub: String) -> Bool {\n",
+        "  return s.contains(sub)\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts.contains("return s.includes(sub);"),
+        "s.contains(sub) -> s.includes(sub): {}",
+        out.ts
+    );
+    assert!(
+        !out.ts.contains("from \"@kei/runtime\""),
+        "String.contains needs no runtime import: {}",
+        out.ts
+    );
+}
+
+#[test]
 fn string_index_of_emits_runtime_helper() {
     let out = emit(concat!(
         "func findAt(s: String, needle: String) -> Option<Int> {\n",

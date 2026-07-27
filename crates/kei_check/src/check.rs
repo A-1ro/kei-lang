@@ -178,7 +178,22 @@ const LIST_BUILTIN_METHODS: &[&str] = &[
 const MAP_BUILTIN_MEMBERS: &[&str] = &["get", "set", "has", "size"];
 
 /// String の未知メンバー診断の did-you-mean 候補(field_on / string_method で共有)。
-const STRING_BUILTIN_MEMBERS: &[&str] = &["length", "toInt", "split", "indexOf", "codePointCount"];
+const STRING_BUILTIN_MEMBERS: &[&str] = &[
+    "length",
+    "toInt",
+    "split",
+    "indexOf",
+    "codePointCount",
+    "substring",
+    "replace",
+    "replaceAll",
+    "toLowerCase",
+    "toUpperCase",
+    "trim",
+    "startsWith",
+    "endsWith",
+    "contains",
+];
 
 /// Int の未知メンバー診断の did-you-mean 候補(field_on / int_method で共有)。
 const INT_BUILTIN_MEMBERS: &[&str] = &["toString"];
@@ -2208,7 +2223,7 @@ impl FnChecker<'_> {
             },
             Ty::Str => match name.name.as_str() {
                 "length" => Ty::Int,
-                "toInt" | "codePointCount" => {
+                "toInt" | "codePointCount" | "toLowerCase" | "toUpperCase" | "trim" => {
                     let m = name.name.clone();
                     self.push(
                         codes::UNKNOWN_FIELD,
@@ -2218,7 +2233,8 @@ impl FnChecker<'_> {
                     );
                     Ty::Unknown
                 }
-                "split" | "indexOf" => {
+                "split" | "indexOf" | "substring" | "replace" | "replaceAll" | "startsWith"
+                | "endsWith" | "contains" => {
                     let m = name.name.clone();
                     self.push(
                         codes::UNKNOWN_FIELD,
@@ -2840,6 +2856,45 @@ impl FnChecker<'_> {
                     self.infer(a);
                 }
                 Ty::Int
+            }
+            "substring" => {
+                // 範囲は **code point 単位**(M45 / #160。#159 の code point 意味論と整合)。
+                // (start, end) の半開区間。emit は runtime helper で code point を尊重する。
+                self.expect_arity("substring", 2, args, span);
+                for a in args {
+                    let at = self.infer(a);
+                    self.check_assign(&Ty::Int, &at, a.span());
+                }
+                Ty::Str
+            }
+            "replace" | "replaceAll" => {
+                // 部分文字列の置換(M45 / #160)。`replace` は最初の 1 箇所、`replaceAll` は全箇所。
+                self.expect_arity(&method.name, 2, args, span);
+                for a in args {
+                    let at = self.infer(a);
+                    self.check_assign(&Ty::Str, &at, a.span());
+                }
+                Ty::Str
+            }
+            "toLowerCase" | "toUpperCase" | "trim" => {
+                // ロケール非依存の大小文字変換 / 前後空白除去(M45 / #160)。引数 0。
+                self.expect_arity(&method.name, 0, args, span);
+                for a in args {
+                    self.infer(a);
+                }
+                Ty::Str
+            }
+            "startsWith" | "endsWith" | "contains" => {
+                // 前方一致 / 後方一致 / 部分文字列包含(M45 / #160)。引数 1(String)、戻り値 Bool。
+                self.expect_arity(&method.name, 1, args, span);
+                if let Some(a) = args.first() {
+                    let at = self.infer(a);
+                    self.check_assign(&Ty::Str, &at, a.span());
+                }
+                for a in args.iter().skip(1) {
+                    self.infer(a);
+                }
+                Ty::Bool
             }
             "length" => {
                 self.push(

@@ -1,0 +1,50 @@
+// String stdlib 段階2(M45 / #160)。実アプリの「面白い純ロジック」を Kei で書くための
+// String API 拡充。substring は範囲を **code point 単位**で規定し(#159 / M44 と整合)、
+// 絵文字(サロゲートペア)を割らない。replace / replaceAll / toLowerCase / toUpperCase /
+// trim / startsWith / endsWith / contains は TS 標準 String に素直に写る。
+// 正規表現は言語に入れない(spec/kei-spec-v0.10-strings.md §5)— 小文字化 + 部分文字列 API で書く。
+module strings.stdlib
+
+// 範囲は code point 単位。`"a😀b".substring(1, 2) == "😀"`(UTF-16 index ではない)。
+func slice(s: String, start: Int, end: Int) -> String {
+  return s.substring(start, end)
+}
+
+// 最初の 1 箇所だけ置換。
+func replaceFirst(s: String, from: String, to: String) -> String {
+  return s.replace(from, to)
+}
+
+// 全箇所を置換。
+func replaceEvery(s: String, from: String, to: String) -> String {
+  return s.replaceAll(from, to)
+}
+
+func lower(s: String) -> String {
+  return s.toLowerCase()
+}
+
+func upper(s: String) -> String {
+  return s.toUpperCase()
+}
+
+func stripEnds(s: String) -> String {
+  return s.trim()
+}
+
+func hasPrefix(s: String, prefix: String) -> Bool {
+  return s.startsWith(prefix)
+}
+
+func hasSuffix(s: String, suffix: String) -> Bool {
+  return s.endsWith(suffix)
+}
+
+func includesSub(s: String, sub: String) -> Bool {
+  return s.contains(sub)
+}
+
+// 合成例: トリム + 小文字化(タグ正規化の芽。M46 の本格版はここを土台にする)。
+func normalizeTag(s: String) -> String {
+  return s.trim().toLowerCase()
+}

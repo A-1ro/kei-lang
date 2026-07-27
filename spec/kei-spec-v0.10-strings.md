@@ -12,7 +12,12 @@
   UTF-16 code unit 長は温存)。「1 文字ずつ」処理する正規経路 `s.split("")` を **code point 単位**に
   是正(runtime helper `keiStringSplit`)。kei_check(型)/ kei_emit(runtime helper)/ pbt
   (境界値 + `codePointCount` の bounded 評価)/ golden / examples に入った。
-- M45(String stdlib 段階2)・M47(並行 async)は後続。
+- **M45 実装完了(v0.10)。** String stdlib 段階2(`substring` / `replace` / `replaceAll` /
+  `toLowerCase` / `toUpperCase` / `trim` / `startsWith` / `endsWith` / `contains`)を追加(§2.3)。
+  `substring` は範囲を **code point 単位**で規定(runtime helper `keiStringSubstring`)、`replaceAll` は
+  空 `from` を code point 境界挿入に是正(runtime helper `keiStringReplaceAll`)、他は TS 標準
+  String に素直に写る。あわせて**正規表現の態度**を明文化(§5。言語に入れず定石例示 + extern 境界)。
+- M46(純ロジック等価テスト実証)・M47(並行 async)は後続。
 
 ## 1. Kei の String がどの単位まで保証するか(境界の明文化)
 
@@ -80,6 +85,87 @@ code point イテレーションに**新しい構文(for 文等)は足さない*
 - JS 参照実装との等価: `s.split("")` の結果は `Array.from(s)` と一致する(`examples/strings/codepoints.kei` +
   `tests/e2e/tests/strings.test.ts` の等価テストで固定)。
 
+### 2.3 String stdlib 段階2(M45 / #160)
+
+実アプリの「面白い純ロジック」(Markdown 除去・slug 生成・タグ正規化・MIME/キーのバリデーション)を
+Kei で書くための API 拡充。範囲は #160 🤝(b) 合意の **high tier + `contains`**(`repeat` / `padStart` /
+`padEnd` は v1.x 送り)。emit は原則 TS 標準 String に素直に落とし、**code point 単位を規定した
+`substring` のみ runtime helper 経由**にする(設計原則 2)。
+
+| メソッド | シグネチャ | 意味論 | emit |
+|---|---|---|---|
+| `substring` | `(start: Int, end: Int) -> String` | **code point 単位**の半開区間(下記) | `keiStringSubstring`(helper) |
+| `replace` | `(from: String, to: String) -> String` | 最初の 1 箇所を置換 | `String.prototype.replace` |
+| `replaceAll` | `(from: String, to: String) -> String` | 全箇所を置換(空 `from` は code point 境界挿入・下記) | `keiStringReplaceAll`(helper) |
+| `toLowerCase` | `() -> String` | ロケール非依存の小文字化 | `String.prototype.toLowerCase` |
+| `toUpperCase` | `() -> String` | ロケール非依存の大文字化 | `String.prototype.toUpperCase` |
+| `trim` | `() -> String` | 前後空白の除去 | `String.prototype.trim` |
+| `startsWith` | `(prefix: String) -> Bool` | 前方一致 | `String.prototype.startsWith` |
+| `endsWith` | `(suffix: String) -> Bool` | 後方一致 | `String.prototype.endsWith` |
+| `contains` | `(sub: String) -> Bool` | 部分文字列包含(`indexOf != None` の可読化) | `String.prototype.includes` |
+
+#### `substring` の添字は code point 単位
+
+`substring(start, end)` の `start` / `end` は **UTF-16 code unit index ではなく code point index**
+とする(M44 で規定した code point 意味論と整合させる。設計原則 2)。
+
+```text
+"a😀b".substring(1, 2)   // "😀"   (code point index 1 の 1 個 = 絵文字まるごと)
+"a😀b".substring(0, 2)   // "a😀"
+"😀😀😀".substring(1, 3)  // "😀😀"
+```
+
+- **範囲の意味論**: code point 列(= `Array.from(s)`)を JS `Array.prototype.slice(start, end)` の index
+  意味論で切る。すなわち **負の index は末尾から**(`slice(-2, ...)`)、**範囲外は端にクランプ**、
+  **resolve 後の `start >= end` は空文字 `""`** を返す。emit は
+  `keiStringSubstring(s, start, end)` = `Array.from(s).slice(start, end).join("")`。
+- **なぜ UTF-16(JS の `String.prototype.substring`)にしないか**: native の `substring` は UTF-16
+  code unit index で、絵文字を含むと `"a😀b".substring(1, 2)` が `"\uD83D"`(サロゲート片)になり、
+  M44 で保証した「code point 単位まで壊さない」路線と食い違う。`length` は互換のため UTF-16 のまま
+  温存する(#159 🤝(a))が、**新規に足す範囲 API は code point 単位に揃える**ことで意味論の一貫性を取る。
+- **UTF-16 index が必要なとき**: `length` と同じ UTF-16 単位で切りたい特殊ケースは、境界の外として
+  extern で TS の `s.substring(...)` / `s.slice(...)` に出す(grapheme / 正規化と同じ extern 誘導)。
+- **1 文字ずつの経路との関係**: 多くの用途は `substring` より `s.split("")`(§2.2)+ `List` 畳み込みで
+  書ける。`substring` は「前から n code point」「後ろを削る」のような範囲取り出しの糖衣として使う。
+
+#### 大小文字はロケール非依存
+
+`toLowerCase` / `toUpperCase` は TS の `String.prototype.toLowerCase` / `toUpperCase`(**ロケール
+非依存**の Unicode デフォルト case マッピング)に写す。`toLocaleLowerCase` / `toLocaleUpperCase` は
+使わない。ロケール依存の畳み込み(トルコ語の `i` ↔ `İ`・ギリシャ語末尾シグマ等)は **v0.10 スコープ外**で、
+必要なら extern(§3 と同じ発想)。純ロジックを決定的・ロケール非依存に保つための選択。
+
+#### `replace` / `replaceAll` の置換パターン注記と空 `from` の意味論
+
+第 1 引数は文字列(部分文字列一致)で、`replace` は最初の 1 箇所・`replaceAll` は全箇所を置換する。
+置換文字列(第 2 引数)は JS の置換パターン(`$&` = マッチ全体、`$$` = 字面の `$` 等)を解釈する
+ことに注意する。`$` を字面で入れたいときは `$$` と書く(非空 `from` の場合)。
+
+**空 `from`(`""`)の `replaceAll` は code point 境界ごとの挿入**とする(M45 深層レビュー反映):
+
+```text
+"a😀b".replaceAll("", "_")   // "_a_😀_b_"   (先頭・各 code point の間・末尾に挿入)
+"".replaceAll("", "_")        // "_"          (native の "".replaceAll("", "_") と同じ形)
+```
+
+- native の `s.replaceAll("", to)` は **UTF-16 code unit 境界**に挿入するため、
+  `"😀".replaceAll("", "_")` が `"_\uD83D_\uDE00_"` と**孤立サロゲートを作ってしまい**、§1 の
+  「code point 単位まで保証」に反する。emit は `keiStringReplaceAll` ヘルパー経由とし、空 `from` のみ
+  code point 境界(`Array.from`)への挿入に是正する。非空 `from` はヘルパー内で native
+  `String.prototype.replaceAll` に委譲するので振る舞いは従来どおり。
+- 空 `from` のとき `to` は**字面どおり**挿入する(マッチが存在しないため `$` パターンは解釈しない。
+  native は空マッチにも `$$` 等を適用するが、Kei は挿入の意味論として字面挿入を規定する)。
+- `replace("", to)` は**位置 0 に 1 回挿入するだけ**(`"😀".replace("", "_") == "_😀"`)で
+  サロゲートを割れないため、native `String.prototype.replace` のままでよい(helper 不要)。
+
+#### 契約と generative
+
+すべて純粋で `requires` / `ensures` 内で使える。`kei check --generative` の bounded 評価器は、
+JS と Rust で結果が一致することを保証できる **`substring` / `startsWith` / `endsWith` / `contains` を評価**
+する(`ensures result == s.startsWith(p)` 等は `[generative]` へ昇格)。`replace` / `replaceAll` /
+`toLowerCase` / `toUpperCase` / `trim` は case マッピング・空白集合・空パターン置換の JS/Rust 差を
+避けるため評価対象外(`[runtime]` のまま。誤った counterexample を出さないための保守)。
+
 ## 3. 境界の外 — grapheme と正規化は extern(TS 側)へ誘導
 
 grapheme segmentation(書記素クラスタ・ZWJ 連結・結合文字)と Unicode 正規化(NFC/NFD)は
@@ -103,10 +189,71 @@ extern Unicode.normalizeNfc(s: String) -> String
 - extern の戻り型・エフェクトは v0.2 §「extern 署名」の enforcement-when-declared に従う。
 - ロケール依存の数え上げ・照合も同様に extern(言語内では持たない)。
 
-## 4. スコープ(M44)
+## 4. スコープ(M44 / M45)
 
-- **含む**: `codePointCount()` の追加、`split("")` の code point 単位への是正、
+- **含む(M44)**: `codePointCount()` の追加、`split("")` の code point 単位への是正、
   grapheme/正規化の境界明文化(本章 §3)。
-- **含まない(後続)**: `substring` / `replace` / 大小文字 / `trim` / 前後方一致 等の stdlib 段階2(M45)、
-  代表 4 関数の等価テスト実証(M46)、並行 async(M47)。
-- **含まない(v1.x 以降)**: grapheme segmentation・正規化の言語内実装(恒久的に extern 誘導)。
+- **含む(M45)**: String stdlib 段階2(`substring`〔code point 単位〕/ `replace` / `replaceAll` /
+  `toLowerCase` / `toUpperCase` / `trim` / `startsWith` / `endsWith` / `contains`。§2.3)、
+  正規表現の態度の明文化(§5)。
+- **含まない(後続)**: 代表 4 関数の等価テスト実証(M46)、並行 async(M47)。
+- **含まない(v1.x 以降)**: grapheme segmentation・正規化の言語内実装(恒久的に extern 誘導)、
+  String stdlib medium tier(`repeat` / `padStart` / `padEnd`。#160 🤝(b) で v1.x 送り確定)、
+  正規表現エンジンの言語内実装(§5。#160 🤝(c) で不採用確定)。
+
+## 5. 正規表現の態度 — 言語に入れない(定石例示 + extern 境界)
+
+v0.10 は **正規表現エンジンを言語に入れない**(#160 🤝(c) 合意済み)。正規表現は契約検証
+(`requires` / `ensures`)・pbt・決定性の観点で重く、Kei の「契約式は同期・純粋・静的に扱える」路線と
+相性が悪いため(grapheme = extern と同じ「境界を曖昧にしない」思想)。代わりに、
+
+1. **String プリミティブ + code point イテレーションで「正規表現を使わずに書く定石」を用意する**、
+2. どうしても正規表現が要るパターンは **extern で TS 側の `RegExp` に出す境界を明記する**。
+
+### 5.1 定石 — 正規表現を使わずに書く
+
+「小文字化 → `split("")` で 1 code point ずつ → 許可集合で畳み込み(除去 / 置換 / 判定)」が基本形。
+slug 生成やタグ正規化はこの形で書ける(代表 4 関数の本格版は M46 で `examples/` に置く)。
+
+```text
+// 許可文字(小文字英数)だけ残し、それ以外はハイフンにする 1 文字の写像。
+func slugChar(c: String) -> String {
+  return match isAllowed(c) {  // isAllowed は c.codePointCount()==1 前提の許可判定(別途定義)
+    true => c
+    false => "-"
+  }
+}
+
+// 小文字化 → 1 code point ずつ写像 → 連結。連続ハイフンの畳み込みや前後トリムも
+// split("") + fold と substring / trim(§2.3)で書ける(正規表現不要)。
+func slugify(s: String) -> String {
+  return s.toLowerCase().split("").fold("", (acc, c) => acc + slugChar(c))
+}
+
+// 前方 / 後方一致・部分文字列は startsWith / endsWith / contains で直接書ける
+// (選択は || で合成する。演算子は v0.1 §「演算子」参照)。
+func isImageKey(key: String) -> Bool {
+  return key.endsWith(".png") || key.endsWith(".jpg")
+}
+```
+
+- 文字クラス判定(`[a-z0-9]` 等)は、code point の範囲比較や許可文字列への `contains` で表現する。
+- 繰り返し・選択・後方参照など正規表現特有の機能は、`split("")` + 畳み込みの状態機械として書くか、
+  下記 extern に出す。
+
+### 5.2 境界 — 正規表現が要るときは extern で TS の `RegExp` に出す
+
+複雑な正規表現(可変長の先読み・込み入った置換)を Kei の定石で書くのが実務的な読みやすさを損なう
+場合は、境界を明示して extern で TS 側に出す。数え上げ・変換のロジック自体は Kei の純ロジックに置かない。
+
+```text
+// TS 側で RegExp を使う正規化を extern 署名として宣言する(実装はアダプタの TS)。
+extern Slug.normalize(s: String) -> String
+// TS 側実装(アダプタ):
+//   const re = /[^a-z0-9]+/g;
+//   return () => s.toLowerCase().replace(re, "-").replace(/^-+|-+$/g, "");
+```
+
+- extern の戻り型・エフェクトは v0.2 §「extern 署名」の enforcement-when-declared に従う。
+- **運用の指針**: まず §5.1 の定石で書けないかを検討し、書けるならそちらを主経路にする(純ロジックが
+  Kei に寄る)。定石が実務的な読みやすさを保てないパターンに限って extern を主経路にする(#160 🤝(c) の運用注記)。
