@@ -1,0 +1,45 @@
+// Markdown 除去(M46 / #160)。純ロジックを Kei だけで書く代表 4 関数の 1 つ。
+// 見出し `#` / 強調 `*` `_` / インラインコード `` ` `` / リンク・画像の括弧を剥がしてプレーンテキスト化する。
+// リンク `[text](url)` は text だけ残し、`]` 直後の `(...)` を落とす小さな状態機械(record を fold の
+// アキュムレータにする)。正規表現は使わない(v0.10 🤝(c))。split("")(code point 単位)+ fold の定石。
+// JS 参照実装との等価は tests/e2e/tests/strings-markdown.test.ts で CI 常設。
+module strings.markdown
+
+// out: これまでの出力 / afterClose: 直前が `]` だった / inUrl: `(...)`(リンク先)を捨てている最中。
+record MdAcc {
+  out: String
+  afterClose: Bool
+  inUrl: Bool
+}
+
+// 単体で剥がす装飾文字(見出し・強調・インラインコード・リンク/画像の角括弧)。
+func isMarkChar(c: String) -> Bool {
+  return "#*_`[]".contains(c)
+}
+
+// 1 code point 分の状態遷移。
+func mdStep(acc: MdAcc, c: String) -> MdAcc {
+  if acc.inUrl {
+    if c == ")" {
+      return MdAcc { out: acc.out, afterClose: false, inUrl: false }
+    }
+    return MdAcc { out: acc.out, afterClose: false, inUrl: true }
+  }
+  if acc.afterClose {
+    if c == "(" {
+      return MdAcc { out: acc.out, afterClose: false, inUrl: true }
+    }
+  }
+  if isMarkChar(c) {
+    return MdAcc { out: acc.out, afterClose: c == "]", inUrl: false }
+  }
+  return MdAcc { out: acc.out + c, afterClose: false, inUrl: false }
+}
+
+// 装飾文字を落とし、リンク/画像の `(...)` を捨ててプレーンテキスト化する。
+// 装飾文字の除去のみ(追加なし)なので出力は入力以下の長さになる。
+func stripMarkdown(s: String) -> String
+  ensures result.codePointCount() <= s.codePointCount()
+{
+  return s.split("").fold(MdAcc { out: "", afterClose: false, inUrl: false }, (acc, c) => mdStep(acc, c)).out
+}

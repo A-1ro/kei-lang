@@ -38,9 +38,12 @@ v0.4.2 時点のギャップ分析(2026-07-03、コミット c8db13d 起点)に�
 | **v0.7** | async | `uses Async` エフェクト、async extern 署名、`async function` + `await` の emit、契約(ensures)の async 対応 |
 | **v0.8** | HTTP/JSON 境界 | unknown → record の安全な構築(JSON parse + 契約検証)、`@kei/runtime` に HTTP ヘルパ、Hono アダプタ(`@kei/hono` 薄層) |
 | **v0.9** | Workers テンプレート & デプロイ | `examples/workers-api` 雛形、wrangler 統合 e2e(`wrangler dev` 起動 → HTTP 叩き → 契約違反が 500 で観測できる) |
-| **v1.0** | 受け入れ検証 | 実 API を Kei で記述して Workers にデプロイ、ドッグフードで初見エージェントが API を書けることを実証 |
+| **v0.10** | 純ロジックは全部 Kei で書ける | String の code point 意味論(#159)+ String stdlib 段階2拡張(#160)。Markdown 除去 / slug 生成 / タグ正規化 / MIME・キーのバリデーションの class が Kei で書けて JS 参照実装と等価。詳細は `docs/kei-roadmap-v0.10.md`(#162) |
+| **v1.0**(延期) | 受け入れ検証 | 実 API を Kei で記述して Workers に**実 `wrangler deploy`**、ドッグフードで初見エージェントが API を書けることを実証。**v0.10 を手前に挿入したため後ろ倒し** |
 
 v0.6〜v0.8 は言語設計判断(🤝)を多く含むため、各版の着手時に本ファイルと同形式の契約書集を新設する。
+
+> **2026-07-27 更新(逆算表の差し替え)**: v0.9.0 の後、Kei を初めて実運用の Cloudflare Worker に統合した事例(文字数上限バリデーションを契約付き純関数として `kei build` → TS → ベンダリング)で、広い採用を阻んだのが wrangler 側ではなく **String の表現力**(`length` の UTF-16 意味論 / stdlib の薄さ)だと判明した。実デプロイ(v1.0)に進む前に「純ロジックが本当に全部 Kei に寄るか」を言語表現力の側で満たすべく、**v0.10 を v1.0 の手前に挿入し、v1.0 を延期する**(オーナー決定)。詳細は `docs/kei-roadmap-v0.10.md`。
 
 ## v0.5 Milestone 全体像と順序
 

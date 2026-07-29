@@ -1,0 +1,30 @@
+module string.stdlib2
+
+func slice(s: String) -> String
+  requires s.codePointCount() >= 2
+  ensures result.codePointCount() <= s.codePointCount()
+{
+  return s.substring(0, 2)
+}
+
+func normalizeTag(s: String) -> String {
+  return s.trim().toLowerCase()
+}
+
+func swapCase(s: String) -> String {
+  return s.toUpperCase()
+}
+
+func rewrite(s: String) -> String {
+  return s.replace("a", "b").replaceAll("c", "d")
+}
+
+func isImage(name: String) -> Bool
+  ensures result == name.endsWith(".png")
+{
+  return name.endsWith(".png")
+}
+
+func looksLikeKey(s: String) -> Bool {
+  return s.startsWith("key_") == s.contains("_")
+}
