@@ -87,7 +87,8 @@ fn full_flow_open_hover_shutdown() {
         Message::Response(r) => r,
         other => panic!("expected response, got {other:?}"),
     };
-    let hover: Hover = serde_json::from_value(resp.result.expect("non-null hover")).unwrap();
+    let hover: Hover =
+        serde_json::from_value(resp.response_result.expect("non-null hover")).unwrap();
     match hover.contents {
         HoverContents::Markup(m) => {
             assert!(m.value.contains("func writeRow("), "{}", m.value);

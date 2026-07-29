@@ -299,7 +299,7 @@ mod tests {
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
         let resp = hover_response_with_source(RequestId::from(1), &params, src);
-        let value = resp.result.expect("hover result");
+        let value = resp.response_result.expect("hover result");
         let hover: Hover = serde_json::from_value(value).expect("non-null hover");
         match hover.contents {
             HoverContents::Markup(m) => {
