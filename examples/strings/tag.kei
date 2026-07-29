@@ -1,0 +1,34 @@
+// タグ正規化(M46 / #160)。純ロジックを Kei だけで書く代表 4 関数の 1 つ。
+// トリム + 小文字化 + 内部空白ランの単一スペース化。空白は半角スペース・タブ・改行・復帰の 4 種。
+// 正規表現は使わない(v0.10 🤝(c))。split("")(code point 単位)+ fold の畳み込みで書く。
+// JS 参照実装との等価は tests/e2e/tests/strings-tag.test.ts で CI 常設。
+module strings.tag
+
+// タグ内の空白とみなす文字(半角スペース・タブ・改行・復帰)。
+func isTagSpace(c: String) -> Bool {
+  return " \t\n\r".contains(c)
+}
+
+// 直前が " " ならスペースを足さない(内部空白ランの単一化)。
+func appendTagSpace(acc: String) -> String {
+  if acc.endsWith(" ") {
+    return acc
+  }
+  return acc + " "
+}
+
+// 空白は単一スペースに畳み込み、それ以外はそのまま連結する。
+func appendTagChar(acc: String, c: String) -> String {
+  if isTagSpace(c) {
+    return appendTagSpace(acc)
+  }
+  return acc + c
+}
+
+// トリム → 小文字化 → 内部空白ランの単一スペース化。
+// トリムと空白ランの畳み込みのみ(追加なし)なので出力は入力以下の長さになる。
+func normalizeTag(s: String) -> String
+  ensures result.codePointCount() <= s.codePointCount()
+{
+  return s.trim().toLowerCase().split("").fold("", (acc, c) => appendTagChar(acc, c))
+}
