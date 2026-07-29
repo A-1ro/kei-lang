@@ -40,6 +40,18 @@ jobs:
           node-version: 22
       - run: cargo test --workspace
 
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # ブラウザ内プレイグラウンド用ラッパー(experiments/kei-lang-wasm-check/RESULT.md)。
+      # コア4クレートはOS依存APIを使わないので、このビルドが通ればプレイグラウンド実現性が実証される。
+      - run: cargo build -p kei_wasm --target wasm32-unknown-unknown
+
   workers-e2e:
     runs-on: ubuntu-latest
     steps:

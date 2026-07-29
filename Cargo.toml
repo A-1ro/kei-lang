@@ -5,6 +5,7 @@ members = [
     "crates/kei_check",
     "crates/kei_fmt",
     "crates/kei_emit",
+    "crates/kei_wasm",
     "crates/kei_cli",
     "crates/kei_mcp",
     "crates/kei_lsp",
