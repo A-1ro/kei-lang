@@ -20,6 +20,7 @@ kei-lang/
 │   ├── kei_check/           # 名前解決 + 型 + エフェクト + 契約検査 / Diagnostic型
 │   ├── kei_fmt/             # 正規形フォーマッタ
 │   ├── kei_emit/            # TSトランスパイラ + source map
+│   ├── kei_wasm/            # ブラウザ内(wasm32)向け薄いラッパー(check/format/emit を wasm-bindgen 公開)
 │   ├── kei_cli/             # `kei` バイナリ(check/fmt/build/test/mcp)
 │   ├── kei_mcp/             # MCPサーバー(lib: run_stdio / Server)+ kei-mcp バイナリ
 │   └── kei_lsp/             # LSPサーバーバイナリ(kei-lsp)
@@ -74,7 +75,7 @@ kei-lang/
 └── .github/
     ├── dependabot.yml      # 依存自動更新(cargo / github-actions / npm)
     └── workflows/
-        ├── ci.yml           # fmt / clippy / test
+        ├── ci.yml           # fmt / clippy / test / wasm(wasm32-unknown-unknown ビルド検証)/ workers-e2e
         └── release.yml      # v*タグでkeiバイナリをビルドしGitHub Releasesへ添付
 ```
 
@@ -89,7 +90,8 @@ kei_check  ←─ kei_emit
      ↑              ↑
      ├── kei_cli ──┘   (→ kei_mcp も: `kei mcp` でサーバー起動を委譲)
      ├── kei_mcp
-     └── kei_lsp   (→ kei_check / kei_syntax / kei_fmt)
+     ├── kei_lsp   (→ kei_check / kei_syntax / kei_fmt)
+     └── kei_wasm  (→ kei_syntax / kei_check / kei_fmt / kei_emit)
 ```
 
 `kei_cli → kei_mcp` は一方向の辺で循環しない(kei_mcp は kei_cli を知らない)。`kei mcp` は
@@ -105,6 +107,7 @@ kei_check  ←─ kei_emit
 | kei_cli | 引数解釈・ファイルIO・Diagnosticの散文整形・ディレクトリ走査・テストランナー起動・`kei mcp`でのMCPサーバー起動 | 言語処理ロジック(検査/整形/トランスパイルは委譲)。`kei test`はランナーの知識を持たず`npm test`へ委譲。`kei mcp`はプロトコル処理を持たず`kei_mcp::run_stdio`へ委譲 |
 | kei_mcp | MCPプロトコル・spec/とexamples/の埋め込み配信。stdio起動は`run_stdio`が単一エントリ(`kei-mcp`バイナリと`kei mcp`が共有) | 言語処理ロジック |
 | kei_lsp | LSPプロトコル変換。kei_checkのDiagnostic→LSP Diagnostic、AST→Hover(契約表示)へ写す。同期stdioループ | 言語処理ロジック(検査/整形/パースは委譲)。kei_check/kei_syntax/kei_fmtへ一方向依存のみ |
+| kei_wasm | ブラウザ内(wasm32-unknown-unknown)向けの薄いラッパー。check/format/emit を wasm-bindgen で公開し、JSON文字列で境界の型変換のみを担う(cdylib + rlib) | 言語処理ロジック(検査/整形/トランスパイルはコア4クレートへ委譲)。本体クレートへの変更を持ち込まない |
 
 ### 外部依存の追加記録(M6 事前合意の手続き)
 
