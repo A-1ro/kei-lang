@@ -57,6 +57,7 @@ kei_check  ←─ kei_emit
 - `cargo test --workspace` — 全テスト。各 Milestone の完了条件(e2e は Node が必要)
 - `cargo clippy --workspace --all-targets -- -D warnings` — 警告ゼロが必須
 - `cargo fmt --all -- --check` — 整形チェック(CI の fmt ジョブと同じ)
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` — rustdoc 警告ゼロが必須(intra-doc link 切れの検出。CI の clippy ジョブと同じ)
 - `cargo run -p kei_mcp --bin kei-mcp` — MCP サーバー起動(stdin から改行区切り JSON-RPC を読む。開発用。配布版は `kei mcp`)
 - `cargo run -p kei_emit --example transpile -- <input.kei> [output.ts]` — 単一 .kei を TS 化(検査 NG は Diagnostic を出して exit 1)。デバッグ用の最小トランスパイラ(ディレクトリ単位は `kei build`)
 - `cargo run -p kei_cli --bin kei -- check <file> [--json]` — 意味検査(既定は散文 Diagnostic、`--json` で `Diagnostic[]`)。エラーありで exit 1
