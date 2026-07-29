@@ -1,0 +1,18 @@
+module string.codepoint
+
+func visibleLength(s: String) -> Int
+  ensures result <= s.length
+{
+  return s.codePointCount()
+}
+
+func fitsIn(s: String, limit: Int) -> Bool
+  requires limit >= 0
+  requires s.codePointCount() <= limit
+{
+  return true
+}
+
+func chars(s: String) -> List<String> {
+  return s.split("")
+}

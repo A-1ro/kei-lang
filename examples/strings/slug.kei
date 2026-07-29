@@ -1,0 +1,51 @@
+// slug 生成(M46 / #160)。純ロジックを Kei だけで書く代表 4 関数の 1 つ。
+// 小文字化 → 1 code point ずつ許可判定([a-z0-9])→ 許可外はハイフン(連続畳み込み)→ 前後トリム。
+// 正規表現は使わない(v0.10 🤝(c))。既存 String API + split("")(code point 単位)+ fold の定石。
+// JS 参照実装との等価は tests/e2e/tests/strings-slug.test.ts で CI 常設。
+module strings.slug
+
+// 許可文字は小文字英数([a-z0-9])。slugify が先に toLowerCase するので大文字は現れない。
+func isSlugChar(c: String) -> Bool {
+  return "abcdefghijklmnopqrstuvwxyz0123456789".contains(c)
+}
+
+// 直前が "-" のときはハイフンを追加しない(連続ハイフンの畳み込み)。
+func appendHyphen(acc: String) -> String {
+  if acc.endsWith("-") {
+    return acc
+  }
+  return acc + "-"
+}
+
+// 許可文字はそのまま、許可外は "-"(連続畳み込みつき)。
+func appendSlugChar(acc: String, c: String) -> String {
+  if isSlugChar(c) {
+    return acc + c
+  }
+  return appendHyphen(acc)
+}
+
+// 先頭の "-" を 1 つ落とす(畳み込み済みなので高々 1 つ)。
+func stripLeadingHyphen(s: String) -> String {
+  if s.startsWith("-") {
+    return s.substring(1, s.codePointCount())
+  }
+  return s
+}
+
+// 末尾の "-" を 1 つ落とす。
+func stripTrailingHyphen(s: String) -> String {
+  if s.endsWith("-") {
+    return s.substring(0, s.codePointCount() - 1)
+  }
+  return s
+}
+
+// 小文字化 → code point ごとの許可写像(連続ハイフン畳み込み)→ 前後ハイフン除去。
+// 前後トリムを最後に行うので、結果がハイフンで始まる/終わることはない。
+func slugify(s: String) -> String
+  ensures !result.startsWith("-")
+  ensures !result.endsWith("-")
+{
+  return stripTrailingHyphen(stripLeadingHyphen(s.toLowerCase().split("").fold("", (acc, c) => appendSlugChar(acc, c))))
+}

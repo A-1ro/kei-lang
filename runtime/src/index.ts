@@ -77,6 +77,62 @@ export function keiStringIndexOf(s: string, needle: string): Option<number> {
   return i < 0 ? None() : Some(i);
 }
 
+/**
+ * String.codePointCount(): Unicode code point 数(`😀` = 1)。
+ * `s.length`(UTF-16 code unit 長。サロゲートペアは 2)とは異なる。
+ * 意味論は `Array.from(s).length` と同一(string iterator = code point 単位の反復)。
+ * 実装は中間配列を確保しないカウントループ(PR #166 深層レビュー反映。
+ * spec §2.6 / kei-spec-v0.10-strings / M44)。
+ */
+export function keiStringCodePointCount(s: string): number {
+  let n = 0;
+  for (const _ of s) {
+    n++;
+  }
+  return n;
+}
+
+/**
+ * String.split(delimiter): 非空デリミタは native `String.prototype.split`、
+ * **空デリミタは code point 単位**で分割する(`Array.from`。native の `s.split("")` は
+ * サロゲートペアを UTF-16 code unit に割ってしまうため、ここで code point を尊重する)。
+ * spec §2.6 / kei-spec-v0.10-strings / M44。
+ */
+export function keiStringSplit(s: string, delimiter: string): string[] {
+  return delimiter === "" ? Array.from(s) : s.split(delimiter);
+}
+
+/**
+ * String.replaceAll(from, to): 非空 `from` は native `String.prototype.replaceAll`、
+ * **空 `from` は code point 境界ごとの挿入**にする(M45 / #160 深層レビュー反映)。
+ * native の `s.replaceAll("", to)` は UTF-16 code unit 境界に挿入するため、
+ * `"😀".replaceAll("", "_")` が `"_\uD83D_\uDE00_"` と孤立サロゲートを作ってしまう。
+ * Kei は code point 意味論(kei-spec-v0.10-strings §1)を守り、先頭・各 code point の間・
+ * 末尾に `to` を挿入する(`"a😀b"` → `"_a_😀_b_"`。空文字列 s は `to` 1 個 —
+ * native の `"".replaceAll("", "_") === "_"` と同じ形)。空 `from` のとき `to` は
+ * **字面どおり**挿入する(マッチが無いので `$` パターンは解釈しない)。
+ * 非空 `from` の native 経路は従来どおり `$` パターンを解釈する(spec §2.3)。
+ */
+export function keiStringReplaceAll(s: string, from: string, to: string): string {
+  if (from !== "") {
+    return s.replaceAll(from, to);
+  }
+  const cps = Array.from(s);
+  return cps.length === 0 ? to : to + cps.join(to) + to;
+}
+
+/**
+ * String.substring(start, end): 範囲は **code point 単位**で規定する(M45 / #160。
+ * #159 / M44 の code point 意味論と整合)。native の `String.prototype.substring` は
+ * UTF-16 code unit index で、絵文字(サロゲートペア)を含むと境界を割ってしまうため、
+ * code point 配列(`Array.from`)を JS `Array.prototype.slice` の index 意味論で切る:
+ * 負の index は末尾から、範囲外は端にクランプ、resolve 後の start >= end は "" を返す。
+ * spec §2.6 / kei-spec-v0.10-strings §2.3 / M45。
+ */
+export function keiStringSubstring(s: string, start: number, end: number): string {
+  return Array.from(s).slice(start, end).join("");
+}
+
 // ---- Map<K, V> のランタイムヘルパー(spec v0.3-collections §7 / M33) ----
 //
 // Map<K, V> は ReadonlyMap<K, V> にトランスパイルされ、has / size は TS の同名 API に

@@ -7,8 +7,35 @@ use serde_json::{json, Value};
 
 use crate::tools::{self, ToolOutcome};
 
-/// 対応する MCP プロトコルバージョン。
-pub const PROTOCOL_VERSION: &str = "2024-11-05";
+/// このサーバーが受け入れる MCP プロトコルバージョン(新しい順)。
+///
+/// MCP spec 2025-11-25 "Version Negotiation":
+/// > If the server supports the requested protocol version, it MUST respond with the
+/// > same version. Otherwise, the server MUST respond with another protocol version it
+/// > supports. This SHOULD be the latest version supported by the server.
+///
+/// この規則は `negotiate_protocol_version` が実装する。先頭要素が
+/// [`DEFAULT_PROTOCOL_VERSION`] = 自分がサポートする最新版で、交渉が不成立のときに
+/// 名乗るバージョンになる。
+///
+/// **新しいリビジョンへの追従はこの配列の先頭に 1 行足すだけ**でよい。ただし
+/// 載せてよいのは実際に準拠しているバージョンだけ(名乗るバージョンに嘘をつかない)。
+/// 追加前に、そのリビジョンが「tools のみを stdio で提供するサーバー」に課す要件を
+/// 満たしているか確認する。既定版は golden にも焼き込まれているので、
+/// `UPDATE_GOLDEN=1 cargo test -p kei_mcp --test golden_mcp` で
+/// tests/mcp/initialize_version_*.response.json を再生成すること(不変条件 3 のとおり
+/// golden の差分は人間レビュー必須)。
+///
+/// 2025-03-26 を意図的に外している: このリビジョンの stdio トランスポートは
+/// メッセージとして JSON-RPC batch(配列)を許すが、[`crate::run_stdio`] は
+/// 1 行 = 1 メッセージしか解釈しない。batch は 2025-06-18 で仕様から削除されたため、
+/// 2025-06-18 以降と(batch 導入前の)2024-11-05 には準拠できるが、
+/// 2025-03-26 には準拠できない。
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2024-11-05"];
+
+/// 交渉が成立しなかったときに名乗る既定バージョン(= サポートする最新版)。
+pub const DEFAULT_PROTOCOL_VERSION: &str = SUPPORTED_PROTOCOL_VERSIONS[0];
+
 /// サーバー名(serverInfo)。
 pub const SERVER_NAME: &str = "kei-mcp";
 /// サーバーバージョン(Cargo パッケージ版数)。
@@ -24,8 +51,19 @@ impl Server {
     }
 
     /// JSON-RPC リクエストを処理する。`id` を持つ通常リクエストは `Some(response)`、
-    /// 通知(`id` なし)は `None` を返す。
+    /// オブジェクトで `id` を持たない通知は `None` を返す。オブジェクト以外
+    /// (配列・文字列・数値・真偽値・null)は通知ではなく不正なリクエストなので、
+    /// `id: null` の Invalid Request(`-32600`)を `Some` で返す。
     pub fn handle(&self, request: &Value) -> Option<Value> {
+        // 非オブジェクト(配列・文字列・数値・真偽値・null)は `Value::get("...")` が
+        // 常に None を返すため、以下の id 取得ロジックだけでは「id なし通知」と
+        // 区別できず無応答で握りつぶされてしまう。JSON-RPC 2.0 spec は
+        // "If there was an error in detecting the id... it MUST be Null" と定めており、
+        // 通知として無視するのではなく id: null で Invalid Request を返す。
+        if !request.is_object() {
+            return Some(error(None, -32600, "Invalid Request: not a JSON object"));
+        }
+
         let method = request.get("method").and_then(Value::as_str);
 
         // 通知(id なし)は応答しない。
@@ -41,7 +79,7 @@ impl Server {
         let params = request.get("params").cloned().unwrap_or(Value::Null);
 
         let response = match method {
-            "initialize" => success(id, initialize_result()),
+            "initialize" => success(id, initialize_result(&params)),
             "ping" => success(id, json!({})),
             "tools/list" => success(id, tools_list_result()),
             "tools/call" => tools_call(id, &params),
@@ -97,9 +135,29 @@ fn tool_result(outcome: &ToolOutcome) -> Value {
     })
 }
 
-fn initialize_result() -> Value {
+/// initialize のバージョン交渉。要求版をサポートしていればそれをそのまま返し
+/// (spec の MUST)、していなければサポートする最新版 [`DEFAULT_PROTOCOL_VERSION`]
+/// を返す(spec の MUST + SHOULD)。
+///
+/// クライアントは `protocolVersion` を送ることが MUST だが、欠落・非文字列でも
+/// 接続を切らずに既定版を名乗る(交渉不成立と同じ扱い)。最終的に版が合わなければ
+/// 切断を選ぶのはクライアント側の責務("If the client does not support the version
+/// in the server's response, it SHOULD disconnect.")。
+fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|want| {
+            SUPPORTED_PROTOCOL_VERSIONS
+                .iter()
+                .copied()
+                .find(|&supported| supported == want)
+        })
+        .unwrap_or(DEFAULT_PROTOCOL_VERSION)
+}
+
+fn initialize_result(params: &Value) -> Value {
+    let requested = params.get("protocolVersion").and_then(Value::as_str);
     json!({
-        "protocolVersion": PROTOCOL_VERSION,
+        "protocolVersion": negotiate_protocol_version(requested),
         "capabilities": { "tools": {} },
         "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
     })
@@ -175,4 +233,125 @@ fn error(id: Option<Value>, code: i64, message: &str) -> Value {
         "id": id.unwrap_or(Value::Null),
         "error": { "code": code, "message": message },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 交渉不成立時に名乗るのは「サポートする最新版」でなければならない
+    /// (spec: "This SHOULD be the latest version supported by the server.")。
+    /// 配列は新しい順に並べる契約なので、既定版は先頭と一致する。
+    #[test]
+    fn default_version_is_the_first_supported_version() {
+        assert_eq!(
+            DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS[0],
+            "SUPPORTED_PROTOCOL_VERSIONS must be ordered newest-first"
+        );
+        let mut sorted = SUPPORTED_PROTOCOL_VERSIONS.to_vec();
+        sorted.sort_unstable();
+        sorted.reverse();
+        assert_eq!(
+            sorted, SUPPORTED_PROTOCOL_VERSIONS,
+            "SUPPORTED_PROTOCOL_VERSIONS must be ordered newest-first"
+        );
+    }
+
+    /// 要求版をサポートしていれば、同じ版をそのまま返す(spec の MUST)。
+    #[test]
+    fn negotiation_echoes_back_every_supported_version() {
+        for supported in SUPPORTED_PROTOCOL_VERSIONS {
+            assert_eq!(negotiate_protocol_version(Some(supported)), *supported);
+        }
+    }
+
+    /// 未サポート版を要求されたら、サポートする最新版にフォールバックする。
+    #[test]
+    fn negotiation_falls_back_when_version_unsupported() {
+        for requested in ["2025-03-26", "1.0.0", "", "2099-01-01"] {
+            assert_eq!(
+                negotiate_protocol_version(Some(requested)),
+                DEFAULT_PROTOCOL_VERSION,
+                "unsupported version {requested} must fall back to the default"
+            );
+        }
+    }
+
+    /// protocolVersion 欠落(仕様上は MUST 送信)でも切らずに既定版を名乗る。
+    #[test]
+    fn negotiation_falls_back_when_version_absent() {
+        assert_eq!(negotiate_protocol_version(None), DEFAULT_PROTOCOL_VERSION);
+    }
+
+    /// initialize 応答は params の protocolVersion を見て決まる。
+    /// 非文字列(型違い)は欠落と同じ扱い。
+    #[test]
+    fn initialize_result_negotiates_from_params() {
+        let echoed = initialize_result(&json!({ "protocolVersion": "2024-11-05" }));
+        assert_eq!(echoed["protocolVersion"], "2024-11-05");
+
+        let fallback = initialize_result(&json!({ "protocolVersion": "1.0.0" }));
+        assert_eq!(fallback["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+
+        let absent = initialize_result(&json!({}));
+        assert_eq!(absent["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+
+        let wrong_type = initialize_result(&json!({ "protocolVersion": 20251125 }));
+        assert_eq!(wrong_type["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+
+        // params を省いた initialize(Value::Null)でも落ちない。
+        let null_params = initialize_result(&Value::Null);
+        assert_eq!(null_params["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
+    }
+
+    /// tools のみを提供するサーバーとして、tools capability の宣言は MUST。
+    #[test]
+    fn initialize_result_declares_tools_capability() {
+        let result = initialize_result(&json!({}));
+        assert!(
+            result["capabilities"]["tools"].is_object(),
+            "servers that support tools MUST declare the tools capability"
+        );
+    }
+
+    /// 非オブジェクトの JSON-RPC メッセージ(配列・文字列・数値・真偽値・null)は、
+    /// id なし通知と混同して無応答で捨てるのではなく、id: null で Invalid Request
+    /// を返す。
+    #[test]
+    fn non_object_message_returns_invalid_request() {
+        let server = Server::new();
+        for non_object in [
+            json!([1, 2, 3]),
+            json!("just a string"),
+            json!(42),
+            json!(true),
+            Value::Null,
+        ] {
+            let response = server
+                .handle(&non_object)
+                .unwrap_or_else(|| panic!("non-object message {non_object} must get a response"));
+            assert_eq!(response["jsonrpc"], "2.0");
+            // `Value` の `Index` はキー欠落でも Null を返すため、`response["id"]` の
+            // 比較だけでは「id フィールドを出していない」応答も素通りしてしまう。
+            // spec が要求するのは null を **含めて** 返すことなので、キーの存在ごと固定する。
+            assert_eq!(
+                response.get("id"),
+                Some(&Value::Null),
+                "id must be present and null: {response}"
+            );
+            assert_eq!(response["error"]["code"], -32600);
+            assert!(
+                response.get("result").is_none(),
+                "error response must not carry a result: {response}"
+            );
+        }
+    }
+
+    /// オブジェクトだが id を欠く正当な通知は、これまで通り無応答。
+    #[test]
+    fn object_notification_without_id_still_gets_no_response() {
+        let server = Server::new();
+        let notification = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
+        assert_eq!(server.handle(&notification), None);
+    }
 }

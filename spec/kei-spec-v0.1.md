@@ -144,13 +144,25 @@ func totalStockValue(products: List<Product>) -> Int
 
 - `String + String -> String`(連結)。混在(`Int + String` 等)は型不一致(`KEI-E2001`)で拒否する。
   tagged String(`type X = String tagged "X"`)同士、または tagged String と素の String の連結も `+` では不可(`KEI-E2001`)。基底 String で連結してからコンストラクタで再構築すること。
-- `s.length -> Int`(プロパティ)。UTF-16 code unit 長(V8 の `String.prototype.length` と同一。サロゲートペアは 2 として数える)。
+- `s.length -> Int`(プロパティ)。UTF-16 code unit 長(V8 の `String.prototype.length` と同一。サロゲートペアは 2 として数える)。**文字数を「人間の感覚どおり」に数えたいときは下記 `codePointCount()` を使う**(`length` は絵文字で 2 以上になる。v0.10 / M44 の指針。詳細は `kei-spec-v0.10-strings.md`)。
+- `s.codePointCount() -> Int`(メソッド、引数0、v0.10 / M44)。Unicode **code point** 数を返す(`"a😀b".codePointCount() == 3`。`"a😀b".length == 4`)。`length`(UTF-16 code unit)とは別の加法 API で、`length` の意味は変えない(#159)。emit は `keiStringCodePointCount` へ写し、サロゲートペアを壊さない(意味論は `Array.from(s).length` と同一 = string iterator の code point 単位反復。実装は中間配列を確保しないカウントループ)。純粋なので `requires` / `ensures` 内でも使え、`kei check --generative` の bounded 評価器も評価できる(`s.chars().count()`。`length` との差はサロゲート境界値で PBT に現れる)。code point より細かい **grapheme(書記素クラスタ)や正規化(NFC/NFD)は言語内で扱わない** — 境界は `kei-spec-v0.10-strings.md` を参照。
 - `s.toInt() -> Option<Int>`(メソッド、引数0)。`^-?[0-9]+$` に一致し、かつ安全整数範囲(`Number.isSafeInteger`)に収まる文字列だけ `Some(n)`。それ以外(空文字・符号のみ・小数点・桁あふれ等)は `None`。
   `toInt()` を含む式は `kei check --generative`(PBT 生成、spec-v0.2 §5)の bounded 評価器が Option 値を未サポートのため評価不能扱いとなり、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 で追跡)。
 - `n.toString() -> String`(`Int` のメソッド、引数0)。10進表記の文字列を返す。
-- `s.split(delimiter: String) -> List<String>`(メソッド、引数1、v0.9 / M41)。TS の `String.prototype.split` に写る。`delimiter` で分割した部分文字列の `List<String>` を返す。区切り文字列が空文字列の場合も許容し、その場合は JS 準拠で code point ごとに分割する。
+- `s.split(delimiter: String) -> List<String>`(メソッド、引数1、v0.9 / M41。空デリミタの意味論を v0.10 / M44 で明確化)。`delimiter` で分割した部分文字列の `List<String>` を返す。**区切り文字列が空文字列 `""` の場合は code point 単位で分割する**(`"a😀b".split("") == ["a", "😀", "b"]`)。emit は `keiStringSplit` ヘルパー経由で、非空デリミタは native `String.prototype.split` に委譲し、空デリミタのみ `Array.from(s)`(code point 単位)に落とす。**注意: native の `s.split("")` はサロゲートペアを UTF-16 code unit に割ってしまう**(`["a", "\uD83D", "\uDE00", "b"]`)ため、Kei は空デリミタ split をヘルパーで code point 尊重にしている(M44 で修正。「1 文字ずつ処理」の正規経路 — `kei-spec-v0.10-strings.md` 参照)。
 - `s.indexOf(needle: String) -> Option<Int>`(メソッド、引数1、v0.9 / M41)。`String.prototype.indexOf` を `Option` でラップしたもの。`needle` が見つかれば `Some(pos)`(UTF-16 code unit index)、見つからなければ `None` を返す。`-1` 番兵は採らない。
   `indexOf()` を含む式は `toInt()` と同じ理由(bounded 評価器が `Option` 値を未サポート)で `kei check --generative` が評価不能扱いとし、当該 `ensures` は `[generative]` へ昇格せず `[runtime]` のまま留まる(issue #109 と同じ挙動)。
+
+String stdlib 段階2(v0.10 / M45。実アプリの純ロジックを Kei で書くための拡充。詳細は `kei-spec-v0.10-strings.md` §2.3):
+
+- `s.substring(start: Int, end: Int) -> String`(メソッド、引数2、v0.10 / M45)。**範囲は code point 単位**で規定する(#159 / M44 の code point 意味論と整合。UTF-16 code unit index ではない)。`start`〜`end` の半開区間を、code point 列を JS `Array.prototype.slice(start, end)` の index 意味論で切り出す(負の index は末尾から、範囲外は端にクランプ、resolve 後の `start >= end` は `""`)。`"a😀b".substring(1, 2) == "😀"`(native の `String.prototype.substring` は UTF-16 index で `"\uD83D"` になりサロゲートを割るため、emit は `keiStringSubstring` ヘルパー経由で code point を尊重する)。純粋で `--generative` の bounded 評価器も評価できる。
+- `s.replace(from: String, to: String) -> String` / `s.replaceAll(from: String, to: String) -> String`(メソッド、引数2、v0.10 / M45)。部分文字列 `from` を `to` に置換する。`replace` は**最初の 1 箇所**、`replaceAll` は**全箇所**。emit は `replace` は TS の `String.prototype.replace` にそのまま、`replaceAll` は `keiStringReplaceAll` ヘルパー経由(非空 `from` は native `replaceAll` に委譲。**空 `from` は code point 境界ごとの挿入**にする — native の `s.replaceAll("", to)` は UTF-16 code unit 境界に挿入し `"😀".replaceAll("", "_")` が孤立サロゲート `"_\uD83D_\uDE00_"` を作るため。Kei は `"a😀b".replaceAll("", "_") == "_a_😀_b_"`。空 `from` のとき `to` は字面どおり挿入され `$` パターンは解釈しない)。`replace("", to)` は位置 0 に 1 回挿入するだけでサロゲートを割れないため native のままでよい。置換文字列 `to` は JS の置換パターン(`$&` などの `$` シーケンス)を解釈するので、`$` を字面で入れたいときは `$$` にする(非空 `from` の場合)。`--generative` では bounded 評価器が JS と Rust の置換細部の差を避けるため評価対象外(`[runtime]` のまま)。
+- `s.toLowerCase() -> String` / `s.toUpperCase() -> String`(メソッド、引数0、v0.10 / M45)。**ロケール非依存**の Unicode 大小文字変換(TS の `String.prototype.toLowerCase` / `toUpperCase`。`toLocale*Case` ではない)。ロケール依存の畳み込み(トルコ語の `i`/`İ` 等)は言語内で扱わない — 必要なら extern。`--generative` では case マッピングの JS/Rust 差を避けるため評価対象外(`[runtime]` のまま)。
+- `s.trim() -> String`(メソッド、引数0、v0.10 / M45)。前後の空白(JS の WhiteSpace + LineTerminator 集合)を除去する。`String.prototype.trim` にそのまま写る。`--generative` では空白集合の JS/Rust 差を避けるため評価対象外(`[runtime]` のまま)。
+- `s.startsWith(prefix: String) -> Bool` / `s.endsWith(suffix: String) -> Bool`(メソッド、引数1、v0.10 / M45)。前方一致 / 後方一致。`String.prototype.startsWith` / `endsWith` にそのまま写る。純粋で `--generative` の bounded 評価器も評価できる。
+- `s.contains(sub: String) -> Bool`(メソッド、引数1、v0.10 / M45)。部分文字列包含(`indexOf(sub) != None` の可読化)。emit は `String.prototype.includes`(`List.contains` と同じフォールバック)。純粋で `--generative` の bounded 評価器も評価できる。
+
+**正規表現は言語に入れない**(v0.10 / M45。#160 🤝(c))。slug 生成・タグ正規化などは上記 String プリミティブ + `s.split("")`(code point イテレーション)+ `List` 畳み込みの定石で書く。どうしても正規表現が要るパターンは extern で TS 側 `RegExp` に出す(境界。詳細と定石は `kei-spec-v0.10-strings.md` §5)。
 
 いずれも純粋で副作用を持たず、`requires` / `ensures` 内でも使える。
 

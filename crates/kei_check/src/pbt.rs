@@ -530,16 +530,51 @@ fn int_domain(deep: bool) -> Vec<Value> {
 }
 
 fn str_domain(deep: bool) -> Vec<Value> {
+    // M44 / #159: サロゲートペア(`😀` = code point 1・UTF-16 code unit 2)を境界値に含め、
+    // `s.length`(UTF-16)と `s.codePointCount()`(code point)の差を PBT で踏めるようにする。
+    // 旗絵文字(`🇯🇵` = 地域指示子 2 つ = code point 2・code unit 4)も足し、単一サロゲート以外の
+    // ずれ幅も観測できるようにする(grapheme 単位ではないことの回帰確認)。
     if deep {
         // PR #76 review: 深い領域でも **空文字** は境界として残す
         // (`requires items.all(nonEmpty)` のような契約が踏まれるように)。
-        vec![Value::Str(String::new()), Value::Str("a".to_string())]
+        vec![
+            Value::Str(String::new()),
+            Value::Str("a".to_string()),
+            Value::Str("😀".to_string()),
+        ]
     } else {
+        // M45 / #160: substring(code point 範囲)・startsWith / endsWith / contains の境界を
+        // 踏めるよう、前後空白を含む値(` a `)も足す(trim/前後方一致の対象文字列)。
         vec![
             Value::Str(String::new()),
             Value::Str("a".to_string()),
             Value::Str("abc".to_string()),
+            Value::Str("a😀b".to_string()),
+            Value::Str("🇯🇵".to_string()),
+            Value::Str(" a ".to_string()),
         ]
+    }
+}
+
+/// JS `Array.prototype.slice(start, end)` の index 意味論を Rust の code point 配列で再現する
+/// (M45 / #160。`substring` の bounded 評価用)。負値は末尾から、範囲外は端にクランプ、
+/// resolve 後の `start >= end` は空文字を返す。runtime の `keiStringSubstring`
+/// (`Array.from(s).slice(start, end).join("")`)と一致する。
+fn js_array_slice(chars: &[char], start: i64, end: i64) -> String {
+    let len = chars.len() as i64;
+    let resolve = |i: i64| -> i64 {
+        if i < 0 {
+            (len + i).max(0)
+        } else {
+            i.min(len)
+        }
+    };
+    let s = resolve(start);
+    let e = resolve(end);
+    if s >= e {
+        String::new()
+    } else {
+        chars[s as usize..e as usize].iter().collect()
     }
 }
 
@@ -995,10 +1030,70 @@ fn eval_expr(
                     Value::Int(n) if name.name == "toString" => {
                         return Ok(Value::Str(n.to_string()));
                     }
-                    // Option / List<String> 値を評価器は持たないため Unsupported に倒す
-                    // (get と同じ扱い。toInt: M30 / #107, split & indexOf: M41 / #136)。
+                    // codePointCount() は Int を返す純粋メソッドなので評価器で計算できる
+                    // (M44 / #159)。`s.chars()` は Unicode スカラ値=code point 単位で反復し、
+                    // `length`(UTF-16 code unit 長)との差がサロゲート境界値で観測できる。
+                    Value::Str(s) if name.name == "codePointCount" && args.is_empty() => {
+                        return Ok(Value::Int(s.chars().count() as i64));
+                    }
+                    // substring(start, end): code point 単位の範囲切り出し(M45 / #160)。
+                    // emit の keiStringSubstring(`Array.from(s).slice(start, end)`)と一致する
+                    // index 意味論を Rust で再現する(負値は末尾から・範囲外はクランプ・
+                    // resolve 後 start >= end は空文字)。純粋なので generative で評価できる。
+                    Value::Str(s) if name.name == "substring" && args.len() == 2 => {
+                        let start = match eval_expr(&args[0], env, funcs, in_ensures, depth)? {
+                            Value::Int(n) => n,
+                            _ => return Err(EvalError::Unsupported),
+                        };
+                        let end = match eval_expr(&args[1], env, funcs, in_ensures, depth)? {
+                            Value::Int(n) => n,
+                            _ => return Err(EvalError::Unsupported),
+                        };
+                        let chars: Vec<char> = s.chars().collect();
+                        return Ok(Value::Str(js_array_slice(&chars, start, end)));
+                    }
+                    // startsWith / endsWith / contains(M45 / #160): 部分文字列判定は Rust の
+                    // str::starts_with / ends_with / contains が JS の startsWith / endsWith /
+                    // includes と同一結果になるので bounded 評価器で正確に評価できる。
+                    Value::Str(s)
+                        if args.len() == 1
+                            && matches!(
+                                name.name.as_str(),
+                                "startsWith" | "endsWith" | "contains"
+                            ) =>
+                    {
+                        let arg = match eval_expr(&args[0], env, funcs, in_ensures, depth)? {
+                            Value::Str(a) => a,
+                            _ => return Err(EvalError::Unsupported),
+                        };
+                        let r = match name.name.as_str() {
+                            "startsWith" => s.starts_with(&arg),
+                            "endsWith" => s.ends_with(&arg),
+                            _ => s.contains(&arg),
+                        };
+                        return Ok(Value::Bool(r));
+                    }
+                    // 評価器が値を持てない・JS と Rust で細部が食い違い得る String メソッドは
+                    // Unsupported に倒す:
+                    //   - toInt / split / indexOf: Option / List<String> を評価器が持たない
+                    //     (get と同じ扱い。toInt: M30 / #107, split & indexOf: M41 / #136)。
+                    //   - replace / replaceAll / toLowerCase / toUpperCase / trim(M45 / #160):
+                    //     case 変換(Rust の Unicode full case ↔ JS の String.prototype.to*Case)・
+                    //     trim の空白集合・空パターン replace は JS と Rust で境界が食い違い得るため、
+                    //     誤った counterexample を出さないよう generative の対象から外す(実行時契約
+                    //     検証・静的検査は通常どおり効く)。
                     Value::Str(_)
-                        if matches!(name.name.as_str(), "toInt" | "split" | "indexOf") =>
+                        if matches!(
+                            name.name.as_str(),
+                            "toInt"
+                                | "split"
+                                | "indexOf"
+                                | "replace"
+                                | "replaceAll"
+                                | "toLowerCase"
+                                | "toUpperCase"
+                                | "trim"
+                        ) =>
                     {
                         return Err(EvalError::Unsupported);
                     }

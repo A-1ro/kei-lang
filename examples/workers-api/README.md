@@ -9,25 +9,28 @@ Cloudflare Workers 上で Kei が書いた API ハンドラを Hono + `@kei/hono
 このリポジトリのルートから:
 
 ```bash
-# 1. @kei/runtime と @kei/hono の dist を作る(file: 依存の解決先)
-(cd runtime && npm install --no-audit --no-fund && npm run build)
-(cd tests/cli/packages/kei-hono && npm install --no-audit --no-fund && npm run build)
-
-# 2. Kei ソースを TS にトランスパイル(dist/ に配置)
+# 1. Kei ソースを TS にトランスパイル(dist/ に配置)
 cargo run -q -p kei_cli --bin kei -- build examples/workers-api --out-dir examples/workers-api/dist
 
-# 3. workers-api の依存を入れる
+# 2. workers-api の依存を入れる
 (cd examples/workers-api && npm install --no-audit --no-fund)
 
-# 4. wrangler の bundling(esbuild)が通ることを確認
+# 3. wrangler の bundling(esbuild)が通ることを確認
+#    (@kei/runtime / @kei/hono の dist が無ければ npm scripts の pre フックが自動で
+#    install + build するので、真っさら環境でも事前ビルド手順は不要)
 (cd examples/workers-api && npx wrangler deploy --dry-run --outdir dist-wrangler)
 
-# 5. wrangler dev を起動して叩く
+# 4. wrangler dev を起動して叩く
 (cd examples/workers-api && npx wrangler dev --port 8787 --local &)
 curl -s http://127.0.0.1:8787/health          # -> {"status":"ok"}
 curl -s http://127.0.0.1:8787/stock/ABC-1     # -> {"qty":42}
 curl -s http://127.0.0.1:8787/stock/UNKNOWN   # -> {"error":"not found"} (404)
 ```
+
+`npm run dry-run` / `npm run dev` / `npm run test` / `npm run typecheck` はいずれも実行前に
+`scripts/ensure-deps-built.sh` が走り、`../../runtime` と `../../tests/cli/packages/kei-hono`
+の `dist/index.js` が無ければ自動で `npm install && npm run build` する(v0.9 dogfood で
+指摘されたギャップ1の対応案(a))。手動で先に事前ビルドしておいた場合はスキップされる。
 
 ## 責務分担 (v0.9 設計原則 4)
 
