@@ -1,0 +1,35 @@
+// MIME / キーのバリデーション(M46 / #160)。純ロジックを Kei だけで書く代表 4 関数の 1 つ。
+// startsWith / endsWith / 許可文字判定(code point 単位)で真偽を返す。正規表現は使わない(v0.10 🤝(c))。
+// JS 参照実装との等価は tests/e2e/tests/strings-validate.test.ts で CI 常設。
+module strings.validate
+
+// s の全 code point が allowed に含まれるか。空文字は true を返すので呼び出し側で非空を保証する。
+func allCharsIn(s: String, allowed: String) -> Bool {
+  return s.split("").fold(true, (acc, c) => acc && allowed.contains(c))
+}
+
+// MIME タイプが image/<subtype> 形式(subtype は [a-z0-9.+-] のみ・非空)か。
+func isImageMime(s: String) -> Bool {
+  if !s.startsWith("image/") {
+    return false
+  }
+  let subtype = s.substring(6, s.codePointCount())
+  if subtype.codePointCount() == 0 {
+    return false
+  }
+  return allCharsIn(subtype, "abcdefghijklmnopqrstuvwxyz0123456789.+-")
+}
+
+// オブジェクトキー: 非空・[A-Za-z0-9._/-] のみ・先頭/末尾が "/" でない。
+func isValidObjectKey(s: String) -> Bool {
+  if s.codePointCount() == 0 {
+    return false
+  }
+  if s.startsWith("/") {
+    return false
+  }
+  if s.endsWith("/") {
+    return false
+  }
+  return allCharsIn(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-/")
+}

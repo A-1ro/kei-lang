@@ -32,6 +32,7 @@ kei-lang/
 │   ├── kei-spec-v0.1.md
 │   ├── kei-spec-v0.2.md      # v0.2差分章(match / extern / 検証レベル / 数量契約イディオム, M10–M13)
 │   ├── kei-spec-v0.3-collections.md  # コレクション型(立場B / List 段階導入, Draft, #25)
+│   ├── kei-spec-v0.10-strings.md  # String の code point 意味論(codePointCount / grapheme 境界, M44, #159)
 │   ├── diagnostic-schema.md  # Diagnosticスキーマ定義(M0で確定 + v0.2 CheckReport拡張)
 │   ├── grammar.md            # 文法リファレンス(kei_specツールの配信元)
 │   └── errors/               # エラーコード別解説
@@ -40,7 +41,10 @@ kei-lang/
 ├── examples/                 # .keiサンプル集(kei_examplesの配信元)
 │   ├── basics/
 │   ├── effects/
-│   └── contracts/
+│   ├── contracts/
+│   ├── collections/
+│   ├── strings/             # String の code point 意味論(codePointCount / split("") 反復, M44)
+│   └── workers-api/
 │
 ├── tests/
 │   ├── golden/               # golden test(契約本文)

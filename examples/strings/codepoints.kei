@@ -1,0 +1,26 @@
+// String の code point 意味論(M44 / #159)。
+// s.length は UTF-16 code unit 長、s.codePointCount() は Unicode code point 数(`😀` = 1)。
+// 「1 文字ずつ」処理する経路は既存の s.split("")(空デリミタ = code point 単位)+ List 畳み込み。
+// grapheme(書記素クラスタ)と正規化(NFC/NFD)は言語内では扱わない —
+// 境界は spec/kei-spec-v0.10-strings.md を参照(extern の Intl.Segmenter へ誘導)。
+module strings.codepoints
+
+func codePointCount(s: String) -> Int
+  ensures result <= s.length
+{
+  return s.codePointCount()
+}
+
+func isWithinLimit(s: String, limit: Int) -> Bool
+  requires limit >= 0
+{
+  return s.codePointCount() <= limit
+}
+
+func codePoints(s: String) -> List<String> {
+  return s.split("")
+}
+
+func countByFold(s: String) -> Int {
+  return s.split("").fold(0, (acc, c) => acc + 1)
+}
