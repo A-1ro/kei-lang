@@ -1,0 +1,14 @@
+{
+  "id": 32,
+  "jsonrpc": "2.0",
+  "result": {
+    "capabilities": {
+      "tools": {}
+    },
+    "protocolVersion": "2025-11-25",
+    "serverInfo": {
+      "name": "kei-mcp",
+      "version": "0.9.0"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 32,
+  "method": "initialize",
+  "params": {
+    "capabilities": {},
+    "clientInfo": { "name": "test-client", "version": "0.0.0" }
+  }
+}
