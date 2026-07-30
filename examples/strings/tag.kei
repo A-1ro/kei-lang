@@ -26,9 +26,11 @@ func appendTagChar(acc: String, c: String) -> String {
 }
 
 // トリム → 小文字化 → 内部空白ランの単一スペース化。
-// トリムと空白ランの畳み込みのみ(追加なし)なので出力は入力以下の長さになる。
+// トリムと空白ランの畳み込みは減らす方向のみだが、小文字化は Unicode の特殊ケース
+// 変換で code point 数が増え得る(例: İ(U+0130) → "i" + U+0307 の 2 code point。#171)。
+// 既知の最大伸長率は 1 code point → 2 code point なので、上限は入力の 2 倍に緩める。
 func normalizeTag(s: String) -> String
-  ensures result.codePointCount() <= s.codePointCount()
+  ensures result.codePointCount() <= s.codePointCount() * 2
 {
   return s.trim().toLowerCase().split("").fold("", (acc, c) => appendTagChar(acc, c))
 }
