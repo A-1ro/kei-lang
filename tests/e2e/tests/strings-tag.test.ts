@@ -78,4 +78,14 @@ describe("strings/tag — タグ正規化の JS 参照等価(M46)", () => {
       expect(normalizeTag(s)).toBe(refNormalizeTag(s));
     }
   });
+
+  // #171: toLowerCase が code point 数を増やす入力(例: İ(U+0130) → "i" + U+0307 の
+  // 2 code point)でも ensures(result.codePointCount() <= s.codePointCount() * 2)を
+  // 破らずに完走し、JS 参照実装と一致することを確認する回帰テスト。
+  it("小文字化で code point が増える入力(İ)でも契約違反にならず参照実装と一致する", () => {
+    const s = "İ";
+    expect(() => normalizeTag(s)).not.toThrow();
+    expect(normalizeTag(s)).toBe(refNormalizeTag(s));
+    expect([...normalizeTag(s)].length).toBeGreaterThan([...s].length);
+  });
 });
