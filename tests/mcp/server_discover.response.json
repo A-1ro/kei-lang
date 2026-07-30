@@ -1,0 +1,19 @@
+{
+  "id": 16,
+  "jsonrpc": "2.0",
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "kei-mcp",
+        "version": "0.9.0"
+      }
+    },
+    "capabilities": {
+      "tools": {}
+    },
+    "resultType": "complete",
+    "supportedVersions": [
+      "2026-07-28"
+    ]
+  }
+}

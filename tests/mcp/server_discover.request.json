@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "method": "server/discover",
+  "params": {
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { "name": "test-client", "version": "0.0.0" }
+    }
+  }
+}
