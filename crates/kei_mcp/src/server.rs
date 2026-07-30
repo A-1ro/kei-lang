@@ -2,12 +2,32 @@
 //! 純関数 [`Server::handle`] で、リクエスト Value → レスポンス Value を返す
 //! (notification は `None`)。これにより tests/mcp/ の golden test が
 //! プロセス起動なしでリクエスト→レスポンスを検証できる。
+//!
+//! ## Dual-era 対応(MCP spec 2026-07-28 "Versioning and Compatibility")
+//!
+//! 2026-07-28 で `initialize`/`initialized` ハンドシェイクが廃止され、
+//! 各リクエストが `params._meta["io.modelcontextprotocol/protocolVersion"]` で
+//! バージョンを申告する方式(spec の呼称で "Modern")に変わった。
+//! 2025-11-25 以前(`initialize` ハンドシェイク方式)は "Legacy" と呼ばれ、
+//! 両方に応答できる実装は "Dual-era" と呼ばれる。
+//!
+//! kei_mcp は Dual-era として振る舞う:
+//! - `method == "initialize"` は常に Legacy 経路(spec: "An initialize request
+//!   selects legacy semantics")。
+//! - それ以外で `params._meta["io.modelcontextprotocol/protocolVersion"]` が
+//!   付いていれば Modern 経路。バージョンが [`MODERN_SUPPORTED_PROTOCOL_VERSIONS`]
+//!   に無ければ [`unsupported_protocol_version_error`](-32022) を返す。
+//! - どちらの申告も無い「era 不明」リクエスト(例: `_meta` 無しの `tools/list`)は
+//!   これまで通り Legacy と同じ経路で処理する。spec もこの状態
+//!   ("era-ambiguous method... processed under legacy semantics")を許容しており、
+//!   kei_mcp はもともとセッション状態を持たないためこれで golden test 互換を保てる。
 
 use serde_json::{json, Value};
 
 use crate::tools::{self, ToolOutcome};
 
-/// このサーバーが受け入れる MCP プロトコルバージョン(新しい順)。
+/// このサーバーが Legacy(`initialize` ハンドシェイク)経路で受け入れる MCP
+/// プロトコルバージョン(新しい順)。
 ///
 /// MCP spec 2025-11-25 "Version Negotiation":
 /// > If the server supports the requested protocol version, it MUST respond with the
@@ -18,8 +38,11 @@ use crate::tools::{self, ToolOutcome};
 /// [`DEFAULT_PROTOCOL_VERSION`] = 自分がサポートする最新版で、交渉が不成立のときに
 /// 名乗るバージョンになる。
 ///
-/// **新しいリビジョンへの追従はこの配列の先頭に 1 行足すだけ**でよい。ただし
-/// 載せてよいのは実際に準拠しているバージョンだけ(名乗るバージョンに嘘をつかない)。
+/// **新しいリビジョンへの追従はこの配列の先頭に 1 行足すだけ**でよい —
+/// ただしこれは 2025-11-25 までの Legacy(`initialize` ハンドシェイク)リビジョン間の
+/// 話に限る。2026-07-28 はハンドシェイク自体を廃止する破壊的変更のため Modern 版は
+/// 別配列 [`MODERN_SUPPORTED_PROTOCOL_VERSIONS`] で管理する(この配列に混ぜると
+/// 「initialize でも 2026-07-28 を名乗れる」という嘘になる)。
 /// 追加前に、そのリビジョンが「tools のみを stdio で提供するサーバー」に課す要件を
 /// 満たしているか確認する。既定版は golden にも焼き込まれているので、
 /// `UPDATE_GOLDEN=1 cargo test -p kei_mcp --test golden_mcp` で
@@ -33,8 +56,26 @@ use crate::tools::{self, ToolOutcome};
 /// 2025-03-26 には準拠できない。
 pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2024-11-05"];
 
-/// 交渉が成立しなかったときに名乗る既定バージョン(= サポートする最新版)。
+/// 交渉が成立しなかったときに名乗る既定バージョン(= サポートする Legacy 最新版)。
 pub const DEFAULT_PROTOCOL_VERSION: &str = SUPPORTED_PROTOCOL_VERSIONS[0];
+
+/// Modern 経路(`_meta` によるリクエスト単位のバージョン申告)でこのサーバーが
+/// 受理するプロトコルバージョン。
+///
+/// MCP spec 2026-07-28 "Terminology":
+/// > Modern: protocol versions that convey version, identity, and capabilities as
+/// > per-request metadata (revision 2026-07-28 and later).
+///
+/// Legacy 専用の [`SUPPORTED_PROTOCOL_VERSIONS`] とは意図的に別配列にしている。
+/// 2025-11-25 以前は per-request メタデータの概念自体を持たないため、同じ配列に
+/// 混ぜると「Modern としても受理する」と誤読されるおそれがある。
+pub const MODERN_SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2026-07-28"];
+
+/// Modern リクエストがバージョンを申告する `_meta` キー。
+///
+/// MCP spec 2026-07-28 "Protocol Version Negotiation":
+/// > Every request declares the protocol version it is using in its `_meta` field.
+const META_PROTOCOL_VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
 /// サーバー名(serverInfo)。
 pub const SERVER_NAME: &str = "kei-mcp";
@@ -78,8 +119,22 @@ impl Server {
         };
         let params = request.get("params").cloned().unwrap_or(Value::Null);
 
+        // Dual-era 判定: `initialize` は常に Legacy(spec: "An initialize request
+        // selects legacy semantics")。それ以外で `_meta` にバージョン申告があれば
+        // Modern 経路とし、[`MODERN_SUPPORTED_PROTOCOL_VERSIONS`] との一致を見る。
+        // 申告が無い era 不明リクエストは(モジュールドキュメント参照)Legacy と
+        // 同じ経路にフォールスルーする。
+        if method != "initialize" {
+            if let Some(requested) = modern_protocol_version(&params) {
+                if !MODERN_SUPPORTED_PROTOCOL_VERSIONS.contains(&requested) {
+                    return Some(unsupported_protocol_version_error(id, requested));
+                }
+            }
+        }
+
         let response = match method {
             "initialize" => success(id, initialize_result(&params)),
+            "server/discover" => success(id, discover_result()),
             "ping" => success(id, json!({})),
             "tools/list" => success(id, tools_list_result()),
             "tools/call" => tools_call(id, &params),
@@ -152,6 +207,56 @@ fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
                 .find(|&supported| supported == want)
         })
         .unwrap_or(DEFAULT_PROTOCOL_VERSION)
+}
+
+/// リクエストの `params._meta["io.modelcontextprotocol/protocolVersion"]` を
+/// 取り出す。無い、または `_meta`/値が非オブジェクト・非文字列なら `None`
+/// (era 不明リクエストとして Legacy 経路にフォールスルーさせる)。
+fn modern_protocol_version(params: &Value) -> Option<&str> {
+    params
+        .get("_meta")?
+        .get(META_PROTOCOL_VERSION_KEY)?
+        .as_str()
+}
+
+/// `server/discover` の応答。MCP spec 2026-07-28 "Discovery":
+/// > Servers MUST implement it.
+/// > A discovery result includes: `supportedVersions`... `capabilities`...
+/// > `_meta['io.modelcontextprotocol/serverInfo']`... Servers SHOULD include this field.
+///
+/// `instructions`/`ttlMs`/`cacheScope` は任意フィールド(キャッシュ関連の拡張)なので
+/// 省略する。`resultType: "complete"` は spec の JSON 例に倣った固定値。
+fn discover_result() -> Value {
+    json!({
+        "resultType": "complete",
+        "supportedVersions": MODERN_SUPPORTED_PROTOCOL_VERSIONS,
+        "capabilities": { "tools": {} },
+        "_meta": {
+            "io.modelcontextprotocol/serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
+        },
+    })
+}
+
+/// Modern リクエストが申告したバージョンを本サーバーがサポートしないときの応答。
+///
+/// MCP spec 2026-07-28 "Protocol Version Negotiation":
+/// > it MUST respond with an `UnsupportedProtocolVersionError` listing the versions
+/// > it does support:
+/// > `{ "error": { "code": -32022, "message": "Unsupported protocol version",
+/// >   "data": { "supported": [...], "requested": "..." } } }`
+fn unsupported_protocol_version_error(id: Option<Value>, requested: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id.unwrap_or(Value::Null),
+        "error": {
+            "code": -32022,
+            "message": "Unsupported protocol version",
+            "data": {
+                "supported": MODERN_SUPPORTED_PROTOCOL_VERSIONS,
+                "requested": requested,
+            },
+        },
+    })
 }
 
 fn initialize_result(params: &Value) -> Value {
@@ -353,5 +458,133 @@ mod tests {
         let server = Server::new();
         let notification = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
         assert_eq!(server.handle(&notification), None);
+    }
+
+    /// `server/discover` は MUST 実装。Modern の申告バージョンが一致すれば
+    /// supportedVersions / capabilities / serverInfo を返す。
+    #[test]
+    fn discover_returns_supported_versions_and_server_info() {
+        let server = Server::new();
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {
+                "_meta": { META_PROTOCOL_VERSION_KEY: "2026-07-28" }
+            }
+        });
+        let response = server.handle(&request).expect("discover responds");
+        assert_eq!(
+            response["result"]["supportedVersions"],
+            json!(MODERN_SUPPORTED_PROTOCOL_VERSIONS)
+        );
+        assert!(response["result"]["capabilities"]["tools"].is_object());
+        assert_eq!(
+            response["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+            SERVER_NAME
+        );
+    }
+
+    /// `_meta` にバージョン申告が無い `server/discover` も(era 不明として)
+    /// フォールスルーし、通常どおり discover 結果を返す。
+    #[test]
+    fn discover_without_meta_still_responds() {
+        let server = Server::new();
+        let request = json!({ "jsonrpc": "2.0", "id": 1, "method": "server/discover" });
+        let response = server.handle(&request).expect("discover responds");
+        assert_eq!(
+            response["result"]["supportedVersions"],
+            json!(MODERN_SUPPORTED_PROTOCOL_VERSIONS)
+        );
+    }
+
+    /// Modern 経路で未サポート版を申告すると `UnsupportedProtocolVersionError`
+    /// (-32022, data.supported/data.requested)を返し、メソッドは実行されない。
+    #[test]
+    fn modern_request_with_unsupported_version_returns_dash_32022() {
+        let server = Server::new();
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/list",
+            "params": {
+                "_meta": { META_PROTOCOL_VERSION_KEY: "1900-01-01" }
+            }
+        });
+        let response = server.handle(&request).expect("responds");
+        assert_eq!(response["error"]["code"], -32022);
+        assert_eq!(response["error"]["data"]["requested"], "1900-01-01");
+        assert_eq!(
+            response["error"]["data"]["supported"],
+            json!(MODERN_SUPPORTED_PROTOCOL_VERSIONS)
+        );
+        assert!(
+            response.get("result").is_none(),
+            "unsupported version must not fall through to the method handler"
+        );
+    }
+
+    /// Modern 経路でサポート済みバージョンを申告すれば、通常どおりメソッドが実行される。
+    #[test]
+    fn modern_request_with_supported_version_dispatches_normally() {
+        let server = Server::new();
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/list",
+            "params": {
+                "_meta": { META_PROTOCOL_VERSION_KEY: "2026-07-28" }
+            }
+        });
+        let response = server.handle(&request).expect("responds");
+        assert!(
+            response.get("error").is_none(),
+            "supported version must dispatch without error: {response}"
+        );
+        assert!(response["result"]["tools"].is_array());
+    }
+
+    /// `initialize` は `_meta` にモダン申告が付いていても常に Legacy 経路
+    /// (spec: "An initialize request selects legacy semantics")。バージョン
+    /// 不一致による -32022 にはならず、既存の Legacy 交渉ロジックが動く。
+    #[test]
+    fn initialize_always_uses_legacy_negotiation_even_with_modern_meta() {
+        let server = Server::new();
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "_meta": { META_PROTOCOL_VERSION_KEY: "1900-01-01" }
+            }
+        });
+        let response = server.handle(&request).expect("responds");
+        assert!(
+            response.get("error").is_none(),
+            "initialize must not be treated as an unsupported modern version: {response}"
+        );
+        assert_eq!(response["result"]["protocolVersion"], "2025-11-25");
+    }
+
+    /// `_meta` の値が非文字列/非オブジェクトなら era 不明として無視し、Legacy と
+    /// 同じフォールスルー経路(既存メソッド分岐)へ進む。
+    #[test]
+    fn modern_protocol_version_ignores_malformed_meta() {
+        assert_eq!(modern_protocol_version(&json!({})), None);
+        assert_eq!(
+            modern_protocol_version(&json!({ "_meta": "not-an-object" })),
+            None
+        );
+        assert_eq!(
+            modern_protocol_version(&json!({ "_meta": { META_PROTOCOL_VERSION_KEY: 123 } })),
+            None
+        );
+        assert_eq!(
+            modern_protocol_version(
+                &json!({ "_meta": { META_PROTOCOL_VERSION_KEY: "2026-07-28" } })
+            ),
+            Some("2026-07-28")
+        );
     }
 }
