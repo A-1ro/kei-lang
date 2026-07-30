@@ -1,0 +1,18 @@
+module check.parallel_in_ensures
+
+// 設計原則 6: 「並行結合子自体は契約を持たない」。`parallel` の呼び出しそのものは
+// 特別扱いされず、要素の直接呼び出し(uses Async)が通常どおり契約の純粋性診断
+// (KEI-E4001)にかかる。2 要素とも同じ理由で個別に拒否される。
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greetAll(a: Int, b: Int) -> List<String>
+  uses Async
+  ensures parallel([fetchName(a), fetchName(b)]).length == 2
+{
+  return parallel([fetchName(a), fetchName(b)])
+}

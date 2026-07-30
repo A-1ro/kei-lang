@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E3009",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Add at least one async call to the list, or avoid 'parallel' for the empty case"
+      }
+    ],
+    "message": "'parallel' requires at least one element",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 21,
+        "line": 8
+      },
+      "file": "tests/golden/check/err_parallel_empty_list.kei",
+      "start": {
+        "col": 19,
+        "line": 8
+      }
+    }
+  }
+]

@@ -1,0 +1,18 @@
+module check.parallel_not_list_literal
+
+// `parallel` の引数は list literal でなければならない(emit がそのまま
+// `Promise.all([...])` の配列項目として写すため。既に評価済みの値や名前参照では
+// 表現できない — check.rs の call_parallel コメント参照)。KEI-E3009。
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greetAll(ids: List<Int>) -> List<String>
+  uses Async
+{
+  let xs = ids
+  return parallel(xs)
+}

@@ -66,5 +66,6 @@ pub fn emit_module_with_resolver(
         &op_spans.async_calls,
         &op_spans.async_match_spans,
         &op_spans.async_funcs,
+        &op_spans.parallel_calls,
     ))
 }

@@ -29,6 +29,7 @@ pub fn emit_checked(
     async_calls: &HashSet<Span>,
     async_match_spans: &HashSet<Span>,
     async_funcs: &HashSet<Span>,
+    parallel_calls: &HashSet<Span>,
 ) -> EmitOutput {
     let ts_path = ts_path_for(file, module);
     let ts_file = ts_path.rsplit('/').next().expect("non-empty path");
@@ -40,6 +41,7 @@ pub fn emit_checked(
         async_calls,
         async_match_spans,
         async_funcs,
+        parallel_calls,
         out: Out::default(),
         old_index: HashMap::new(),
         in_ensures: false,
@@ -420,6 +422,9 @@ struct Emitter<'a> {
     /// `uses Async` を宣言している関数宣言の span 集合(検査器由来、M37 レビュー対応)。
     /// `emit_func` がこれだけを根拠に `async function` として出す。
     async_funcs: &'a HashSet<Span>,
+    /// 並行結合子 `parallel(xs)` の Call 式の span 集合(検査器由来、M47)。`emit_call` が
+    /// この位置の Call を `await Promise.all([...])` として出す。
+    parallel_calls: &'a HashSet<Span>,
     out: Out,
     /// ensures 内 `old(...)` の割当。span をキーに kei$old$N の割当を引く。fold など引数の
     /// emit 順が AST 順と一致しないコンビネータがあるため、位置カウンタではなく式の同一性
@@ -1173,6 +1178,23 @@ impl Emitter<'_> {
     }
 
     fn emit_call(&mut self, callee: &ast::Expr, args: &[ast::Expr], span: Span, parent: Prec) {
+        // 並行結合子 `parallel(xs)`(M47)。検査器が確定した位置(`parallel_calls`)だけを
+        // 根拠に `await Promise.all([...])` へ写す。check が `args[0]` を list literal に
+        // 限定しているので、要素はそのまま配列項目として emit すればよい(要素の直接呼び出しは
+        // `in_parallel_arg` により `async_calls` に積まれていないため、個別の `await` は付かない)。
+        if self.parallel_calls.contains(&span) {
+            let needs_paren = parent > Prec::Unary;
+            if needs_paren {
+                self.out.frag("(");
+            }
+            self.out.frag("await Promise.all(");
+            self.emit_expr(&args[0], Prec::Implication);
+            self.out.frag(")");
+            if needs_paren {
+                self.out.frag(")");
+            }
+            return;
+        }
         // `await` は JS の UnaryExpression 相当の優先順位(Prec::Unary)。postfix 位置
         // (`f(x).field` の `f(x)` のように、直後にさらに `.`/`()` が続く文脈)では
         // `await f(x).field` が `await (f(x).field)` と解釈され Promise に `.field` を

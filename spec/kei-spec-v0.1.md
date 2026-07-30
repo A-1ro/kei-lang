@@ -234,6 +234,12 @@ Async              // 非同期呼び出し。IO 傘下ではない独立ルー�
 `&&` は v0.5(M28)で導入。短絡評価であり、契約式は副作用禁止のため観測不能だが、`b != 0 && a / b > 0` のような trap 回避に意味を持つ。
 
 - **非同期の扱い(v0.7・M37/M38で導入)**: `uses Async` 関数は `async function` + `Promise<T>` に写る。呼び出し側は自動 await(呼び出し側の Kei コードに `await` 演算子は登場せず、コンパイラが emit 時に挿入する)。M37 で導入するのは関数コア(ローカル関数の `uses Async`・呼び出し・match / combinator を含む式の emit)のみで、`extern` の async 署名と契約(`requires`/`ensures`)からの async 呼び出しの e2e 検証は M38 の範囲。
+- **並行実行(v0.10・M47/#161で導入)**: v0.7〜v0.9 の `uses Async` は逐次のみだった。v0.10 は独立 I/O を並行実行する**最小の並行結合子** `parallel(xs) -> List<T>` を追加する(🤝(d) 合意済み。`docs/kei-roadmap-v0.10.md` M47 参照)。
+  - **形**: `xs` は同種 `List<T>`。**list literal でなければならず**、各要素は `uses Async` を持つ関数への**直接呼び出し**(例: `fetchName(id)`)でなければならない。既に評価済みの値・名前参照・非 async な式は `KEI-E3009` で拒否する(emit がそのまま `Promise.all([...])` の配列項目に写すため、要素は「後から await できる Promise 生成式」である必要がある)。
+  - **意味論**: 各要素は同時に開始され、全ての resolve を待って `List<T>` として返る。**独立実行**(要素間に順序依存はない)・**実行順非依存**(結果 `List<T>` の順序は入力順のまま。完了順ではない)・**失敗時 fail-fast**(いずれかが reject/throw したら全体が伝播。`Promise.all` 準拠)。
+  - **契約との関係**: **並行結合子自体は契約を持たない**。各要素(各 async 関数)の `requires` は自分の入口で、`ensures` は自分の resolve 後に、v0.7 の既存挙動のまま個別に評価される。「並行実行時の事後条件」という新しい契約意味論は増やさない。契約式(`requires`/`ensures`)の中で `parallel(...)` を使うこと自体は禁止しないが、要素の直接呼び出しが `uses Async` である以上、既存の契約純粋性診断(`KEI-E4001` + 境界越しの `KEI-E3001`)にそのままかかり、事実上使えない。
+  - **emit**: `await Promise.all([xs...])` に写る(`crates/kei_emit/src/emit.rs` の `emit_call`)。
+  - **スコープ外(v1.x 以降で実需確認後)**: `race`(最初に成功したものを取る合流)・キャンセル/タイムアウト・構造化並行スコープ(nursery)・異種型タプル結合(`join(a, b) -> (A, B)`)。
 - 出力TSは人間が読める品質を保つ(デバッグ時のsource of truthはKeiだが、スタックトレースの追跡可能性を確保)。
 - source map(v3)対応。`sources` は .kei ファイル、`sourcesContent` 埋め込み。契約違反のエラー位置は .kei 側の行番号に解決される。
 

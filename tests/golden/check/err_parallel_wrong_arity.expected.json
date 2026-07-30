@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Call 'parallel([f(a), g(b), ...])' with a single list literal"
+      }
+    ],
+    "message": "'parallel' takes exactly 1 argument (a list literal of async calls), found 2",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 50,
+        "line": 14
+      },
+      "file": "tests/golden/check/err_parallel_wrong_arity.kei",
+      "start": {
+        "col": 10,
+        "line": 14
+      }
+    }
+  }
+]

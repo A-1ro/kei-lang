@@ -11,6 +11,7 @@
 - 2026-07-27: 起草。v0.10 のテーマ・傘下 issue・受け入れ基準を確定。詳細 /goal は 🤝 合意後に追記。
 - 2026-07-27: **/goal 契約書化(M44〜M47)を起草。** 設計原則・Milestone 分解・完了条件・🤝 着手前合意事項(5 点)を追記。
 - 2026-07-27: **🤝 5 点すべて合意済み**(length は加法 — UTF-16 の `length` 温存 + `codePointCount()` 追加 / stdlib 段階2は high tier + `contains`(pad・repeat は v1.x 送り)/ 正規表現は定石例示 + extern 境界の併用(言語内エンジンなし)/ 並行結合子は `parallel` — 同種 List を並行実行し emit は `Promise.all` / 順序は String 先行 M44→M45→M46→M47)。各 Milestone の合意節・/goal 文を確定版に更新。
+- 2026-07-29: **M47 実装完了。** `parallel(xs) -> List<T>` を追加(KEI-E3009。list literal 限定・要素は `uses Async` 関数への直接呼び出し限定)。emit は `await Promise.all([...])`。golden(check)/ emit 単体テスト / spec(`kei-spec-v0.1.md` §5)/ SKILL / examples(`examples/effects/parallel.kei`)/ e2e(結果等価 + 並行性観測)/ MCP golden 再生成 まで完了。
 
 ## なぜ v0.10 を挿入するか
 
@@ -80,7 +81,7 @@ M 番号は v0.9(M40〜M43)からの連番。**🤝 5 点合意済み(2026-07-27
 | **M44** | String の code point 意味論(`codePointCount` + code point イテレーション + grapheme 境界明文化) | #159 | high | ✅ 合意済み・未着手 | kei_check / kei_emit / pbt / spec / skill / examples |
 | **M45** | String stdlib 段階2(substring / replace / 大小文字 / trim / 前後方一致 等)+ 正規表現の態度明示 | #160 | high | ✅ 合意済み・未着手 | kei_check / kei_emit / pbt / spec / skill |
 | **M46** | 純ロジック等価テスト実証(Markdown 除去 / slug / タグ正規化 / MIME・キーバリデーションの代表 4 関数)| #160 | high(テーマ合否ゲート) | ✅ 合意済み・未着手 | examples / tests(等価テスト)/ CI / kei_mcp(埋め込み) |
-| **M47** | 並行 async — 最小の並行結合子(独立 I/O の同時実行) | #161 | medium | ✅ 合意済み・未着手 | kei_syntax / kei_check / kei_emit / spec / skill / tests |
+| **M47** | 並行 async — 最小の並行結合子(独立 I/O の同時実行) | #161 | medium | ✅ 実装完了 | kei_syntax / kei_check / kei_emit / spec / skill / tests |
 
 順序の論拠:
 

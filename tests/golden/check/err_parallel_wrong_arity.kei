@@ -1,0 +1,15 @@
+module check.parallel_wrong_arity
+
+// `parallel` は 1 引数のみ受け付ける(list literal 1 個)。KEI-E2001(TYPE_MISMATCH)。
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greetAll(a: Int, b: Int) -> List<String>
+  uses Async
+{
+  return parallel([fetchName(a)], [fetchName(b)])
+}
