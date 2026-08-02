@@ -1,38 +1,21 @@
 // examples/strings/markdown.kei の等価テスト(M46 / #160)。
 // Kei が生成した stripMarkdown(装飾文字の除去 + リンク/画像 `(...)` の除去の状態機械)が、
-// 独立に書いた JS 参照実装と、固定代表ケース + 決定論的ランダム入力(絵文字・記号・空文字・長文を含む)で
-// 完全一致することを CI で常設検証する。参照側は code point を反復する素朴な命令型で、Kei の
-// record アキュムレータ fold が同じ意味論(サロゲートを割らない)を実現していることを確かめる。
+// 独立に書いた JS 参照実装(正規表現ベース)と、固定代表ケース + 決定論的ランダム入力
+// (絵文字・記号・空文字・長文を含む)で完全一致することを CI で常設検証する。参照側は
+// strings-tag.test.ts の refNormalizeTag と同様に正規表現ベースの別戦略で書き、Kei の
+// 状態機械(record アキュムレータ fold)の命令形写しにしない(#170: 独立オラクル化)。
 
 import { describe, expect, it } from "vitest";
 
 import { stripMarkdown } from "../generated/strings/markdown";
 
-// JS 参照実装。code point 単位(for-of は code point 反復)で状態機械を回す。
+// JS 参照実装。2段階の正規表現置換で状態機械と同じ意味論を実現する:
+//  1. `](...)` — リンク/画像の閉じ角括弧に続く丸括弧一式(URL部分)を除去。
+//     丸括弧が閉じないまま文字列が終わる場合も `[^)]*` が末尾まで貪欲マッチし、
+//     `\)?` で閉じ括弧を必須にしないことで状態機械の「閉じるまで消費し続ける」挙動と一致する。
+//  2. 単体の装飾文字(見出し・強調・インラインコード・残った角括弧)を除去。
 function refStripMarkdown(s: string): string {
-  const marks = new Set(["#", "*", "_", "`", "[", "]"]);
-  let out = "";
-  let afterClose = false;
-  let inUrl = false;
-  for (const c of s) {
-    if (inUrl) {
-      if (c === ")") inUrl = false;
-      afterClose = false;
-      continue;
-    }
-    if (afterClose && c === "(") {
-      afterClose = false;
-      inUrl = true;
-      continue;
-    }
-    if (marks.has(c)) {
-      afterClose = c === "]";
-      continue;
-    }
-    out += c;
-    afterClose = false;
-  }
-  return out;
+  return s.replace(/\]\([^)]*\)?/g, "").replace(/[#*_`[\]]/g, "");
 }
 
 function makeRng(seed: number): () => number {
