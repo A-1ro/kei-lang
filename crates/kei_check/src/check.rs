@@ -975,6 +975,7 @@ impl Env {
                 ast::Item::Record(r) if is_primary(&first, &r.name) => {
                     let mut fields = Vec::new();
                     for f in &r.fields {
+                        push_ts_reserved_word_diag(&env, diags, "record field", &f.name);
                         if fields.iter().any(|(n, _)| n == &f.name.name) {
                             env.push(
                                 diags,
@@ -1054,6 +1055,7 @@ impl Env {
             };
             let mut params: Vec<(String, Ty)> = Vec::new();
             for p in &f.params {
+                push_ts_reserved_word_diag(&env, diags, "function parameter", &p.name);
                 if params.iter().any(|(n, _)| n == &p.name.name) {
                     env.push(
                         diags,
@@ -1717,6 +1719,7 @@ impl FnChecker<'_> {
             // 注釈を信頼して伝播する(カスケードエラー防止)。
             bound = ann_ty;
         }
+        push_ts_reserved_word_diag(self.env, self.diags, "let binding", &l.name);
         let scope = self.scopes.last_mut().expect("at least one scope");
         if scope.contains_key(&l.name.name) {
             let name = l.name.name.clone();
@@ -3218,24 +3221,12 @@ impl FnChecker<'_> {
                 }
             }
         }
-        // [4] / M25: TS 予約語と衝突するラムダパラメータを弾く。Kei では予約語でない
+        // [4] / M25 / #100: TS 予約語と衝突するラムダパラメータを弾く。Kei では予約語でない
         // 名前(`class` / `var` / `null` / `this` ...)でも、emit 後の `(class) => ...`
         // は tsc が parse できない。check 段階で先に弾いて、ビルドが TS 側で死ぬ事故を
-        // 構造的に防ぐ。検出単位はラムダパラメータのみ(将来 let / 関数パラメータに拡張可)。
+        // 構造的に防ぐ。
         for lp in lparams {
-            if is_ts_reserved_word(&lp.name) {
-                let name = lp.name.clone();
-                self.push(
-                    codes::TYPE_MISMATCH,
-                    format!(
-                        "lambda parameter '{name}' collides with a TypeScript reserved word; the emitted TS would not parse"
-                    ),
-                    lp.span,
-                    vec![direction(format!(
-                        "Rename '{name}' to a non-reserved name (e.g. 'item', '{name}1')"
-                    ))],
-                );
-            }
+            push_ts_reserved_word_diag(self.env, self.diags, "lambda parameter", lp);
         }
         // N3 + [3] / M31: ensures 内 lambda body の `old(...)` は狭めた規則で検査する
         // (禁止集合に含まれる名前を参照する old・Call を含む old・変数参照ゼロの old だけ
@@ -4684,12 +4675,12 @@ fn is_map_empty_call_shape(expr: &ast::Expr) -> bool {
     root == "Map" && name.name == "empty"
 }
 
-/// [4] / M25: lambda パラメータ名が TS 予約語と衝突するかを判定する。Kei では予約語でない
+/// [4] / M25: 識別子束縛点の名前が TS 予約語と衝突するかを判定する。Kei では予約語でない
 /// 名前(`class` / `function` / `var` / `null` / `this` ...)でも、emit 後の TS では
 /// `tsc` が parse 不能になる(`(class) => class > 0` は SyntaxError)。check 段階で弾く。
 ///
-/// 対象は **lambda パラメータ限定**(段階的導入)。将来、let 束縛 / 関数パラメータ全般に
-/// 拡張する場合は同じヘルパを再利用する。リストは ES2022 + TS 固有の strict mode reserved。
+/// 対象は lambda パラメータ / let 束縛 / 関数パラメータ / record フィールド名(#100)。
+/// リストは ES2022 + TS 固有の strict mode reserved。
 fn is_ts_reserved_word(name: &str) -> bool {
     matches!(
         name,
@@ -4703,6 +4694,31 @@ fn is_ts_reserved_word(name: &str) -> bool {
         | "let" | "static" | "implements" | "interface" | "package" | "private"
         | "protected" | "public" | "await" | "async"
     )
+}
+
+/// #100: 識別子束縛点(lambda パラメータ / let / 関数パラメータ / record フィールド名)が
+/// TS 予約語と衝突していたら KEI-E2001(TYPE_MISMATCH に相乗り、既存の運用を継続)を積む。
+/// `kind` は診断メッセージ中のラベル(例: "lambda parameter" / "let binding")。
+fn push_ts_reserved_word_diag(
+    env: &Env,
+    diags: &mut Vec<Diagnostic>,
+    kind: &str,
+    ident: &ast::Ident,
+) {
+    if is_ts_reserved_word(&ident.name) {
+        let name = ident.name.clone();
+        env.push(
+            diags,
+            codes::TYPE_MISMATCH,
+            format!(
+                "{kind} '{name}' collides with a TypeScript reserved word; the emitted TS would not parse"
+            ),
+            ident.span,
+            vec![direction(format!(
+                "Rename '{name}' to a non-reserved name (e.g. 'item', '{name}1')"
+            ))],
+        );
+    }
 }
 
 /// N3 / M25、M31 で狭めた規則に変更: contract 文脈の lambda body 内の `old(...)` を

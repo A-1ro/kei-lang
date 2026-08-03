@@ -1,0 +1,5 @@
+module collections.fn_param_ts_reserved
+
+func bad(class: Int) -> Int {
+  return class
+}

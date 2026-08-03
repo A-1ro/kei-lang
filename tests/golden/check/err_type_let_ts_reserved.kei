@@ -1,0 +1,6 @@
+module collections.let_ts_reserved
+
+func bad() -> Int {
+  let class = 1
+  return class
+}
