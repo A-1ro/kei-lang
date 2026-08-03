@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E2001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Rename 'class' to a non-reserved name (e.g. 'item', 'class1')"
+      }
+    ],
+    "message": "let binding 'class' collides with a TypeScript reserved word; the emitted TS would not parse",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 12,
+        "line": 4
+      },
+      "file": "tests/golden/check/err_type_let_ts_reserved.kei",
+      "start": {
+        "col": 7,
+        "line": 4
+      }
+    }
+  }
+]

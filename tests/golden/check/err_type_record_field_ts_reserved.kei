@@ -1,0 +1,9 @@
+module collections.record_field_ts_reserved
+
+record Item {
+  class: Int
+}
+
+func bad(item: Item) -> Int {
+  return item.class
+}

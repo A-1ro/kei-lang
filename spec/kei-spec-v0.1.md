@@ -131,7 +131,7 @@ func totalStockValue(products: List<Product>) -> Int
   - `arg` がキャプチャ変数を 1 つも参照しない(例: `old(42)` — `old` を使う意味がない)
   - `arg` が `result` を参照する
   したがって `xs.all(p => p < old(maxLimit()))` や `xs.all(p => p < old(p.qty))` のような契約は依然として書けない。代替: lambda body をトップレベル関数に切り出して `old(...)` 値を引数で渡すか、契約から `old` を取り除いて別の不変条件で表現する。emit 側はキャプチャ変数のみを参照する `old` をラムダ body の中まで走査してキャプチャ・巻き上げする(`collect_old_exprs` はラムダ境界で停止しない。ラムダパラメータ依存の `old` は check が既にエラーとして拒否済みなので、emit に到達する module にはそもそも現れない)。
-- **TS 予約語**: lambda パラメータ名が TS 予約語(`class`, `var`, `null`, `this`, `function`, `delete`, `typeof`, `let`, `await`, `async` 等)と衝突したら `KEI-E2001`([4])。Kei 自体は予約していないが、emit 後の `(class) => ...` は `tsc` が parse 不能になるため check 段階で弾く。検出単位は v0.4 では lambda パラメータのみ(将来 let / 関数パラメータ全般に拡張可)。
+- **TS 予約語**: 識別子束縛点(lambda パラメータ / let 束縛 / 関数パラメータ / record フィールド名)の名前が TS 予約語(`class`, `var`, `null`, `this`, `function`, `delete`, `typeof`, `let`, `await`, `async` 等)と衝突したら `KEI-E2001`([4])。Kei 自体は予約していないが、emit 後の `(class) => ...` は `tsc` が parse 不能になるため check 段階で弾く(v0.5 / #100 で lambda パラメータ限定から拡張)。
 - **0 引数禁止**: `() => expr` は構文段階で `KEI-E0101` ([6])。parser が `Expr::Error` sentinel を返し、下流 walker は no-op で扱う。
 - **第一級関数値ではない**: ラムダは「コンビネータ引数位置の構文糖」であり、値として保存・再利用はできない(M9 / spec §10 「案 2: 第一級関数値を導入しない」を維持)。
 - **ネスト可能**: `xss.fold(0, (acc, xs) => acc + xs.fold(0, (a, x) => a + x))` のように内側のコンビネータ引数位置に再度 lambda を書ける。純粋限定は外側にも一段ずつ独立に効く。**v0.5 / M31 以降、内側 lambda から外側 lambda のパラメータも読み取り参照できる**(通常のレキシカルスコープに揃えるための意図的な挙動。読み取り専用キャプチャの一部)。
