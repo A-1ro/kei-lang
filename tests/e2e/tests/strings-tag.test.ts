@@ -29,6 +29,9 @@ function makeRng(seed: number): () => number {
 const pool = [
   "a", "B", "z", "0", "9", " ", "  ", "\t", "\n", "\r", "-", ".",
   "あ", "😀", "🎉", "🇯🇵", "é", "文", "!", "#",
+  // U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE: toLowerCase() で "i" + U+0307
+  // (combining dot above) の 2 code point に伸長する(#171 の ensures 契約修正の回帰確認)。
+  "İ",
 ];
 
 function randomStrings(seed: number, count: number, maxLen: number): string[] {
@@ -71,6 +74,13 @@ describe("strings/tag — タグ正規化の JS 参照等価(M46)", () => {
     expect(normalizeTag("emoji 😀 tag")).toBe("emoji 😀 tag");
     expect(normalizeTag("")).toBe("");
     expect(normalizeTag("   ")).toBe("");
+  });
+
+  it("code point 数が伸長するケース(#171)でも ensures 契約に違反せず JS 参照実装と一致する", () => {
+    // İ(1 code point) → toLowerCase() で "i" + combining dot above(2 code point)。
+    expect(() => normalizeTag("İstanbul")).not.toThrow();
+    expect(normalizeTag("İstanbul")).toBe(refNormalizeTag("İstanbul"));
+    expect(normalizeTag("İ İ İ")).toBe(refNormalizeTag("İ İ İ"));
   });
 
   it("固定 + ランダム入力すべてで JS 参照実装と一致する", () => {
