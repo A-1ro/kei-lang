@@ -290,3 +290,164 @@ fn imported_record_with_invalid_map_key_is_detected() {
         "expected KEI-E2011 for Map<Bool, Int> field on imported record; got {codes:?}"
     );
 }
+
+/// #99: namespace alias(`import a.b as N`)経由の record は `N.Member` として
+/// 通常の import 名と同じ深さの型検査を受ける(存在しないフィールドが検出される)。
+#[test]
+fn namespace_alias_resolves_member_record_unknown_field_is_detected() {
+    let src = "module t.consumer\n\
+               import t.database as Database\n\
+               func bad(p: Database.Account) -> Int {\n\
+                   return p.nonexistentField\n\
+               }\n";
+    let module = parse(src);
+
+    let resolver = FakeResolver::new().insert(
+        &["t", "database"],
+        vec![(
+            "Account",
+            ResolvedTypeDef::Record(vec![("balance".to_string(), Ty::Int)]),
+        )],
+    );
+    let diags =
+        check_module_with_resolver("consumer.kei", &module, CheckOptions::default(), &resolver);
+    let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
+    assert!(
+        codes.contains(&"KEI-E2002"),
+        "expected KEI-E2002 for unknown field on namespace-aliased record; got {codes:?}"
+    );
+}
+
+/// #99: namespace alias 経由の record フィールド型も伝播する。
+#[test]
+fn namespace_alias_resolves_member_record_field_type_propagates() {
+    let src = "module t.consumer\n\
+               import t.database as Database\n\
+               func bad(p: Database.Account) -> Bool {\n\
+                   return p.balance\n\
+               }\n";
+    let module = parse(src);
+
+    let resolver = FakeResolver::new().insert(
+        &["t", "database"],
+        vec![(
+            "Account",
+            ResolvedTypeDef::Record(vec![("balance".to_string(), Ty::Int)]),
+        )],
+    );
+    let diags =
+        check_module_with_resolver("consumer.kei", &module, CheckOptions::default(), &resolver);
+    let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
+    assert!(
+        codes.contains(&"KEI-E2001"),
+        "expected KEI-E2001 for Int returned where Bool expected via namespace alias; got {codes:?}"
+    );
+}
+
+/// #99: `Database.Account { ... }` の record リテラル構築が通常の record と
+/// 同じフィールド検査を受ける。
+#[test]
+fn namespace_alias_record_literal_construction_is_checked() {
+    let src = "module t.consumer\n\
+               import t.database as Database\n\
+               func make() -> Database.Account {\n\
+                   return Database.Account { balance: 1 }\n\
+               }\n\
+               func bad() -> Database.Account {\n\
+                   return Database.Account { balance: true }\n\
+               }\n";
+    let module = parse(src);
+
+    let resolver = FakeResolver::new().insert(
+        &["t", "database"],
+        vec![(
+            "Account",
+            ResolvedTypeDef::Record(vec![("balance".to_string(), Ty::Int)]),
+        )],
+    );
+    let diags =
+        check_module_with_resolver("consumer.kei", &module, CheckOptions::default(), &resolver);
+    let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
+    assert!(
+        codes.contains(&"KEI-E2001"),
+        "expected KEI-E2001 for wrong field type in namespace-aliased record literal; got {codes:?}"
+    );
+}
+
+/// #99: namespace alias 経由の enum variant(payload なし)の構築・参照が
+/// 通常の enum と同じ経路で検査される。
+#[test]
+fn namespace_alias_enum_variant_reference_is_checked() {
+    let src = "module t.consumer\n\
+               import t.status as Database\n\
+               func bad(s: Database.Status) -> Int {\n\
+                   return match s {\n\
+                       Database.Status.Active => 1\n\
+                   }\n\
+               }\n";
+    let module = parse(src);
+
+    let resolver = FakeResolver::new().insert(
+        &["t", "status"],
+        vec![(
+            "Status",
+            ResolvedTypeDef::Enum(vec![
+                ("Active".to_string(), ResolvedVariant::Unit),
+                ("Closed".to_string(), ResolvedVariant::Unit),
+            ]),
+        )],
+    );
+    let diags =
+        check_module_with_resolver("consumer.kei", &module, CheckOptions::default(), &resolver);
+    let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
+    assert!(
+        codes.contains(&"KEI-E2007"),
+        "expected KEI-E2007 for non-exhaustive match on namespace-aliased enum; got {codes:?}"
+    );
+}
+
+/// #99: `N.Member` を値として参照する(型そのものを使う)と TYPE_MISMATCH を報告する。
+#[test]
+fn namespace_alias_member_used_as_value_reports_type_mismatch() {
+    let src = "module t.consumer\n\
+               import t.database as Database\n\
+               func bad() -> Int {\n\
+                   return Database.Account\n\
+               }\n";
+    let module = parse(src);
+
+    let resolver = FakeResolver::new().insert(
+        &["t", "database"],
+        vec![(
+            "Account",
+            ResolvedTypeDef::Record(vec![("balance".to_string(), Ty::Int)]),
+        )],
+    );
+    let diags =
+        check_module_with_resolver("consumer.kei", &module, CheckOptions::default(), &resolver);
+    let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
+    assert!(
+        codes.contains(&"KEI-E2001"),
+        "expected TYPE_MISMATCH for namespace member used as a value; got {codes:?}"
+    );
+}
+
+/// #99: 対象モジュールが resolver で解決できない namespace alias は、従来通り
+/// opaque(段階移行の既定挙動)のまま診断を出さない。
+#[test]
+fn namespace_alias_unresolved_module_stays_opaque() {
+    let src = "module t.consumer\n\
+               import t.unknown as Unknown\n\
+               func bad(p: Unknown.Thing) -> Int {\n\
+                   return p.whatever\n\
+               }\n";
+    let module = parse(src);
+
+    let resolver = FakeResolver::new();
+    let diags =
+        check_module_with_resolver("consumer.kei", &module, CheckOptions::default(), &resolver);
+    assert!(
+        diags.is_empty(),
+        "unresolved namespace alias must stay opaque (no diagnostics emitted); got {diags:?}"
+    );
+}

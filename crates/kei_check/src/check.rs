@@ -691,6 +691,11 @@ enum NameKind {
     Func,
     Import,
     ExternPackage,
+    /// namespace alias import(`import a.b as N`, #99)。`N` 自体は単一の型では
+    /// なく、対象モジュールが解決できたときに `N.Member` 経由でメンバーを引ける
+    /// 名前空間。`N` 単独は値にも型にもならない(Import と同様に opaque)。
+    /// `N.Member` の解決結果は `Env::namespace_kinds`(`"N.Member"` キー)に積む。
+    Namespace,
 }
 
 #[derive(Debug, Clone)]
@@ -743,6 +748,12 @@ struct Env {
     funcs: HashMap<String, FuncSig>,
     /// 外部関数の署名。フルパス(`"Database.fetchBalance"`)で引く。
     externs: HashMap<String, ExternSig>,
+    /// namespace alias(`import a.b as N`, #99)経由で解決されたメンバーの種別。
+    /// キーは `"N.Member"`(alias 名 + `.` + モジュール内の型定義名)。値が
+    /// Record/Enum/Alias のときだけ意味を持ち、対応する実体は `records` /
+    /// `enums` / `aliases` に **同じ複合キー**(`"N.Member"`)で登録済み
+    /// (識別子はドットを含めないので実際の名前と衝突しない)。
+    namespace_kinds: HashMap<String, NameKind>,
 }
 
 impl Env {
@@ -760,6 +771,7 @@ impl Env {
             aliases: HashMap::new(),
             funcs: HashMap::new(),
             externs: HashMap::new(),
+            namespace_kinds: HashMap::new(),
         };
         // 名前 → 最初の定義位置(重複メッセージと「最初の定義のみ有効」の判定)。
         let mut first: HashMap<String, SynSpan> = HashMap::new();
@@ -799,55 +811,28 @@ impl Env {
                     );
                     continue;
                 }
-                // namespace alias(`import a.b as Database`)は単一型ではなく
-                // 名前空間。今回は従来通り opaque のまま据え置く(`Database.X` 経由の
-                // 型解決は将来拡張)。
+                // namespace alias(`import a.b as N`, #99): 対象モジュールが解決できれば
+                // `N` は名前空間になり、`N.Member` を通常の import 名と同じ経路(record /
+                // enum / alias)で検査に載せる。`N.Member` ごとの解決結果は複合キー
+                // (`"N.Member"`)で `env.records` / `env.enums` / `env.aliases` /
+                // `env.namespace_kinds` に積む。モジュール自体が解決できない場合は
+                // 従来通り `N` を opaque な Import として扱う(段階移行の既定挙動)。
                 let kind = if is_namespace_alias {
-                    NameKind::Import
+                    if let Some(rm) = resolved.as_ref() {
+                        for (member, def) in &rm.type_defs {
+                            let composite = format!("{}.{member}", ident.name);
+                            let member_kind =
+                                register_type_def(&mut env, &composite, def, ident.span, diags);
+                            env.namespace_kinds.insert(composite, member_kind);
+                        }
+                        NameKind::Namespace
+                    } else {
+                        NameKind::Import
+                    }
                 } else if let Some(rm) = resolved.as_ref() {
                     match rm.type_defs.get(&ident.name) {
-                        Some(ResolvedTypeDef::Record(fields)) => {
-                            for (_, fty) in fields {
-                                check_imported_map_keys(&env, fty, ident.span, diags);
-                            }
-                            env.records.insert(ident.name.clone(), fields.clone());
-                            NameKind::Record
-                        }
-                        Some(ResolvedTypeDef::Enum(variants)) => {
-                            for (_, v) in variants {
-                                match v {
-                                    ResolvedVariant::Unit => {}
-                                    ResolvedVariant::Tuple(ts) => {
-                                        for t in ts {
-                                            check_imported_map_keys(&env, t, ident.span, diags);
-                                        }
-                                    }
-                                    ResolvedVariant::Record(fs) => {
-                                        for (_, t) in fs {
-                                            check_imported_map_keys(&env, t, ident.span, diags);
-                                        }
-                                    }
-                                }
-                            }
-                            let internal: Vec<(String, VariantDef)> = variants
-                                .iter()
-                                .map(|(n, v)| {
-                                    let def = match v {
-                                        ResolvedVariant::Unit => VariantDef::Unit,
-                                        ResolvedVariant::Tuple(ts) => VariantDef::Tuple(ts.clone()),
-                                        ResolvedVariant::Record(fs) => {
-                                            VariantDef::Record(fs.clone())
-                                        }
-                                    };
-                                    (n.clone(), def)
-                                })
-                                .collect();
-                            env.enums.insert(ident.name.clone(), internal);
-                            NameKind::Enum
-                        }
-                        Some(ResolvedTypeDef::Alias(ty)) => {
-                            env.aliases.insert(ident.name.clone(), ty.clone());
-                            NameKind::Alias
+                        Some(def) => {
+                            register_type_def(&mut env, &ident.name, def, ident.span, diags)
                         }
                         None => NameKind::Import,
                     }
@@ -1248,6 +1233,34 @@ impl Env {
                 }
                 return Ty::Unknown;
             }
+            // namespace alias(`import a.b as N`, #99): `N.Member` を 2 段の型として
+            // 解決する。`N` 自体が opaque(モジュール未解決)なら 1 段上の Import 分岐で
+            // 既に処理済みなのでここには来ない。`N.Member` の 3 段以上、または
+            // `Member` が解決できなかった場合は従来の import と同じく opaque(Unknown)。
+            if self.kinds.get(root) == Some(&NameKind::Namespace) {
+                for a in &t.args {
+                    self.resolve_ty(a, diags);
+                }
+                if t.path.len() == 2 {
+                    let composite = format!("{root}.{}", t.path[1].name);
+                    match self.namespace_kinds.get(&composite) {
+                        Some(NameKind::Record) => {
+                            self.check_type_args(t, 0, diags);
+                            return Ty::Record(composite);
+                        }
+                        Some(NameKind::Enum) => {
+                            self.check_type_args(t, 0, diags);
+                            return Ty::Enum(composite);
+                        }
+                        Some(NameKind::Alias) => {
+                            self.check_type_args(t, 0, diags);
+                            return self.aliases.get(&composite).cloned().unwrap_or(Ty::Unknown);
+                        }
+                        _ => return Ty::Unknown,
+                    }
+                }
+                return Ty::Unknown;
+            }
             if self.kinds.get(root) == Some(&NameKind::ExternPackage) {
                 for a in &t.args {
                     self.resolve_ty(a, diags);
@@ -1332,7 +1345,7 @@ impl Env {
                     self.check_type_args(t, 0, diags);
                     self.aliases.get(root).cloned().unwrap_or(Ty::Unknown)
                 }
-                Some(NameKind::Import) => {
+                Some(NameKind::Import) | Some(NameKind::Namespace) => {
                     for a in &t.args {
                         self.resolve_ty(a, diags);
                     }
@@ -1444,6 +1457,62 @@ fn check_imported_map_keys(env: &Env, ty: &Ty, span: SynSpan, diags: &mut Vec<Di
             check_imported_map_keys(env, b, span, diags);
         }
         _ => {}
+    }
+}
+
+/// 解決済み `ResolvedTypeDef` を `env.records` / `env.enums` / `env.aliases` に
+/// `name` キーで登録し、対応する `NameKind` を返す(#55 M20 の直接 import 名と
+/// #99 namespace alias のメンバーの両方で共有する)。`name` は直接 import なら
+/// 素の識別子(`"Product"`)、namespace alias なら複合キー(`"Database.Account"`)。
+fn register_type_def(
+    env: &mut Env,
+    name: &str,
+    def: &ResolvedTypeDef,
+    span: SynSpan,
+    diags: &mut Vec<Diagnostic>,
+) -> NameKind {
+    match def {
+        ResolvedTypeDef::Record(fields) => {
+            for (_, fty) in fields {
+                check_imported_map_keys(env, fty, span, diags);
+            }
+            env.records.insert(name.to_string(), fields.clone());
+            NameKind::Record
+        }
+        ResolvedTypeDef::Enum(variants) => {
+            for (_, v) in variants {
+                match v {
+                    ResolvedVariant::Unit => {}
+                    ResolvedVariant::Tuple(ts) => {
+                        for t in ts {
+                            check_imported_map_keys(env, t, span, diags);
+                        }
+                    }
+                    ResolvedVariant::Record(fs) => {
+                        for (_, t) in fs {
+                            check_imported_map_keys(env, t, span, diags);
+                        }
+                    }
+                }
+            }
+            let internal: Vec<(String, VariantDef)> = variants
+                .iter()
+                .map(|(n, v)| {
+                    let def = match v {
+                        ResolvedVariant::Unit => VariantDef::Unit,
+                        ResolvedVariant::Tuple(ts) => VariantDef::Tuple(ts.clone()),
+                        ResolvedVariant::Record(fs) => VariantDef::Record(fs.clone()),
+                    };
+                    (n.clone(), def)
+                })
+                .collect();
+            env.enums.insert(name.to_string(), internal);
+            NameKind::Enum
+        }
+        ResolvedTypeDef::Alias(ty) => {
+            env.aliases.insert(name.to_string(), ty.clone());
+            NameKind::Alias
+        }
     }
 }
 
@@ -2041,7 +2110,7 @@ impl FnChecker<'_> {
                 );
                 Ty::Unknown
             }
-            Some(NameKind::Import) => Ty::Unknown,
+            Some(NameKind::Import) | Some(NameKind::Namespace) => Ty::Unknown,
             Some(NameKind::ExternPackage) => {
                 let (msg, fixes) = extern_package_scope_diag(name);
                 self.push(codes::EXTERN_PACKAGE_SCOPE, msg, span, fixes);
@@ -2071,12 +2140,39 @@ impl FnChecker<'_> {
         }
     }
 
+    /// namespace alias(`import a.b as N`, #99)経由でメンバーを 2 段で参照した
+    /// (`N.Member`)ときの、値位置での評価。`Member` が record/enum/alias として
+    /// 解決できていれば型そのもの(値ではない)を参照しているので
+    /// `TYPE_MISMATCH`(`type '...' cannot be used as a value`)。解決できなければ
+    /// 従来の opaque import と同じく黙って `Ty::Unknown`。
+    fn namespace_field(&mut self, alias: &str, member: &ast::Ident) -> Ty {
+        let composite = format!("{alias}.{}", member.name);
+        match self.env.namespace_kinds.get(&composite) {
+            Some(NameKind::Record) | Some(NameKind::Enum) | Some(NameKind::Alias) => {
+                self.push(
+                    codes::TYPE_MISMATCH,
+                    format!("type '{composite}' cannot be used as a value"),
+                    member.span,
+                    vec![direction(format!(
+                        "Construct a value of type '{composite}'"
+                    ))],
+                );
+                Ty::Unknown
+            }
+            _ => Ty::Unknown,
+        }
+    }
+
     fn infer_field(&mut self, base: &ast::Expr, name: &ast::Ident, _span: SynSpan) -> Ty {
         if let ast::Expr::Name { name: root, .. } = base {
             if self.lookup_scope(root).into_option().is_none() {
                 match self.env.kinds.get(root.as_str()) {
                     Some(NameKind::Enum) => return self.variant_ref(root.clone(), name),
                     Some(NameKind::Import) => return Ty::Unknown,
+                    Some(NameKind::Namespace) => {
+                        let root = root.clone();
+                        return self.namespace_field(&root, name);
+                    }
                     Some(NameKind::ExternPackage) => {
                         let root = root.clone();
                         let (msg, fixes) = extern_package_scope_diag(&root);
@@ -2119,6 +2215,29 @@ impl FnChecker<'_> {
                         return Ty::Unknown;
                     }
                     None => {} // 未定義は一般経路(infer_name)で E1001 を報告する
+                }
+            }
+        } else if let ast::Expr::Field {
+            base: inner_base,
+            name: mid,
+            ..
+        } = base
+        {
+            // namespace alias 越しの enum variant 参照(#99): `N.Status.Active`
+            // (payload なし)。`N.Status` の時点で `field_on` に落とすと
+            // `Ty::Enum` は field を持たないため誤って UNKNOWN_FIELD になってしまう
+            // (かつ enum の**値**への `.field` アクセスと区別できなくなる)。
+            // AST 構造(base が `Field { base: Name(alias), name: member }`)を直接
+            // 見ることで、値の field アクセスの意味論には触れずに variant 参照だけを
+            // 横取りする。
+            if let ast::Expr::Name { name: alias, .. } = inner_base.as_ref() {
+                if self.lookup_scope(alias).into_option().is_none()
+                    && self.env.kinds.get(alias.as_str()) == Some(&NameKind::Namespace)
+                {
+                    let composite = format!("{alias}.{}", mid.name);
+                    if self.env.namespace_kinds.get(&composite) == Some(&NameKind::Enum) {
+                        return self.variant_ref(composite, name);
+                    }
                 }
             }
         }
@@ -2357,6 +2476,86 @@ impl FnChecker<'_> {
         }
     }
 
+    /// enum variant のリテラル構築(`Enum.Variant { ... }`)を検査する。ローカル enum
+    /// (`enum_name` は素の識別子)と namespace alias 越しの enum(`enum_name` は
+    /// `"N.Status"` の複合キー、#99)の両方から共有する。
+    fn infer_enum_variant_lit(
+        &mut self,
+        enum_name: String,
+        vname: &ast::Ident,
+        fields: &[ast::RecordLitField],
+        spread: Option<&ast::Expr>,
+        span: SynSpan,
+    ) -> Ty {
+        match self.find_variant(&enum_name, &vname.name) {
+            Some(VariantDef::Record(def)) => {
+                let owner = format!("{enum_name}.{}", vname.name);
+                // M32 / #97: spread は plain record リテラル限定。enum variant の値は
+                // TS 側で `{ kind, fields }` の 2 層構造に写るため object spread が
+                // フィールド位置に wrapper キーを注入して壊れる上、型システムが
+                // variant を保持しないため variant 一致も静的検証できない。
+                if let Some(s) = spread {
+                    // spread 式自体の infer は後続の check_record_fields が行うが、
+                    // 型照合(check_assign)は行わない: KEI-E2004 を既に報告済みのため、
+                    // owner_ty=Ty::Enum との不一致で誤誘導的な KEI-E2001 を重ねて出さない
+                    // (spread_already_diagnosed=true で抑止)。
+                    self.push(
+                        codes::RECORD_LITERAL,
+                        format!(
+                            "spread '...' is not supported in enum variant literals; list all fields of '{owner}' explicitly"
+                        ),
+                        s.span(),
+                        vec![direction(
+                            "Replace the spread with explicit 'field: value' entries (spread is only available for plain record literals)",
+                        )],
+                    );
+                }
+                let owner_ty = Ty::Enum(enum_name.clone());
+                self.check_record_fields(
+                    &def,
+                    fields,
+                    spread,
+                    &owner,
+                    &owner_ty,
+                    span,
+                    spread.is_some(),
+                );
+                Ty::Enum(enum_name)
+            }
+            Some(VariantDef::Tuple(_)) => {
+                let v = &vname.name;
+                self.infer_lit_fields(spread, fields);
+                self.push(
+                    codes::UNKNOWN_VARIANT,
+                    format!(
+                        "variant '{v}' of '{enum_name}' carries a positional payload; construct it with '{enum_name}.{v}(...)'"
+                    ),
+                    span,
+                    vec![direction("Use positional arguments")],
+                );
+                Ty::Enum(enum_name)
+            }
+            Some(VariantDef::Unit) => {
+                let v = &vname.name;
+                self.infer_lit_fields(spread, fields);
+                self.push(
+                    codes::UNKNOWN_VARIANT,
+                    format!(
+                        "variant '{v}' of '{enum_name}' takes no payload; write '{enum_name}.{v}'"
+                    ),
+                    span,
+                    vec![direction(format!("Remove the braces: '{enum_name}.{v}'"))],
+                );
+                Ty::Enum(enum_name)
+            }
+            None => {
+                self.infer_lit_fields(spread, fields);
+                self.unknown_variant(&enum_name, vname);
+                Ty::Unknown
+            }
+        }
+    }
+
     fn find_variant(&self, enum_name: &str, vname: &str) -> Option<VariantDef> {
         self.env
             .enums
@@ -2413,14 +2612,40 @@ impl FnChecker<'_> {
                         return self.call_map_static(vname, args, span);
                     }
                 }
+                // namespace alias 越しの enum variant 構築(#99): `N.Status.Active(...)`
+                // (位置ペイロード)。`Database.fetchAccount(...)` のような extern 呼び出しと
+                // 区別するため、`N.Member` が namespace_kinds 上で Enum に解決できたときだけ
+                // 横取りする(extern はこの下の field_path 分岐に自然に流れる)。
+                if let ast::Expr::Field {
+                    base: inner_base,
+                    name: mid,
+                    ..
+                } = base.as_ref()
+                {
+                    if let ast::Expr::Name { name: alias, .. } = inner_base.as_ref() {
+                        if self.lookup_scope(alias).into_option().is_none()
+                            && self.env.kinds.get(alias.as_str()) == Some(&NameKind::Namespace)
+                        {
+                            let composite = format!("{alias}.{}", mid.name);
+                            if self.env.namespace_kinds.get(&composite) == Some(&NameKind::Enum) {
+                                return self.call_variant(&composite, vname, args, span);
+                            }
+                        }
+                    }
+                }
                 // 外部境界(import した名前空間配下)の呼び出しで extern 署名が
                 // あれば照合する。無ければ従来どおり opaque(M11 段階移行)。strict-extern
-                // 時のみ、未宣言の外部呼び出しを警告する(M16 / #44)。
+                // 時のみ、未宣言の外部呼び出しを警告する(M16 / #44)。namespace alias が
+                // 解決済み(NameKind::Namespace)でも extern 呼び出しは変わらず opaque 経路
+                // (#99: namespace alias 越しの extern は元々 field_path のフルパス一致で
+                // 解決していたため、`N` が Import から Namespace に変わっても壊さない)。
                 if let Some(path) = field_path(callee) {
                     if self.lookup_scope(&path[0]).into_option().is_none()
                         && matches!(
                             self.env.kinds.get(&path[0]),
-                            Some(&NameKind::Import) | Some(&NameKind::ExternPackage)
+                            Some(&NameKind::Import)
+                                | Some(&NameKind::ExternPackage)
+                                | Some(&NameKind::Namespace)
                         )
                     {
                         let key = path.join(".");
@@ -3325,7 +3550,7 @@ impl FnChecker<'_> {
         }
         match self.env.kinds.get(name) {
             Some(NameKind::Func) => self.call_local(name, args, span),
-            Some(NameKind::Import) => {
+            Some(NameKind::Import) | Some(NameKind::Namespace) => {
                 for a in args {
                     self.infer(a);
                 }
@@ -3785,7 +4010,7 @@ impl FnChecker<'_> {
                     );
                     Ty::Enum(root)
                 }
-                Some(NameKind::Import) => {
+                Some(NameKind::Import) | Some(NameKind::Namespace) => {
                     self.infer_lit_fields(spread, fields);
                     Ty::Unknown
                 }
@@ -3834,76 +4059,90 @@ impl FnChecker<'_> {
                 }
             }
         } else if path.len() == 2 && self.env.kinds.get(root.as_str()) == Some(&NameKind::Enum) {
-            let enum_name = root.clone();
-            let vname = &path[1];
-            match self.find_variant(&enum_name, &vname.name) {
-                Some(VariantDef::Record(def)) => {
-                    let owner = format!("{enum_name}.{}", vname.name);
-                    // M32 / #97: spread は plain record リテラル限定。enum variant の値は
-                    // TS 側で `{ kind, fields }` の 2 層構造に写るため object spread が
-                    // フィールド位置に wrapper キーを注入して壊れる上、型システムが
-                    // variant を保持しないため variant 一致も静的検証できない。
-                    if let Some(s) = spread {
-                        // spread 式自体の infer は後続の check_record_fields が行うが、
-                        // 型照合(check_assign)は行わない: KEI-E2004 を既に報告済みのため、
-                        // owner_ty=Ty::Enum との不一致で誤誘導的な KEI-E2001 を重ねて出さない
-                        // (spread_already_diagnosed=true で抑止)。
-                        self.push(
-                            codes::RECORD_LITERAL,
-                            format!(
-                                "spread '...' is not supported in enum variant literals; list all fields of '{owner}' explicitly"
-                            ),
-                            s.span(),
-                            vec![direction(
-                                "Replace the spread with explicit 'field: value' entries (spread is only available for plain record literals)",
-                            )],
-                        );
+            self.infer_enum_variant_lit(root.clone(), &path[1], fields, spread, span)
+        } else if path.len() == 2 && self.env.kinds.get(root.as_str()) == Some(&NameKind::Namespace)
+        {
+            // namespace alias 越しの record/alias/enum リテラル(#99): `N.Account { ... }`。
+            let composite = format!("{root}.{}", path[1].name);
+            match self.env.namespace_kinds.get(&composite).cloned() {
+                Some(NameKind::Record) => {
+                    let def = self
+                        .env
+                        .records
+                        .get(&composite)
+                        .cloned()
+                        .unwrap_or_default();
+                    let owner = composite.clone();
+                    let owner_ty = Ty::Record(owner.clone());
+                    self.check_record_fields(&def, fields, spread, &owner, &owner_ty, span, false);
+                    Ty::Record(owner)
+                }
+                Some(NameKind::Alias) => {
+                    let resolved = self
+                        .env
+                        .aliases
+                        .get(&composite)
+                        .cloned()
+                        .unwrap_or(Ty::Unknown);
+                    match &resolved {
+                        Ty::Record(r) => {
+                            let def = self.env.records.get(r).cloned().unwrap_or_default();
+                            let owner = r.clone();
+                            let owner_ty = resolved.clone();
+                            self.check_record_fields(
+                                &def, fields, spread, &owner, &owner_ty, span, false,
+                            );
+                            resolved
+                        }
+                        Ty::Unknown => {
+                            self.infer_lit_fields(spread, fields);
+                            Ty::Unknown
+                        }
+                        _ => {
+                            self.infer_lit_fields(spread, fields);
+                            self.push(
+                                codes::RECORD_LITERAL,
+                                format!("'{composite}' is not a record type"),
+                                span,
+                                vec![direction("Construct a record type here")],
+                            );
+                            Ty::Unknown
+                        }
                     }
-                    let owner_ty = Ty::Enum(enum_name.clone());
-                    self.check_record_fields(
-                        &def,
-                        fields,
-                        spread,
-                        &owner,
-                        &owner_ty,
-                        span,
-                        spread.is_some(),
-                    );
-                    Ty::Enum(enum_name)
                 }
-                Some(VariantDef::Tuple(_)) => {
-                    let v = &vname.name;
+                Some(NameKind::Enum) => {
                     self.infer_lit_fields(spread, fields);
                     self.push(
                         codes::UNKNOWN_VARIANT,
                         format!(
-                            "variant '{v}' of '{enum_name}' carries a positional payload; construct it with '{enum_name}.{v}(...)'"
+                            "enum '{composite}' needs a variant: '{composite}.Variant {{ ... }}'"
                         ),
                         span,
-                        vec![direction("Use positional arguments")],
+                        vec![direction("Name the variant to construct")],
                     );
-                    Ty::Enum(enum_name)
+                    Ty::Enum(composite)
                 }
-                Some(VariantDef::Unit) => {
-                    let v = &vname.name;
+                // 未解決メンバー: 従来の import 未解決と同じく opaque(段階移行の既定挙動)。
+                _ => {
                     self.infer_lit_fields(spread, fields);
-                    self.push(
-                        codes::UNKNOWN_VARIANT,
-                        format!(
-                            "variant '{v}' of '{enum_name}' takes no payload; write '{enum_name}.{v}'"
-                        ),
-                        span,
-                        vec![direction(format!("Remove the braces: '{enum_name}.{v}'"))],
-                    );
-                    Ty::Enum(enum_name)
-                }
-                None => {
-                    self.infer_lit_fields(spread, fields);
-                    self.unknown_variant(&enum_name, vname);
                     Ty::Unknown
                 }
             }
-        } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::Import) {
+        } else if path.len() == 3 && self.env.kinds.get(root.as_str()) == Some(&NameKind::Namespace)
+        {
+            // namespace alias 越しの enum variant リテラル(#99): `N.Status.Active { ... }`。
+            let composite = format!("{root}.{}", path[1].name);
+            if self.env.namespace_kinds.get(&composite) == Some(&NameKind::Enum) {
+                self.infer_enum_variant_lit(composite, &path[2], fields, spread, span)
+            } else {
+                // メンバー未解決 / Enum 以外: opaque。
+                self.infer_lit_fields(spread, fields);
+                Ty::Unknown
+            }
+        } else if matches!(
+            self.env.kinds.get(root.as_str()),
+            Some(&NameKind::Import) | Some(&NameKind::Namespace)
+        ) {
             self.infer_lit_fields(spread, fields);
             Ty::Unknown
         } else if self.env.kinds.get(root.as_str()) == Some(&NameKind::ExternPackage) {
