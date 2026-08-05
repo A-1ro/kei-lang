@@ -4925,19 +4925,14 @@ fn bin_op_text(op: ast::BinOp) -> &'static str {
 pub fn contract_expr_text(e: &ast::Expr) -> String {
     // Kei パーサと同じ優先順位(比較は単一階層。kei_emit の TS 用 Prec とは意図的に
     // 異なる — JS は relational > equality だが Kei テキストはパーサの読みと一致させる)。
-    // パーサ(parse_cmp)は `==` と `<` 等を同一ループ・単一左結合階層で読むため、ここで
-    // 別階層に分けると `result == b < c` を再パースしたときに `(result == b) < c` へ
+    // パーサ(parse_cmp相当の段)は `==` と `<` 等を同一ループ・単一左結合階層で読むため、
+    // ここで別階層に分けると `result == b < c` を再パースしたときに `(result == b) < c` へ
     // ズレて suggested_contract が適用不能になる(KEI-E2001)。括弧を最小化する。
+    //
+    // #104: 優先順位テーブルは kei_syntax::precedence が単一情報源。ここでは
+    // 参照するだけで、独自の優先順位を再定義しない。
     fn bin_prec(op: ast::BinOp) -> u8 {
-        use ast::BinOp::*;
-        match op {
-            Implies => 0,
-            Or => 1,
-            And => 2,
-            Eq | Ne | Lt | Gt | Le | Ge => 3,
-            Add | Sub => 4,
-            Mul | Div | Rem => 5,
-        }
+        kei_syntax::bin_prec_level(op)
     }
     // 子が二項式で親より弱く結合するときだけ括弧で包む。Postfix は最大 bin_prec(Mul=5)+1 の 6 相当。
     fn child(e: &ast::Expr, parent: u8) -> String {
