@@ -8,11 +8,13 @@ pub mod ast;
 pub mod error;
 pub mod lexer;
 pub mod parser;
+pub mod precedence;
 pub mod span;
 pub mod token;
 
 pub use ast::{Comment, Module};
 pub use error::{FixHint, SyntaxError};
+pub use precedence::{bin_prec, bin_prec_level, PrecTier};
 pub use span::{Position, Span};
 
 /// パース結果。エラーがあっても `module` は回復済みの部分 AST を保持する。

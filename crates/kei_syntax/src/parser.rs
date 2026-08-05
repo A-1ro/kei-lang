@@ -1212,72 +1212,47 @@ impl Parser {
     // ---- 式 ----
 
     fn parse_expr(&mut self, no_struct: bool) -> Option<Expr> {
-        self.parse_implies(no_struct)
+        self.parse_level(0, no_struct)
     }
 
-    fn parse_implies(&mut self, no_struct: bool) -> Option<Expr> {
-        let lhs = self.parse_or(no_struct)?;
-        if self.at(T::Implies) {
-            self.bump();
-            // 右結合
-            let rhs = self.parse_implies(no_struct)?;
-            let span = lhs.span().to(rhs.span());
-            return Some(Expr::Binary {
-                op: BinOp::Implies,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                span,
-            });
+    /// 二項演算子のテーブル駆動パース(#104: 優先順位の単一情報源化)。
+    ///
+    /// `level` は [`PrecTier::ORDER`] のインデックス(0 = 最弱の `implies`、
+    /// `PrecTier::ORDER.len()` に達したら二項演算子の段を抜けて単項式に落ちる)。
+    /// この関数 1 つが、かつての `parse_implies → parse_or → parse_and →
+    /// parse_cmp → parse_add → parse_mul` という再帰下降連鎖の全段を肩代わりする。
+    /// 段ごとの結合方向(`implies` のみ右結合、他は左結合)と、どのトークンが
+    /// どの段に属するかは [`crate::precedence`] の単一テーブルを参照するため、
+    /// 演算子を追加してもここを個別に触らずに済む。
+    fn parse_level(&mut self, level: usize, no_struct: bool) -> Option<Expr> {
+        use crate::precedence::PrecTier;
+
+        let Some(&tier) = PrecTier::ORDER.get(level) else {
+            return self.parse_unary(no_struct);
+        };
+
+        if tier == PrecTier::Implies {
+            let lhs = self.parse_level(level + 1, no_struct)?;
+            if let Some(op) = self.match_tier_op(tier) {
+                self.bump();
+                // 右結合: 同じ段をもう一度呼ぶ。
+                let rhs = self.parse_level(level, no_struct)?;
+                let span = lhs.span().to(rhs.span());
+                return Some(Expr::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                    span,
+                });
+            }
+            return Some(lhs);
         }
-        Some(lhs)
-    }
 
-    fn parse_or(&mut self, no_struct: bool) -> Option<Expr> {
-        let mut lhs = self.parse_and(no_struct)?;
-        while self.at(T::OrOr) {
+        // 左結合: `while` で同段を吸い続ける。
+        let mut lhs = self.parse_level(level + 1, no_struct)?;
+        while let Some(op) = self.match_tier_op(tier) {
             self.bump();
-            let rhs = self.parse_and(no_struct)?;
-            let span = lhs.span().to(rhs.span());
-            lhs = Expr::Binary {
-                op: BinOp::Or,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                span,
-            };
-        }
-        Some(lhs)
-    }
-
-    fn parse_and(&mut self, no_struct: bool) -> Option<Expr> {
-        let mut lhs = self.parse_cmp(no_struct)?;
-        while self.at(T::AndAnd) {
-            self.bump();
-            let rhs = self.parse_cmp(no_struct)?;
-            let span = lhs.span().to(rhs.span());
-            lhs = Expr::Binary {
-                op: BinOp::And,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                span,
-            };
-        }
-        Some(lhs)
-    }
-
-    fn parse_cmp(&mut self, no_struct: bool) -> Option<Expr> {
-        let mut lhs = self.parse_add(no_struct)?;
-        loop {
-            let op = match self.cur().kind {
-                T::EqEq => BinOp::Eq,
-                T::NotEq => BinOp::Ne,
-                T::Lt => BinOp::Lt,
-                T::Gt => BinOp::Gt,
-                T::Le => BinOp::Le,
-                T::Ge => BinOp::Ge,
-                _ => return Some(lhs),
-            };
-            self.bump();
-            let rhs = self.parse_add(no_struct)?;
+            let rhs = self.parse_level(level + 1, no_struct)?;
             let span = lhs.span().to(rhs.span());
             lhs = Expr::Binary {
                 op,
@@ -1286,46 +1261,35 @@ impl Parser {
                 span,
             };
         }
+        Some(lhs)
     }
 
-    fn parse_add(&mut self, no_struct: bool) -> Option<Expr> {
-        let mut lhs = self.parse_mul(no_struct)?;
-        loop {
-            let op = match self.cur().kind {
-                T::Plus => BinOp::Add,
-                T::Minus => BinOp::Sub,
-                _ => return Some(lhs),
-            };
-            self.bump();
-            let rhs = self.parse_mul(no_struct)?;
-            let span = lhs.span().to(rhs.span());
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                span,
-            };
-        }
-    }
-
-    fn parse_mul(&mut self, no_struct: bool) -> Option<Expr> {
-        let mut lhs = self.parse_unary(no_struct)?;
-        loop {
-            let op = match self.cur().kind {
-                T::Star => BinOp::Mul,
-                T::Slash => BinOp::Div,
-                T::Percent => BinOp::Rem,
-                _ => return Some(lhs),
-            };
-            self.bump();
-            let rhs = self.parse_unary(no_struct)?;
-            let span = lhs.span().to(rhs.span());
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                span,
-            };
+    /// 現在のトークンが二項演算子で、かつ `tier` の段に属するならその `BinOp` を返す
+    /// (消費はしない)。トークン→BinOp の対応はここに一本化しつつ、段の判定自体は
+    /// [`crate::precedence::bin_prec`] に委譲することで「どのトークンがどの段か」の
+    /// 判断がテーブルと食い違わないようにしている。
+    fn match_tier_op(&self, tier: crate::precedence::PrecTier) -> Option<BinOp> {
+        let op = match self.cur().kind {
+            T::Implies => BinOp::Implies,
+            T::OrOr => BinOp::Or,
+            T::AndAnd => BinOp::And,
+            T::EqEq => BinOp::Eq,
+            T::NotEq => BinOp::Ne,
+            T::Lt => BinOp::Lt,
+            T::Gt => BinOp::Gt,
+            T::Le => BinOp::Le,
+            T::Ge => BinOp::Ge,
+            T::Plus => BinOp::Add,
+            T::Minus => BinOp::Sub,
+            T::Star => BinOp::Mul,
+            T::Slash => BinOp::Div,
+            T::Percent => BinOp::Rem,
+            _ => return None,
+        };
+        if crate::precedence::bin_prec(op) == tier {
+            Some(op)
+        } else {
+            None
         }
     }
 

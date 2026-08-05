@@ -368,6 +368,34 @@ enum Prec {
     Postfix,
 }
 
+impl Prec {
+    /// 弱い順に並んだ全段。`Ord` 導出済みの列挙から「次に強い段」を機械的に
+    /// 求めるための並び順の単一情報源(#104: kei_emit の TS 用 `Prec` は JS の
+    /// relational > equality という別体系が必要なため kei_syntax::PrecTier とは
+    /// 統合しないが、「次に強い段」を手で書き下したラダーにはしない)。
+    const ORDER: [Prec; 9] = [
+        Prec::Implication,
+        Prec::Or,
+        Prec::And,
+        Prec::Equality,
+        Prec::Relational,
+        Prec::Additive,
+        Prec::Multiplicative,
+        Prec::Unary,
+        Prec::Postfix,
+    ];
+
+    /// 1 段強く結合する隣接段。最強段(`Postfix`)なら自分自身を返す
+    /// (呼び出し側は「同段のまま」を期待するフォールバックとして扱う)。
+    fn next_stronger(self) -> Prec {
+        let idx = Self::ORDER
+            .iter()
+            .position(|&p| p == self)
+            .expect("Prec::ORDER covers all variants");
+        Self::ORDER[(idx + 1).min(Self::ORDER.len() - 1)]
+    }
+}
+
 fn bin_prec(op: BinOp) -> Prec {
     match op {
         BinOp::Implies => Prec::Implication,
@@ -1433,15 +1461,9 @@ impl Emitter<'_> {
             // 左結合演算子の右辺は 1 段高い優先度で出す。同優先度が右にネストしたとき
             // (`a == (b == c)`)に括弧を保つため(括弧を落とすと JS の左結合で
             // `(a == b) == c` に化けて結果が変わる)。Equality / Relational も対象。
-            let rhs_min = match prec {
-                Prec::Equality => Prec::Relational,
-                Prec::Relational => Prec::Additive,
-                Prec::Additive => Prec::Multiplicative,
-                Prec::Multiplicative => Prec::Unary,
-                Prec::Or => Prec::And,
-                Prec::And => Prec::Equality,
-                p => p,
-            };
+            // #104: 手書きのラダーではなく `Ord` 導出済み `Prec` から「次に強い段」を
+            // 機械的に計算する(`Prec::next_stronger`)。
+            let rhs_min = prec.next_stronger();
             self.emit_expr(rhs, rhs_min);
         }
         if needs_paren {

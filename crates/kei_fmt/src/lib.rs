@@ -608,15 +608,13 @@ fn let_text(stmt: &LetStmt, level: usize) -> String {
 // ---- 式 ----
 
 /// 二項演算子の優先順位(数値が大きいほど強く結合)。
+///
+/// #104: 優先順位テーブルは kei_syntax::precedence が単一情報源。ここでの
+/// `+ 1` は本関数のローカルスケール(`prec(expr)` が Postfix=7/Unary=6 相当を
+/// 使うため 1 始まりにしている)を保つための下駄で、優先順位の並び自体は
+/// `kei_syntax::bin_prec_level` に委譲する。
 fn bin_prec(op: BinOp) -> u8 {
-    match op {
-        BinOp::Implies => 1,
-        BinOp::Or => 2,
-        BinOp::And => 3,
-        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => 4,
-        BinOp::Add | BinOp::Sub => 5,
-        BinOp::Mul | BinOp::Div | BinOp::Rem => 6,
-    }
+    kei_syntax::bin_prec_level(op) + 1
 }
 
 fn bin_op_text(op: BinOp) -> &'static str {
