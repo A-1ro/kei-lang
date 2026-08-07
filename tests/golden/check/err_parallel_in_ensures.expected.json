@@ -1,0 +1,46 @@
+[
+  {
+    "code": "KEI-E4001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Move the effectful call into the function body"
+      }
+    ],
+    "message": "call to 'fetchName' (uses Async) is not allowed in a contract; contract expressions must be pure",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 33,
+        "line": 15
+      },
+      "file": "tests/golden/check/err_parallel_in_ensures.kei",
+      "start": {
+        "col": 21,
+        "line": 15
+      }
+    }
+  },
+  {
+    "code": "KEI-E4001",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Move the effectful call into the function body"
+      }
+    ],
+    "message": "call to 'fetchName' (uses Async) is not allowed in a contract; contract expressions must be pure",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 47,
+        "line": 15
+      },
+      "file": "tests/golden/check/err_parallel_in_ensures.kei",
+      "start": {
+        "col": 35,
+        "line": 15
+      }
+    }
+  }
+]

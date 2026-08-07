@@ -1380,3 +1380,62 @@ fn extern_async_signature_gets_await_at_call_site() {
         out.ts
     );
 }
+
+/// M47 / #161: `parallel(xs)` は `await Promise.all([...])` に写る。要素の直接呼び出しは
+/// (in_parallel_arg により async_calls に積まれないため)個別の `await` を持たず、
+/// `Promise.all` に渡す配列項目としてそのまま emit される。
+#[test]
+fn parallel_call_emits_await_promise_all() {
+    let out = emit(concat!(
+        "func fetchName(id: Int) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  return \"user\"\n",
+        "}\n",
+        "\n",
+        "func greetAll(a: Int, b: Int) -> List<String>\n",
+        "  uses Async\n",
+        "{\n",
+        "  return parallel([fetchName(a), fetchName(b)])\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts
+            .contains("return await Promise.all([fetchName(a), fetchName(b)]);"),
+        "expected parallel(...) to emit await Promise.all([...]) with un-awaited elements:\n{}",
+        out.ts
+    );
+    // 要素の直接呼び出しは個別に await されない(regression: `await fetchName(a)` は
+    // Promise.all の外側で単独に現れてはいけない)。
+    assert!(
+        !out.ts.contains("await fetchName(a);"),
+        "elements of parallel(...) must not be individually awaited:\n{}",
+        out.ts
+    );
+}
+
+/// `parallel(...)` の結果を let 束縛に渡す位置でも同じ形で emit される
+/// (`await` の挿入位置が Call 式の位置に依らないことの確認)。
+#[test]
+fn parallel_call_at_let_binding_position() {
+    let out = emit(concat!(
+        "func fetchName(id: Int) -> String\n",
+        "  uses Async\n",
+        "{\n",
+        "  return \"user\"\n",
+        "}\n",
+        "\n",
+        "func greetAll(a: Int, b: Int) -> List<String>\n",
+        "  uses Async\n",
+        "{\n",
+        "  let names = parallel([fetchName(a), fetchName(b)])\n",
+        "  return names\n",
+        "}\n",
+    ));
+    assert!(
+        out.ts
+            .contains("const names = await Promise.all([fetchName(a), fetchName(b)]);"),
+        "expected parallel(...) at a let-binding position to emit await Promise.all([...]):\n{}",
+        out.ts
+    );
+}

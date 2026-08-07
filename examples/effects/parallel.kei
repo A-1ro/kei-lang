@@ -1,0 +1,34 @@
+// 並行結合子 `parallel(xs) -> List<T>`(M47 / #161、🤝(d))。独立した I/O(ここでは
+// 擬似リモート取得)を並行実行する最小形。emit は `await Promise.all([...])` に写り、
+// 直列版(`fetchUsersSequential`)と結果は等価だが、待ち時間は並行版のほうが短くなる
+// (e2e で観測 — tests/e2e/tests/parallel.test.ts)。
+// 設計原則 6: 結合子自体は契約を持たない。各要素の `requires`/`ensures` はそれぞれの
+// 関数の入口/resolve 後にそのまま評価される(この例は単純化のため契約を省いている)。
+module effects.parallel
+
+import infra.remote as Remote
+
+extern Remote.fetchName(id: Int) -> String uses Network.Read, Async
+
+func fetchUser(id: Int) -> String
+  uses Network.Read, Async
+{
+  return Remote.fetchName(id)
+}
+
+// 直列版: 1 件ずつ順番に待つ(v0.7 の既定挙動)。合計待ち時間は各呼び出しの和。
+func fetchUsersSequential(a: Int, b: Int) -> List<String>
+  uses Network.Read, Async
+{
+  let first = fetchUser(a)
+  let second = fetchUser(b)
+  return [first, second]
+}
+
+// 並行版: `parallel([...])` で 2 件を同時に開始し、両方の resolve を待つ
+// (fail-fast、`Promise.all` 準拠)。結果は入力順の `List<String>`(完了順ではない)。
+func fetchUsersInParallel(a: Int, b: Int) -> List<String>
+  uses Network.Read, Async
+{
+  return parallel([fetchUser(a), fetchUser(b)])
+}

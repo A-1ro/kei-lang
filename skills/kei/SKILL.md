@@ -475,7 +475,44 @@ func greetTwo(idA: Int, idB: Int) -> List<String>
 }
 ```
 
-並列実行(`Promise.all` 相当)は v0.8 以降で検討される(v0.7 は sequential のみ)。
+並列実行(`Promise.all` 相当)は v0.10(M47)で `parallel(...)` 結合子として追加された。下記参照。
+
+#### 並行 async を書く(`parallel(xs) -> List<T>` / v0.10 M47)
+
+独立した I/O(複数 fetch・複数 KV/D1 読み取りなど)を**同時に**実行したいときは、
+1 件ずつ順番に取得する代わりに `parallel([f(a), g(b), ...])` を使う。同じ型 `T` を返す
+複数の呼び出しを並行実行し、結果を入力順の `List<T>` で受け取る:
+
+```kei
+module fx.parallel_basic
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greetAll(a: Int, b: Int) -> List<String>
+  uses Async
+{
+  return parallel([fetchName(a), fetchName(b)]) // 生成 TS: await Promise.all([fetchName(a), fetchName(b)])
+}
+```
+
+- **`xs` は list literal でなければならない**。要素は `uses Async` 関数への**直接呼び出し**
+  (`fetchName(a)` のような式そのもの)でなければならず、変数に取っておいた値・名前参照・
+  非 async な式を渡すと `KEI-E3009` で拒否される(emit がそのまま `Promise.all([...])` の
+  配列項目に写すため、要素は「後から await できる Promise 生成式」である必要がある)。
+- 要素は 1 件以上必要(空リスト `parallel([])` は `KEI-E3009`)。
+- 結果 `List<T>` の**順序は入力順**(完了順ではない)。失敗時は **fail-fast**
+  (いずれかが reject/throw したら全体が伝播。`Promise.all` 準拠)。
+- **結合子自体は契約を持たない。** 各要素の `requires`/`ensures` はそれぞれの関数の入口/resolve 後に
+  そのまま評価される。「並行実行時の事後条件」という新しい契約意味論はない。
+- **逐次実行との使い分け**: 要素間に依存がある(2 件目が 1 件目の結果を使う)場合は
+  `parallel` は使えない(そもそも直接呼び出しの list literal にならない) — 上の
+  「制約: 高階関数への async 名前参照は未対応」節の逐次パターンをそのまま使う。
+- **未サポート(v1.x 以降で実需確認後)**: `race`(最初に成功したものを取る合流)・
+  キャンセル/タイムアウト・構造化並行スコープ・異種型タプル結合(`join(a, b) -> (A, B)`)。
 
 ---
 

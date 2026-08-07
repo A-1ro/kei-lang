@@ -43,6 +43,7 @@ mod codes {
     pub const INVALID_PACKAGE_SPECIFIER: &str = "KEI-E3006";
     pub const EXTERN_PACKAGE_SCOPE: &str = "KEI-E3007";
     pub const COMBINATOR_ASYNC_FN: &str = "KEI-E3008";
+    pub const PARALLEL_ARG_SHAPE: &str = "KEI-E3009";
     pub const IMPURE_CONTRACT: &str = "KEI-E4001";
     pub const CONTRACT_CONSTRUCT: &str = "KEI-E4002";
     pub const CONST_FALSE_CONTRACT: &str = "KEI-E4003";
@@ -268,6 +269,8 @@ pub fn check_module_with_resolver(
                 lambda_floor: None,
                 async_calls: None,
                 async_match_spans: None,
+                parallel_calls: None,
+                in_parallel_arg: false,
             }
             .check();
         }
@@ -315,6 +318,10 @@ pub struct OpSpans {
     /// emit はこれだけを根拠に `async function` として出す(構文ヒューリスティックの
     /// `func_is_async` を廃止し、checker が確定した宣言エフェクトに一本化する)。
     pub async_funcs: std::collections::HashSet<SynSpan>,
+    /// 並行結合子 `parallel(xs)` の Call 式の完全な Span(M47)。emit はこの位置の
+    /// Call を `await Promise.all([...])` として出す。要素の直接呼び出しは個別に
+    /// `await` しない(`async_calls` には積まれない — `in_parallel_arg` で抑止)。
+    pub parallel_calls: std::collections::HashSet<SynSpan>,
 }
 
 /// resolver なしの版(後方互換)。import 由来の型は opaque 扱いなので、
@@ -337,6 +344,7 @@ pub fn op_spans_with_resolver(module: &ast::Module, resolver: &dyn ModuleResolve
     let mut async_calls = HashSet::new();
     let mut async_match_spans = HashSet::new();
     let mut async_funcs = HashSet::new();
+    let mut parallel_calls = HashSet::new();
     for (item, sig) in module.items.iter().zip(&fn_sigs) {
         if let (ast::Item::Func(f), Some(sig)) = (item, sig) {
             if sig.effects.iter().any(|e| effects::covers("Async", e)) {
@@ -356,6 +364,8 @@ pub fn op_spans_with_resolver(module: &ast::Module, resolver: &dyn ModuleResolve
                 lambda_floor: None,
                 async_calls: Some(&mut async_calls),
                 async_match_spans: Some(&mut async_match_spans),
+                parallel_calls: Some(&mut parallel_calls),
+                in_parallel_arg: false,
             }
             .check();
         }
@@ -366,6 +376,7 @@ pub fn op_spans_with_resolver(module: &ast::Module, resolver: &dyn ModuleResolve
         async_calls,
         async_match_spans,
         async_funcs,
+        parallel_calls,
     }
 }
 
@@ -1566,6 +1577,13 @@ struct FnChecker<'a> {
     /// `match` 式のうち async 化が必要なものの Span(M37 レビュー対応)。
     /// `OpSpans::async_match_spans` のコメント参照。通常検査では `None`。
     async_match_spans: Option<&'a mut HashSet<SynSpan>>,
+    /// 並行結合子 `parallel(xs)` の Call 式の Span(M47)。`OpSpans::parallel_calls` の
+    /// コメント参照。通常検査では `None`。
+    parallel_calls: Option<&'a mut HashSet<SynSpan>>,
+    /// `parallel(xs)` の `xs`(list literal)の要素を検査している間だけ `true`(M47)。
+    /// この間は要素の直接 async 呼び出しを `async_calls` に積まない(個別に `await` せず、
+    /// `parallel` の呼び出し自身が `Promise.all` として一括で待つため)。
+    in_parallel_arg: bool,
 }
 
 impl FnChecker<'_> {
@@ -3321,6 +3339,12 @@ impl FnChecker<'_> {
                 }
                 return self.check_ctor_args(name, 1, args, span);
             }
+            // 並行結合子 `parallel(xs) -> List<T>`(M47 / #161、🤝(d))。ユーザーが
+            // 同名の関数/型/import を定義している場合はそちらを優先する(既存名との
+            // 衝突回避。`Map.empty()` の扱いと同じ流儀)。
+            "parallel" if !self.env.kinds.contains_key("parallel") => {
+                return self.call_parallel(args, span);
+            }
             _ => {}
         }
         match self.env.kinds.get(name) {
@@ -3506,12 +3530,122 @@ impl FnChecker<'_> {
         // (altitude: 以前は check_call_effects 内の is_direct_call フラグ経由で行って
         // いたが、「直接呼び出しかどうか」は呼び出し側が一番よく知っているので、
         // ここで自然に判定する。PR #118 の教訓)。
-        if callee.effects.iter().any(|e| e == "Async") {
+        if callee.effects.iter().any(|e| e == "Async") && !self.in_parallel_arg {
+            // M47: `parallel(xs)` の要素として呼ばれている間は個別に `await` しない
+            // (`in_parallel_arg` のコメント参照。`parallel` の Call 自身が
+            // `Promise.all` として一括で待つため)。
             if let Some(calls) = self.async_calls.as_deref_mut() {
                 calls.insert(span);
             }
         }
         callee.ret
+    }
+
+    /// 並行結合子 `parallel(xs) -> List<T>`(M47 / #161、🤝(d))。`xs` は
+    /// **list literal でなければならず**、各要素は `uses Async` を持つローカル関数への
+    /// 直接呼び出しでなければならない(emit が要素をそのまま `Promise.all([...])` の
+    /// 配列項目として出力するため、要素は「後から await できる Promise 生成式」である
+    /// 必要がある — 既に評価済みの値や名前参照では表現できない)。
+    ///
+    /// 結合子自体は契約を持たない(設計原則 6)。`uses Async` の要求は各要素の直接呼び出しが
+    /// 通常どおり `call_local` → `check_call_effects` を経由することで自然に満たされる
+    /// (本体内の未宣言は KEI-E3001、契約式内は KEI-E4001、コンビネータ lambda 内は
+    /// KEI-E3001 — 既存の純粋性診断をそのまま再利用する。専用の追加ロジックは持たない)。
+    fn call_parallel(&mut self, args: &[ast::Expr], span: SynSpan) -> Ty {
+        if args.len() != 1 {
+            self.push(
+                codes::TYPE_MISMATCH,
+                format!(
+                    "'parallel' takes exactly 1 argument (a list literal of async calls), found {}",
+                    args.len()
+                ),
+                span,
+                vec![direction(
+                    "Call 'parallel([f(a), g(b), ...])' with a single list literal",
+                )],
+            );
+            for a in args {
+                self.infer(a);
+            }
+            return Ty::List(Box::new(Ty::Unknown));
+        }
+
+        let ast::Expr::ListLit {
+            elements,
+            span: lspan,
+        } = &args[0]
+        else {
+            self.push(
+                codes::PARALLEL_ARG_SHAPE,
+                "'parallel' expects a list literal of direct async calls, e.g. 'parallel([f(a), g(b)])'"
+                    .to_string(),
+                args[0].span(),
+                vec![direction(
+                    "Pass a list literal whose elements are direct calls to 'uses Async' functions",
+                )],
+            );
+            self.infer(&args[0]);
+            return Ty::List(Box::new(Ty::Unknown));
+        };
+
+        if elements.is_empty() {
+            self.push(
+                codes::PARALLEL_ARG_SHAPE,
+                "'parallel' requires at least one element".to_string(),
+                *lspan,
+                vec![direction(
+                    "Add at least one async call to the list, or avoid 'parallel' for the empty case",
+                )],
+            );
+            return Ty::List(Box::new(Ty::Unknown));
+        }
+
+        let mut elem_ty: Option<Ty> = None;
+        let prev = self.in_parallel_arg;
+        self.in_parallel_arg = true;
+        for el in elements {
+            let is_direct_async_call = match el {
+                ast::Expr::Call { callee, .. } => match callee.as_ref() {
+                    ast::Expr::Name { name, .. } => {
+                        self.lookup_scope(name).into_option().is_none()
+                            && self.env.kinds.get(name) == Some(&NameKind::Func)
+                            && self
+                                .env
+                                .funcs
+                                .get(name)
+                                .is_some_and(|f| f.effects.iter().any(|e| e == "Async"))
+                    }
+                    _ => false,
+                },
+                _ => false,
+            };
+            let t = self.infer(el);
+            if !is_direct_async_call {
+                self.push(
+                    codes::PARALLEL_ARG_SHAPE,
+                    "each element of 'parallel(...)' must be a direct call to a function declared 'uses Async'"
+                        .to_string(),
+                    el.span(),
+                    vec![direction(
+                        "Call a 'uses Async' function directly here, e.g. 'fetchName(id)'",
+                    )],
+                );
+            }
+            elem_ty = Some(match elem_ty {
+                None => t,
+                Some(prev_ty) => {
+                    self.check_assign(&prev_ty, &t, el.span());
+                    prev_ty
+                }
+            });
+        }
+        self.in_parallel_arg = prev;
+
+        if let Some(calls) = self.parallel_calls.as_deref_mut() {
+            calls.insert(span);
+        }
+
+        Ty::List(Box::new(elem_ty.unwrap_or(Ty::Unknown)))
     }
 
     /// 外部境界の呼び出し(M11)。extern 署名と引数を照合し、戻り型を返し、

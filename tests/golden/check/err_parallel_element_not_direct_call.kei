@@ -1,0 +1,16 @@
+module check.parallel_element_not_direct_call
+
+// `parallel(xs)` の各要素は `uses Async` 関数への直接呼び出しでなければならない。
+// 文字列リテラルのような「後から await できない」要素は拒否する。KEI-E3009。
+
+func fetchName(id: Int) -> String
+  uses Async
+{
+  return "user"
+}
+
+func greetAll(a: Int) -> List<String>
+  uses Async
+{
+  return parallel(["already", fetchName(a)])
+}

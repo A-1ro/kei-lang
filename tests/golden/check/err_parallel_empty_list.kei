@@ -1,0 +1,9 @@
+module check.parallel_empty_list
+
+// `parallel([])` は少なくとも 1 要素を要求する(空の並行実行は意味を持たない)。KEI-E3009。
+
+func greetAll() -> List<String>
+  uses Async
+{
+  return parallel([])
+}

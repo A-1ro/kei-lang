@@ -1,0 +1,24 @@
+[
+  {
+    "code": "KEI-E3009",
+    "fixes": [
+      {
+        "edits": [],
+        "title": "Pass a list literal whose elements are direct calls to 'uses Async' functions"
+      }
+    ],
+    "message": "'parallel' expects a list literal of direct async calls, e.g. 'parallel([f(a), g(b)])'",
+    "severity": "error",
+    "span": {
+      "end": {
+        "col": 21,
+        "line": 17
+      },
+      "file": "tests/golden/check/err_parallel_not_list_literal.kei",
+      "start": {
+        "col": 19,
+        "line": 17
+      }
+    }
+  }
+]
